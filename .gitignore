@@ -7,3 +7,6 @@ __pycache__/
 build/
 dist/
 *.egg-info
+
+# Internal-only docs (infrastructure/cost planning, not published)
+docs/internal/

@@ -393,6 +393,5 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
   Live-data retrieval looks up one entity at a time rather than answering a
   free-text query, so it's left out of that shared interface.
 - **Hosting, once this needs to leave one laptop.** Everything currently
-  runs locally. [`docs/infrastructure-plan.md`](docs/infrastructure-plan.md)
-  scopes what's needed to make it reachable by others, phased from a $0
-  pilot setup to what a paying client would need.
+  runs locally. A phased hosting/cost plan exists internally, not published
+  in this repo.
