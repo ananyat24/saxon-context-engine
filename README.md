@@ -170,7 +170,9 @@ pytest
 
   then visit `http://localhost:8000/docs` for interactive API documentation, or
   `http://localhost:8000/api/v1/entities` to see the full merged list of entity
-  and relationship types the ontology currently defines.
+  and relationship types the ontology currently defines. Querying
+  `/api/v1/context/query` requires an `X-API-Key` header -- see
+  [API access & tenant isolation](#api-access--tenant-isolation) below.
 
 ---
 
@@ -200,7 +202,9 @@ aissist-context/
 │   │   └── graphiti_adapter.py
 │   ├── ingestion/                # [scaffolded] turning raw text/records into graph writes
 │   ├── retrieval/                 # [scaffolded] querying the graph/semantic/live data sources
+│   │   └── base.py                # TextRetriever interface every query-based retriever implements
 │   ├── context/                   # [scaffolded] planning, ranking, and composing query responses
+│   ├── security.py               # API key -> tenant (group_id) lookup, see "API access" below
 │   └── api/                      # FastAPI routes: /health, /entities, /context
 ├── ontology/
 │   ├── README.md                 # Ontology design principles and layering model
@@ -262,8 +266,8 @@ This is how facts actually get read from and written to storage.
 | Core data models (`app/models/`) | Implemented -- plain Pydantic schemas |
 | Ontology (`app/ontology/`, `ontology/`) | Implemented and tested |
 | Graph persistence (`app/graph/`) | Implemented and tested |
-| Ingestion (`app/ingestion/`) | Scaffolded -- `IngestionPipeline` calls Graphiti correctly; structured/unstructured formatting helpers and entity resolution are stubs |
-| Retrieval (`app/retrieval/`) | Scaffolded -- graph retrieval works via `GraphRepository`; semantic and live-data retrieval are stubs |
+| Ingestion (`app/ingestion/`) | Scaffolded -- `IngestionPipeline` calls Graphiti correctly; structured/unstructured formatting helpers are stubs |
+| Retrieval (`app/retrieval/`) | Scaffolded -- graph retrieval works via `GraphRepository` and implements the shared `TextRetriever` interface (`app/retrieval/base.py`) so semantic search can be added later without restructuring `ContextOrchestrator`; semantic and live-data retrieval themselves are stubs |
 | Context composition (`app/context/`) | Scaffolded -- `ContextOrchestrator` assembles a basic response from graph facts; planning, ranking, and richer composition are stubs |
 | API (`app/api/`) | Implemented for what exists above -- `/health`, `/entities`, `/context/query` |
 
@@ -276,5 +280,56 @@ uvicorn app.main:app --reload
 - `GET /api/v1/health` -- is the app able to reach Neo4j right now?
 - `GET /api/v1/entities` -- every entity/relationship type the currently loaded
   ontology defines.
-- `POST /api/v1/context/query` -- `{"query": "...", "group_ids": ["..."]}`, returns
-  a `ContextPacket` assembled from whatever the graph currently knows.
+- `POST /api/v1/context/query` -- `{"query": "..."}` with an `X-API-Key` header,
+  returns a `ContextPacket` assembled from whatever the graph currently knows.
+  See below for what that header controls.
+
+### API access & tenant isolation
+
+Neo4j Community Edition (what this project runs on) can't give each client its
+own database the way Enterprise Edition can, so this project keeps one client's
+data logically separate from another's inside a single database using Graphiti's
+`group_id`. On its own, that separation is only as strong as whatever calls the
+API -- if a client could put any `group_id` it wanted directly in a request, the
+separation would be advisory, not enforced.
+
+To close that gap, `POST /api/v1/context/query` requires an `X-API-Key` header.
+`app/security.py` looks the key up in `TENANT_API_KEYS` (configured in `.env`,
+see `.env.example`) and returns the one `group_id` that key is allowed to query --
+the request body has no `group_id` field at all, so there's nothing for a caller
+to override. An invalid or missing key gets a 401/422 before any Neo4j or Gemini
+call is made.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/context/query \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: local-dev-key" \
+  -d '{"query": "who manages the Contoso account"}'
+```
+
+This is a practical baseline appropriate for one shared Neo4j instance serving
+multiple logical tenants, not the strongest possible guarantee. The strongest
+guarantee is physical separation -- a dedicated Neo4j database (Enterprise
+Edition) or a fully separate deployment per client -- which trades infrastructure
+cost for eliminating any risk of an application bug leaking data across tenants.
+That tradeoff is worth revisiting once there's a real client whose compliance
+requirements call for it.
+
+### Roadmap / open decisions
+
+- **Ontology authoring UI.** Domain and customer ontology packs are hand-edited
+  YAML today (`ontology/domains/*.yaml`, `ontology/customer-extension-template.yaml`).
+  A UI for a non-engineer to configure a new client's vocabulary without editing
+  YAML directly is a planned next step, not yet started.
+- **Entity resolution.** The earlier `EntityResolver` stub was removed -- it only
+  trimmed whitespace and wasn't used anywhere, while Graphiti already does
+  semantic entity deduplication as part of its own extraction. Reintroduce a real
+  resolver only if a concrete gap shows up (e.g. Graphiti's matching missing an
+  obvious cross-system ID match that a deterministic rule could catch).
+- **Semantic search & live data (layers 9-10 of the original design).** Not
+  built yet, and intentionally not rushed -- but `app/retrieval/base.py`'s
+  `TextRetriever` interface and `ContextOrchestrator`'s retriever list already
+  exist so that adding a semantic retriever later is additive (append it to the
+  list) rather than a restructure. Live-data retrieval looks up one entity at a
+  time rather than answering a free-text query, so it's deliberately left out of
+  that shared interface rather than forced to fit it.

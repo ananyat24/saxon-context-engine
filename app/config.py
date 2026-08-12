@@ -6,6 +6,7 @@
 # Nothing else in this codebase should call os.environ.get() directly for these
 # values; import `settings` from here instead, so there's exactly one source of
 # truth for configuration.
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +17,12 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "password"
+
+    # Maps API keys to the tenant (Graphiti group_id) they're allowed to query --
+    # see app/security.py for why this exists and how it's enforced. Set as a JSON
+    # object in .env, e.g. TENANT_API_KEYS={"<key>": "<group_id>"}. Empty by
+    # default, meaning no API key will be valid until you configure at least one.
+    tenant_api_keys: dict[str, str] = Field(default_factory=dict)
 
     # Google Gemini is used for entity extraction, embeddings, and reranking (see
     # app/graph/graphiti_adapter.py). Get a key from https://aistudio.google.com/.

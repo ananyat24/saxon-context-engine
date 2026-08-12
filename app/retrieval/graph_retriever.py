@@ -1,6 +1,7 @@
-# Wraps GraphRepository's Graphiti search behind a "retriever" interface, so
-# app/context/orchestrator.py can treat this the same way it will eventually treat
-# other retrievers (semantic, live-data) rather than talking to GraphRepository directly.
+# Wraps GraphRepository's Graphiti search behind the TextRetriever interface
+# (see app/retrieval/base.py), so ContextOrchestrator can treat this the same way
+# it will eventually treat a semantic retriever, instead of talking to
+# GraphRepository directly.
 import logging
 from typing import Any, Optional
 from graphiti_core import Graphiti
@@ -16,7 +17,7 @@ class GraphRetriever:
         self.graphiti = graphiti_instance
         self.repository = GraphRepository(graphiti_instance)
 
-    async def retrieve_context_facts(
+    async def retrieve(
         self, query: str, group_ids: Optional[list[str]] = None
     ) -> list[dict[str, Any]]:
         logger.info(f"Retrieving graph context for query: '{query}'")
