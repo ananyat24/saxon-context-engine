@@ -378,7 +378,11 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
 - **Ingestion source connectors.** Nothing currently pulls data from a real
   system; everything ingested so far has been written by hand in test
   scripts. Next step is a generic connector that reads sample files from
-  `data/raw/`, before building connectors for specific client systems.
+  `data/samples/`, before building connectors for specific client systems.
+  A few small, permissively-licensed sample datasets (a CRM/ERP-style
+  business database, manufacturing sensor readings, and legal contracts) are
+  already in `data/samples/`, with sources and licenses documented in
+  [`data/samples/SOURCES.md`](data/samples/SOURCES.md).
 - **Ontology authoring UI.** Domain and client ontology packs are hand-edited
   YAML today. A UI for configuring a new client's vocabulary without editing
   YAML directly is planned, not started.
