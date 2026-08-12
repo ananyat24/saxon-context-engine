@@ -1,0 +1,29 @@
+ontology:
+  id: aissist-manufacturing
+  name: AISSIST Manufacturing Ontology
+  version: "0.1.0"
+  description: >
+    Domain extension for AISSIST Enterprise Core.
+  namespace: aissist.domain.manufacturing
+  extends: aissist.core
+  extension_policy: additive
+
+entities: {}
+# Add domain concepts here. Every domain entity should extend a core concept.
+#
+# Example:
+# DomainEntity:
+#   extends: Asset
+#   description: Domain-specific specialization.
+
+relationships: {}
+# Add only relationships whose meaning is genuinely domain-specific.
+#
+# Example:
+# manufacturing_RELATIONSHIP:
+#   source: DomainEntity
+#   target: Entity
+
+event_types: {}
+fact_types: {}
+aliases: {}

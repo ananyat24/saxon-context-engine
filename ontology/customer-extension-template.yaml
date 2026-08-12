@@ -1,0 +1,19 @@
+ontology:
+  id: customer-extension
+  name: Customer Ontology Extension
+  version: "0.1.0"
+  description: Customer-specific vocabulary, aliases, specializations, and relationships.
+  namespace: aissist.customer
+  extends: aissist.core
+  extension_policy: additive
+
+entities: {}
+relationships: {}
+event_types: {}
+fact_types: {}
+
+aliases:
+  # Map customer language to canonical ontology terms where appropriate.
+  # Example:
+  # account: Organization
+  # site: Location

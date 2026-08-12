@@ -1,0 +1,9 @@
+neo4j
+pydantic
+pydantic-settings
+python-dotenv
+pyyaml
+pytest
+fastapi
+uvicorn
+graphiti-core[anthropic,google-geni]>=0.29.3

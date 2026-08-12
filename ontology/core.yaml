@@ -1,0 +1,418 @@
+ontology:
+  id: aissist-enterprise-core
+  name: AISSIST Enterprise Core Ontology
+  version: "0.1.0"
+  description: >
+    Domain-neutral ontology for enterprise knowledge graphs and context engines.
+    Designed to be extended by industry, functional, and customer-specific
+    ontology packs rather than hard-coding domain concepts into the runtime.
+  namespace: aissist.core
+  extension_policy: additive
+
+entities:
+
+  Entity:
+    abstract: true
+    description: Base identifiable object in the enterprise context.
+    properties:
+      id: {type: string, required: true}
+      name: {type: string, required: false}
+      description: {type: string, required: false}
+      source_system: {type: string, required: false}
+      external_ids: {type: object, required: false}
+      aliases: {type: array, required: false}
+      tags: {type: array, required: false}
+      created_at: {type: datetime, required: false}
+      updated_at: {type: datetime, required: false}
+
+  Organization:
+    extends: Entity
+    description: Company, business unit, agency, institution, department, vendor, customer, or partner.
+    properties:
+      organization_type: {type: string, required: false}
+
+  Person:
+    extends: Entity
+    description: Individual participating in enterprise activities.
+    properties:
+      title: {type: string, required: false}
+      role: {type: string, required: false}
+
+  Group:
+    extends: Entity
+    description: Team, committee, role group, cohort, or organizational grouping.
+
+  Location:
+    extends: Entity
+    description: Physical or logical place.
+    properties:
+      location_type: {type: string, required: false}
+
+  Asset:
+    extends: Entity
+    description: Physical, digital, financial, or intellectual asset controlled or used by an enterprise.
+    properties:
+      asset_type: {type: string, required: false}
+
+  Product:
+    extends: Entity
+    description: Product, SKU family, offering, manufactured good, or digital product.
+
+  Service:
+    extends: Entity
+    description: Service or capability provided internally or externally.
+
+  Resource:
+    extends: Entity
+    description: Consumable, capacity, material, fund, compute, labor, or other usable resource.
+
+  Document:
+    extends: Entity
+    description: Information artifact such as contract, SOP, report, email, policy, manual, note, or record.
+    properties:
+      document_type: {type: string, required: false}
+      uri: {type: string, required: false}
+      mime_type: {type: string, required: false}
+
+  DataObject:
+    extends: Entity
+    description: Dataset, table, file, record collection, semantic model, dashboard, or data product.
+
+  System:
+    extends: Entity
+    description: Application, platform, database, service, API, model, or enterprise system.
+    properties:
+      system_type: {type: string, required: false}
+
+  Process:
+    extends: Entity
+    description: Business or operational process made up of activities and decisions.
+
+  Activity:
+    extends: Entity
+    description: Unit of work performed by a person, system, or process.
+
+  Task:
+    extends: Activity
+    description: Assignable unit of work.
+
+  Event:
+    extends: Entity
+    description: Something that happened or changed at a point or interval in time.
+    properties:
+      event_type: {type: string, required: false}
+      occurred_at: {type: datetime, required: false}
+      started_at: {type: datetime, required: false}
+      ended_at: {type: datetime, required: false}
+
+  Transaction:
+    extends: Event
+    description: Business transaction such as order, invoice, payment, shipment, booking, or journal entry.
+
+  Interaction:
+    extends: Event
+    description: Communication or interaction between people, organizations, systems, or agents.
+
+  Observation:
+    extends: Event
+    description: Observation, reading, assessment, measurement, or detected condition.
+
+  Decision:
+    extends: Event
+    description: Decision made by a person, group, rule, workflow, or AI agent.
+    properties:
+      rationale: {type: string, required: false}
+      decision_status: {type: string, required: false}
+
+  Issue:
+    extends: Entity
+    description: Problem, risk, exception, defect, deviation, incident, dispute, or concern.
+    properties:
+      severity: {type: string, required: false}
+      status: {type: string, required: false}
+
+  Policy:
+    extends: Document
+    description: Rule, policy, standard, regulation, control, contractual rule, or governance directive.
+
+  Requirement:
+    extends: Entity
+    description: Business, technical, regulatory, contractual, or operational requirement.
+
+  Metric:
+    extends: Entity
+    description: Defined quantitative or qualitative measure.
+    properties:
+      unit: {type: string, required: false}
+      definition: {type: string, required: false}
+
+  MetricValue:
+    extends: Observation
+    description: Metric value observed for a subject at a point or interval in time.
+    properties:
+      metric_id: {type: string, required: false}
+      value: {type: any, required: false}
+      unit: {type: string, required: false}
+
+  Goal:
+    extends: Entity
+    description: Objective, target, outcome, KPI target, commitment, or desired state.
+
+  Contract:
+    extends: Document
+    description: Agreement defining obligations, rights, commercial terms, or service commitments.
+
+  Agent:
+    extends: System
+    description: AI or software agent capable of observing, deciding, recommending, or acting.
+
+relationships:
+
+  IS_A:
+    source: Entity
+    target: Entity
+    description: Type or specialization relationship.
+
+  RELATED_TO:
+    source: Entity
+    target: Entity
+    symmetric: true
+    description: Generic association used only when a more specific relation is unavailable.
+
+  PART_OF:
+    source: Entity
+    target: Entity
+    description: Composition or containment relationship.
+
+  BELONGS_TO:
+    source: Entity
+    target: Organization
+
+  OWNS:
+    source: Entity
+    target: Entity
+
+  MANAGED_BY:
+    source: Entity
+    target: Entity
+
+  ASSIGNED_TO:
+    source: Entity
+    target: Entity
+
+  LOCATED_AT:
+    source: Entity
+    target: Location
+
+  CREATED_BY:
+    source: Entity
+    target: Entity
+
+  CREATED_FOR:
+    source: Entity
+    target: Entity
+
+  PERFORMED_BY:
+    source: Activity
+    target: Entity
+
+  PERFORMED_ON:
+    source: Activity
+    target: Entity
+
+  PARTICIPATED_IN:
+    source: Entity
+    target: Event
+
+  INVOLVES:
+    source: Event
+    target: Entity
+
+  AFFECTS:
+    source: Entity
+    target: Entity
+
+  DEPENDS_ON:
+    source: Entity
+    target: Entity
+
+  USES:
+    source: Entity
+    target: Entity
+
+  PRODUCES:
+    source: Entity
+    target: Entity
+
+  CONSUMES:
+    source: Entity
+    target: Entity
+
+  PROVIDES:
+    source: Entity
+    target: Entity
+
+  REQUESTS:
+    source: Entity
+    target: Entity
+
+  REFERENCES:
+    source: Entity
+    target: Document
+
+  DOCUMENTS:
+    source: Document
+    target: Entity
+
+  GOVERNED_BY:
+    source: Entity
+    target: Policy
+
+  SATISFIES:
+    source: Entity
+    target: Requirement
+
+  VIOLATES:
+    source: Entity
+    target: Requirement
+
+  MEASURES:
+    source: Metric
+    target: Entity
+
+  HAS_METRIC_VALUE:
+    source: Entity
+    target: MetricValue
+
+  TARGETS:
+    source: Goal
+    target: Entity
+
+  TRIGGERED_BY:
+    source: Entity
+    target: Entity
+
+  CAUSED_BY:
+    source: Entity
+    target: Entity
+
+  RESULTED_IN:
+    source: Entity
+    target: Entity
+
+  PRECEDED_BY:
+    source: Event
+    target: Event
+
+  FOLLOWED_BY:
+    source: Event
+    target: Event
+
+  SUPERSEDES:
+    source: Entity
+    target: Entity
+
+  DERIVED_FROM:
+    source: Entity
+    target: Entity
+
+  SUPPORTS:
+    source: Entity
+    target: Entity
+
+  CONTRADICTS:
+    source: Entity
+    target: Entity
+
+  APPROVED_BY:
+    source: Entity
+    target: Entity
+
+  REJECTED_BY:
+    source: Entity
+    target: Entity
+
+  RECOMMENDED_BY:
+    source: Entity
+    target: Entity
+
+  DECIDED_BY:
+    source: Decision
+    target: Entity
+
+  IMPLEMENTS:
+    source: Entity
+    target: Entity
+
+  INTEGRATES_WITH:
+    source: System
+    target: System
+    symmetric: true
+
+  STORED_IN:
+    source: DataObject
+    target: System
+
+  SOURCED_FROM:
+    source: Entity
+    target: Entity
+
+event_types:
+
+  Creation:
+    description: An entity or record was created.
+
+  Update:
+    description: An entity, relationship, fact, or state changed.
+
+  StatusChange:
+    description: Status transitioned from one state to another.
+
+  Interaction:
+    description: Communication or engagement occurred.
+
+  Transaction:
+    description: Commercial or operational transaction occurred.
+
+  Observation:
+    description: A measurement, detection, assessment, or observation occurred.
+
+  Decision:
+    description: A decision, approval, rejection, or recommendation occurred.
+
+  Exception:
+    description: Risk, issue, deviation, defect, or incident occurred.
+
+fact_types:
+
+  AttributeFact:
+    description: Subject has an attribute value.
+
+  RelationshipFact:
+    description: A relationship between two entities is asserted.
+
+  StateFact:
+    description: Subject is in a state during a validity interval.
+
+  ClassificationFact:
+    description: Subject is classified under a category or ontology type.
+
+  DerivedFact:
+    description: Fact inferred or calculated from other facts/evidence.
+
+aliases:
+  org: Organization
+  company: Organization
+  enterprise: Organization
+  employee: Person
+  user: Person
+  site: Location
+  facility: Location
+  application: System
+  app: System
+  dataset: DataObject
+  file: Document
+  record: Document
+  kpi: Metric
+  risk: Issue
+  incident: Issue

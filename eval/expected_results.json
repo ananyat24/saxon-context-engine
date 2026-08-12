@@ -1,0 +1,7 @@
+[
+  {
+    "id": 1,
+    "expected_entities": ["Contoso Ltd"],
+    "expected_manager": "Marcus Lee"
+  }
+]

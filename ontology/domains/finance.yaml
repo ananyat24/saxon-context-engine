@@ -1,0 +1,29 @@
+ontology:
+  id: aissist-finance
+  name: AISSIST Finance Ontology
+  version: "0.1.0"
+  description: >
+    Domain extension for AISSIST Enterprise Core.
+  namespace: aissist.domain.finance
+  extends: aissist.core
+  extension_policy: additive
+
+entities: {}
+# Add domain concepts here. Every domain entity should extend a core concept.
+#
+# Example:
+# DomainEntity:
+#   extends: Asset
+#   description: Domain-specific specialization.
+
+relationships: {}
+# Add only relationships whose meaning is genuinely domain-specific.
+#
+# Example:
+# finance_RELATIONSHIP:
+#   source: DomainEntity
+#   target: Entity
+
+event_types: {}
+fact_types: {}
+aliases: {}
