@@ -1,11 +1,11 @@
 ontology:
-  id: aissist-sales
-  name: AISSIST Sales / CRM Ontology
+  id: saxon-sales
+  name: Saxon Sales / CRM Ontology
   version: "0.1.0"
   description: >
-    Domain extension for AISSIST Enterprise Core.
-  namespace: aissist.domain.sales
-  extends: aissist.core
+    Domain extension for the Saxon Enterprise Core ontology.
+  namespace: saxon.domain.sales
+  extends: saxon.core
   extension_policy: additive
 
 entities: {}

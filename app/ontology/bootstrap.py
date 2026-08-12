@@ -24,6 +24,27 @@ def build_default_registry(ontology_root: str | Path = DEFAULT_ONTOLOGY_ROOT) ->
     return reg
 
 
+def build_scoped_registry(
+    domains: list[str], ontology_root: str | Path = DEFAULT_ONTOLOGY_ROOT
+) -> OntologyRegistry:
+    """Load core.yaml plus only the named domain packs.
+
+    Ingestion passes the resulting schema into the extraction prompt (see
+    app/ontology/graphiti_types.py), and every type in it costs prompt tokens
+    and gives the LLM one more option to weigh. A manufacturing ingest has no
+    use for the legal or pharma vocabularies, so loading all nine domains for
+    it makes extraction both more expensive and harder, not more capable.
+    """
+    root = Path(ontology_root)
+    reg = OntologyRegistry()
+
+    reg.register(OntologyLoader.load(root / "core.yaml"))
+    for domain in domains:
+        reg.register(OntologyLoader.load(root / "domains" / f"{domain}.yaml"))
+
+    return reg
+
+
 # Built once, when this module is first imported, and then reused everywhere --
 # re-parsing and re-merging the YAML files on every request would be wasted work
 # since the ontology doesn't change while the app is running. If you edit the YAML

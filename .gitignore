@@ -13,3 +13,6 @@ docs/internal/
 
 # Real tenant API keys -- config/tenants.example.json is the committed template
 config/tenants.json
+
+# Per-machine record of what's already been ingested, not source
+data/processed/ingest_log.json

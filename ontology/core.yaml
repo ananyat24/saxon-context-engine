@@ -1,12 +1,12 @@
 ontology:
-  id: aissist-enterprise-core
-  name: AISSIST Enterprise Core Ontology
+  id: saxon-enterprise-core
+  name: Saxon Enterprise Core Ontology
   version: "0.1.0"
   description: >
     Domain-neutral ontology for enterprise knowledge graphs and context engines.
     Designed to be extended by industry, functional, and customer-specific
     ontology packs rather than hard-coding domain concepts into the runtime.
-  namespace: aissist.core
+  namespace: saxon.core
   extension_policy: additive
 
 entities:

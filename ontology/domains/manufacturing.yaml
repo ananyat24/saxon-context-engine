@@ -1,29 +1,147 @@
 ontology:
-  id: aissist-manufacturing
-  name: AISSIST Manufacturing Ontology
-  version: "0.1.0"
+  id: saxon-manufacturing
+  name: Saxon Manufacturing Ontology
+  version: "0.2.0"
   description: >
-    Domain extension for AISSIST Enterprise Core.
-  namespace: aissist.domain.manufacturing
-  extends: aissist.core
+    Domain extension for the Saxon Enterprise Core ontology, covering
+    production equipment, its operating conditions, and maintenance events.
+    Designed against the AI4I 2020 predictive maintenance dataset in
+    data/samples/manufacturing_ai4i2020/, so every type here has real sample
+    data to validate against.
+  namespace: saxon.domain.manufacturing
+  extends: saxon.core
   extension_policy: additive
 
-entities: {}
-# Add domain concepts here. Every domain entity should extend a core concept.
-#
-# Example:
-# DomainEntity:
-#   extends: Asset
-#   description: Domain-specific specialization.
+entities:
 
-relationships: {}
-# Add only relationships whose meaning is genuinely domain-specific.
-#
-# Example:
-# manufacturing_RELATIONSHIP:
-#   source: DomainEntity
-#   target: Entity
+  Machine:
+    extends: Asset
+    description: >
+      A physical production machine (mill, lathe, press, CNC tool). Specializes
+      Asset rather than introducing a new root concept, so generic queries over
+      Assets still find machines.
+    properties:
+      machine_type: {type: string, required: false}
+      quality_tier: {type: string, required: false}
+      serial_number: {type: string, required: false}
 
-event_types: {}
-fact_types: {}
-aliases: {}
+  ToolComponent:
+    extends: Asset
+    description: >
+      A consumable/replaceable part fitted to a Machine, such as a cutting
+      tool insert. Tracked separately from the Machine because it wears out
+      and is replaced on its own schedule.
+    properties:
+      component_type: {type: string, required: false}
+      expected_life_minutes: {type: number, required: false}
+
+  ProductionLine:
+    extends: Process
+    description: Ordered arrangement of machines and activities that produces a product.
+
+  SensorReading:
+    extends: MetricValue
+    description: >
+      One measurement from a machine at a point in time (temperature, torque,
+      rotational speed, tool wear). Extends MetricValue so it inherits the
+      core's metric/unit/time handling rather than redefining it.
+    properties:
+      sensor_type: {type: string, required: false}
+      machine_id: {type: string, required: false}
+
+  MachineFailure:
+    extends: Issue
+    description: >
+      A machine failing or being taken out of service. Extends Issue (the core's
+      problem/incident concept) rather than Event, so it inherits severity and
+      status alongside the core's event-time handling.
+    properties:
+      failure_mode: {type: string, required: false}
+      downtime_minutes: {type: number, required: false}
+
+  MaintenanceActivity:
+    extends: Activity
+    description: Inspection, repair, replacement, or servicing performed on a machine.
+    properties:
+      maintenance_type: {type: string, required: false}
+      scheduled: {type: boolean, required: false}
+
+  WorkOrder:
+    extends: Task
+    description: Assignable instruction to perform maintenance or production work.
+    properties:
+      priority: {type: string, required: false}
+      status: {type: string, required: false}
+
+relationships:
+
+  OPERATED_ON:
+    source: Machine
+    target: Product
+    description: Machine ran a production operation producing this product.
+
+  HAS_COMPONENT:
+    source: Machine
+    target: ToolComponent
+    description: Tool/part is currently fitted to this machine.
+
+  MEASURED_ON:
+    source: SensorReading
+    target: Machine
+    description: Reading was taken from this machine.
+
+  FAILED_WITH:
+    source: Machine
+    target: MachineFailure
+    description: Machine experienced this failure.
+
+  MAINTAINED_BY:
+    source: Machine
+    target: Entity
+    description: Person, team, or vendor responsible for maintaining this machine.
+
+  RESOLVES:
+    source: MaintenanceActivity
+    target: MachineFailure
+    description: Maintenance work performed in response to a failure.
+
+  PART_OF_LINE:
+    source: Machine
+    target: ProductionLine
+    description: Machine belongs to this production line.
+
+event_types:
+
+  MachineFailureEvent:
+    description: A machine failure occurred.
+
+  MaintenancePerformed:
+    description: Scheduled or unscheduled maintenance was carried out.
+
+  ToolReplacement:
+    description: A worn tool/component was replaced.
+
+  ProductionRun:
+    description: A batch or production run was executed.
+
+fact_types:
+
+  OperatingConditionFact:
+    description: Subject was operating under a given condition (temperature, load, speed) over an interval.
+
+  ToolWearFact:
+    description: Cumulative wear measured on a tool component at a point in time.
+
+aliases:
+  # Vocabulary commonly used on a shop floor, mapped to canonical types.
+  equipment: Machine
+  asset: Machine
+  tool: ToolComponent
+  breakdown: MachineFailure
+  fault: MachineFailure
+  downtime: MachineFailure
+  repair: MaintenanceActivity
+  pm: MaintenanceActivity
+  line: ProductionLine
+  reading: SensorReading
+  telemetry: SensorReading

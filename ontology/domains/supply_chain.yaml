@@ -1,11 +1,11 @@
 ontology:
-  id: aissist-supply_chain
-  name: AISSIST Supply Chain Ontology
+  id: saxon-supply_chain
+  name: Saxon Supply Chain Ontology
   version: "0.1.0"
   description: >
-    Domain extension for AISSIST Enterprise Core.
-  namespace: aissist.domain.supply_chain
-  extends: aissist.core
+    Domain extension for the Saxon Enterprise Core ontology.
+  namespace: saxon.domain.supply_chain
+  extends: saxon.core
   extension_policy: additive
 
 entities: {}

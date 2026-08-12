@@ -1,11 +1,11 @@
 ontology:
-  id: aissist-technology
-  name: AISSIST Technology / IT Ontology
+  id: saxon-technology
+  name: Saxon Technology / IT Ontology
   version: "0.1.0"
   description: >
-    Domain extension for AISSIST Enterprise Core.
-  namespace: aissist.domain.technology
-  extends: aissist.core
+    Domain extension for the Saxon Enterprise Core ontology.
+  namespace: saxon.domain.technology
+  extends: saxon.core
   extension_policy: additive
 
 entities: {}

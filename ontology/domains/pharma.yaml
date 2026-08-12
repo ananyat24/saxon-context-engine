@@ -1,11 +1,11 @@
 ontology:
-  id: aissist-pharma
-  name: AISSIST Pharma / Life Sciences Ontology
+  id: saxon-pharma
+  name: Saxon Pharma / Life Sciences Ontology
   version: "0.1.0"
   description: >
-    Domain extension for AISSIST Enterprise Core.
-  namespace: aissist.domain.pharma
-  extends: aissist.core
+    Domain extension for the Saxon Enterprise Core ontology.
+  namespace: saxon.domain.pharma
+  extends: saxon.core
   extension_policy: additive
 
 entities: {}

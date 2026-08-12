@@ -1,29 +1,139 @@
 ontology:
-  id: aissist-legal
-  name: AISSIST Legal Ontology
-  version: "0.1.0"
+  id: saxon-legal
+  name: Saxon Legal Ontology
+  version: "0.2.0"
   description: >
-    Domain extension for AISSIST Enterprise Core.
-  namespace: aissist.domain.legal
-  extends: aissist.core
+    Domain extension for the Saxon Enterprise Core ontology, covering contracts,
+    their clauses, obligations, and key dates. Designed against the CUAD
+    contract dataset in data/samples/legal_cuad/, so the clause types here
+    reflect categories real contract reviewers actually tag.
+  namespace: saxon.domain.legal
+  extends: saxon.core
   extension_policy: additive
 
-entities: {}
-# Add domain concepts here. Every domain entity should extend a core concept.
-#
-# Example:
-# DomainEntity:
-#   extends: Asset
-#   description: Domain-specific specialization.
+entities:
 
-relationships: {}
-# Add only relationships whose meaning is genuinely domain-specific.
-#
-# Example:
-# legal_RELATIONSHIP:
-#   source: DomainEntity
-#   target: Entity
+  Clause:
+    extends: Document
+    description: >
+      A specific provision within a contract (governing law, non-compete,
+      liability cap). Extends Document rather than being a bare entity so it
+      inherits the core's document handling, including the uri/excerpt fields
+      that let a clause point back at its source text.
+    properties:
+      clause_type: {type: string, required: false}
+      char_offset: {type: number, required: false}
 
-event_types: {}
-fact_types: {}
-aliases: {}
+  ContractParty:
+    extends: Entity
+    description: >
+      An organization or person bound by a contract, in their capacity as a
+      signatory. Kept distinct from plain Organization/Person because the same
+      company can be a party to many contracts in different roles.
+    properties:
+      party_role: {type: string, required: false}
+
+  Obligation:
+    extends: Requirement
+    description: >
+      Something a party must do or refrain from doing under a contract.
+      Extends the core Requirement so obligations participate in the existing
+      SATISFIES/VIOLATES relationships rather than needing parallel ones.
+    properties:
+      obligation_type: {type: string, required: false}
+      responsible_party_id: {type: string, required: false}
+
+  Amendment:
+    extends: Document
+    description: A document that modifies an existing contract.
+
+  ContractTerm:
+    extends: Entity
+    description: >
+      The time window a contract is in force -- effective date, expiration
+      date, renewal terms. Modeled as its own entity because a contract's
+      term is frequently amended independently of the rest of the agreement.
+    properties:
+      effective_date: {type: datetime, required: false}
+      expiration_date: {type: datetime, required: false}
+      auto_renews: {type: boolean, required: false}
+      notice_period_days: {type: number, required: false}
+
+  Jurisdiction:
+    extends: Location
+    description: Legal jurisdiction whose law governs a contract or clause.
+
+relationships:
+
+  HAS_CLAUSE:
+    source: Contract
+    target: Clause
+    description: Contract contains this clause.
+
+  PARTY_TO:
+    source: ContractParty
+    target: Contract
+    description: This party is bound by the contract.
+
+  IMPOSES_OBLIGATION:
+    source: Clause
+    target: Obligation
+    description: Clause creates this obligation.
+
+  OBLIGATED_PARTY:
+    source: Obligation
+    target: ContractParty
+    description: The party who must fulfill this obligation.
+
+  GOVERNED_BY_LAW:
+    source: Contract
+    target: Jurisdiction
+    description: Contract is governed by this jurisdiction's law.
+
+  AMENDS:
+    source: Amendment
+    target: Contract
+    description: Amendment modifies this contract.
+
+  HAS_TERM:
+    source: Contract
+    target: ContractTerm
+    description: Contract's effective/expiration dates and renewal behavior.
+
+event_types:
+
+  ContractExecuted:
+    description: A contract was signed and became binding.
+
+  ContractAmended:
+    description: An amendment to an existing contract took effect.
+
+  ContractTerminated:
+    description: A contract ended, by expiry, termination for convenience, or breach.
+
+  ContractRenewed:
+    description: A contract renewed, automatically or by agreement.
+
+  ObligationBreached:
+    description: A party failed to meet a contractual obligation.
+
+fact_types:
+
+  ClauseFact:
+    description: A contract contains a clause of a given type, with its source text.
+
+  TermFact:
+    description: A contract was in force over a given interval.
+
+aliases:
+  # Contract-review vocabulary mapped to canonical types.
+  agreement: Contract
+  counterparty: ContractParty
+  signatory: ContractParty
+  provision: Clause
+  section: Clause
+  covenant: Obligation
+  governing_law: Jurisdiction
+  venue: Jurisdiction
+  term: ContractTerm
+  addendum: Amendment

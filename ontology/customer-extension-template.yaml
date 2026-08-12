@@ -3,8 +3,8 @@ ontology:
   name: Customer Ontology Extension
   version: "0.1.0"
   description: Customer-specific vocabulary, aliases, specializations, and relationships.
-  namespace: aissist.customer
-  extends: aissist.core
+  namespace: saxon.customer
+  extends: saxon.core
   extension_policy: additive
 
 entities: {}

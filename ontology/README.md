@@ -1,7 +1,7 @@
-# AISSIST Enterprise Ontology Package
+# Saxon Enterprise Ontology Package
 
-This package implements a domain-neutral ontology foundation for the AISSIST
-knowledge graph and context engine.
+This package implements a domain-neutral ontology foundation for the Saxon AI
+Context Engine's knowledge graph.
 
 ## Design principles
 

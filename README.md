@@ -227,6 +227,45 @@ Neo4j running; the graph tests do):
 pytest
 ```
 
+## Ingesting data
+
+Steps 4 and 5 above ingest one hand-written sentence at a time. To load an
+actual dataset, `scripts/ingest_samples.py` reads the files in
+`data/samples/`, turns each row or document into a sentence, and extracts
+entities and facts from it against the ontology.
+
+```bash
+# See what would be ingested, without calling the LLM or writing anything
+python scripts/ingest_samples.py northwind --dry-run
+
+# Ingest for real (northwind | manufacturing | legal)
+python scripts/ingest_samples.py northwind --limit 10
+```
+
+Each record costs several LLM calls (extraction, embedding, deduplication),
+not one, and Gemini's free tier caps requests per minute, so the script
+defaults to 20 records per run with a 15-second gap (`--limit`, `--delay`).
+Expect to hit the limit anyway on the free tier: a run at a 4-second delay
+failed 6 of 10 records in testing. That's recoverable rather than
+destructive. Successfully ingested records are tracked in
+`data/processed/ingest_log.json`; failures are not marked, so re-running the
+same command retries exactly what failed and skips what already succeeded.
+Use `--group-id` to keep a run's data in its own bucket.
+
+Extraction is constrained to the ontology: the entity and relationship types
+from `ontology/core.yaml` plus the dataset's domain pack are passed into the
+extraction prompt, so the model picks from types the ontology defines rather
+than inventing its own. This matters more than it sounds. Ingesting the same
+Northwind customers without it produced `HAS_COMPANY_NAME`,
+`LOCATED_IN_CITY`, and `LOCATED_IN_COUNTRY` alongside the ontology's own
+`LOCATED_AT` and `OWNS` -- six of eight relationship types were invented, and
+a graph like that can't be queried consistently. With the ontology passed in,
+all of them came from the ontology.
+
+To add a dataset of your own, describe its files with a `FileSourceSpec` (see
+the `NORTHWIND_SPECS` list in the script) and add an entry to
+`DATASET_DOMAINS` naming which ontology domain pack it extracts against.
+
 ### Experimenting
 
 - Open Neo4j Desktop's Neo4j Browser against your running database and run
@@ -321,7 +360,7 @@ if both are present.
 ### Folder structure
 
 ```text
-aissist-context/
+saxon-context-engine/
 ├── README.md
 ├── requirements.txt
 ├── .env.example
@@ -403,21 +442,17 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
 | Core data models (`app/models/`) | Implemented |
 | Ontology (`app/ontology/`, `ontology/`) | Implemented and tested |
 | Graph persistence (`app/graph/`) | Implemented and tested |
-| Ingestion (`app/ingestion/`) | `IngestionPipeline` works; structured/unstructured formatting helpers are stubs, and there are no source connectors yet |
+| Ingestion (`app/ingestion/`) | Works for files: CSV and text sources are read, converted to prose, and extracted against the ontology. No connectors to live source systems (CRM/ERP APIs) yet |
 | Retrieval (`app/retrieval/`) | Graph retrieval works; semantic and live-data retrieval are stubs |
 | Context composition (`app/context/`) | Basic assembly from graph facts works; planning, ranking, and richer composition are stubs |
 | API (`app/api/`) | `/health`, `/entities`, `/context/query` implemented |
 
 ### Roadmap
 
-- **Ingestion source connectors.** Nothing currently pulls data from a real
-  system; everything ingested so far has been written by hand in test
-  scripts. Next step is a generic connector that reads sample files from
-  `data/samples/`, before building connectors for specific client systems.
-  A few small, permissively-licensed sample datasets (a CRM/ERP-style
-  business database, manufacturing sensor readings, and legal contracts) are
-  already in `data/samples/`, with sources and licenses documented in
-  [`data/samples/SOURCES.md`](data/samples/SOURCES.md).
+- **Connectors to live source systems.** File-based ingestion works (see
+  "Ingesting data" above), but nothing yet pulls from a CRM or ERP's API on a
+  schedule. That needs per-system connector code plus incremental sync, so a
+  nightly run picks up only what changed rather than reprocessing everything.
 - **Ontology authoring UI.** Domain and client ontology packs are hand-edited
   YAML today. A UI for configuring a new client's vocabulary without editing
   YAML directly is planned, not started.
