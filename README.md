@@ -260,11 +260,11 @@ could put any `group_id` it wanted directly into a request, the separation
 would be advisory rather than enforced.
 
 To close that gap, `POST /api/v1/context/query` requires an `X-API-Key`
-header. `app/security.py` looks the key up in `TENANT_API_KEYS` (set in
-`.env`) and returns that tenant's config: their `group_id`, and their own
-Gemini API key. The request body has no `group_id` or key field, so there's
-nothing for a caller to override. An invalid or missing key is rejected
-before any Neo4j or Gemini call is made.
+header. `app/security.py` looks the key up in `config/tenants.json` and
+returns that tenant's config: their `group_id`, and their own Gemini API
+key. The request body has no `group_id` or key field, so there's nothing for
+a caller to override. An invalid or missing key is rejected before any Neo4j
+or Gemini call is made.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/context/query \
@@ -274,11 +274,10 @@ curl -X POST http://localhost:8000/api/v1/context/query \
 ```
 
 Each tenant also brings their own Gemini API key rather than sharing one
-operator-owned key -- set per tenant in `TENANT_API_KEYS`, see
-`.env.example`. Building a Graphiti client (LLM + embedder + reranker setup)
-is real overhead, so this isn't done fresh on every request: each tenant
-gets one client, built on their first request and cached after that -- see
-`app/graph/tenant_graphiti_pool.py`.
+operator-owned key. Building a Graphiti client (LLM + embedder + reranker
+setup) is real overhead, so this isn't done fresh on every request: each
+tenant gets one client, built on their first request and cached after that --
+see `app/graph/tenant_graphiti_pool.py`.
 
 This is a reasonable baseline for one shared database serving multiple
 clients, not the strongest possible guarantee. Full separation would mean a
@@ -286,6 +285,34 @@ dedicated database or deployment per client, which costs more in
 infrastructure but removes any risk of an application bug leaking one
 client's data into another's. Worth revisiting if a client's compliance
 requirements call for it.
+
+### Adding a client's API key
+
+No code editing or hand-written JSON required -- use `scripts/manage_tenants.py`,
+which reads and writes `config/tenants.json` for you:
+
+```bash
+# Add a new client, generating a random API key for them
+python scripts/manage_tenants.py add --name "Acme Corp" --gemini-key <their Gemini API key>
+
+# See who's configured (keys shown masked, not in full)
+python scripts/manage_tenants.py list
+
+# Remove a client
+python scripts/manage_tenants.py remove acme_corp
+```
+
+`add` prints the generated API key once -- that's what you give the client to
+put in their `X-API-Key` header. It isn't shown again by `list`, so save it
+somewhere before closing the terminal. The API needs a restart to pick up any
+change, since configuration is only read once at startup.
+
+`config/tenants.json` is gitignored (it holds real API keys); see
+`config/tenants.example.json` for the shape it expects if you'd rather edit
+it directly. Platforms that prefer environment-variable configuration over a
+file (e.g. Azure Container Apps) can set the equivalent `TENANT_API_KEYS`
+environment variable instead -- see `.env.example`. The file takes priority
+if both are present.
 
 ---
 

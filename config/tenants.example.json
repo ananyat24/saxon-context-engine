@@ -1,0 +1,6 @@
+{
+  "REPLACE_WITH_A_REAL_API_KEY": {
+    "group_id": "example_tenant",
+    "gemini_api_key": "REPLACE_WITH_THAT_TENANT_S_OWN_GEMINI_KEY"
+  }
+}

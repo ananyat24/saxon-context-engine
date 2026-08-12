@@ -10,3 +10,6 @@ dist/
 
 # Internal-only docs (infrastructure/cost planning, not published)
 docs/internal/
+
+# Real tenant API keys -- config/tenants.example.json is the committed template
+config/tenants.json
