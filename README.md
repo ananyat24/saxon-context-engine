@@ -1,4 +1,4 @@
-# AIssist Context Engine
+# Saxon AI Context Engine
 
 ## Overview
 
@@ -159,7 +159,7 @@ already has some data in it looks like:
 
 ```
 --- Seeding quickstart core episode ---
-Fact: Ananya set up the AIssist Context Engine with Graphiti and Gemini.
+Fact: Ananya set up the Saxon AI Context Engine with Graphiti and Gemini.
 Fact: Sarah Chen manages the enterprise customer account for Contoso Ltd.
 Fact: Contoso Ltd's account is managed by Marcus Lee
 ```
@@ -261,10 +261,10 @@ would be advisory rather than enforced.
 
 To close that gap, `POST /api/v1/context/query` requires an `X-API-Key`
 header. `app/security.py` looks the key up in `TENANT_API_KEYS` (set in
-`.env`) and returns the one `group_id` that key is allowed to query. The
-request body has no `group_id` field, so there's nothing for a caller to
-override. An invalid or missing key is rejected before any Neo4j or Gemini
-call is made.
+`.env`) and returns that tenant's config: their `group_id`, and their own
+Gemini API key. The request body has no `group_id` or key field, so there's
+nothing for a caller to override. An invalid or missing key is rejected
+before any Neo4j or Gemini call is made.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/context/query \
@@ -272,6 +272,13 @@ curl -X POST http://localhost:8000/api/v1/context/query \
   -H "X-API-Key: local-dev-key" \
   -d '{"query": "who manages the Contoso account"}'
 ```
+
+Each tenant also brings their own Gemini API key rather than sharing one
+operator-owned key -- set per tenant in `TENANT_API_KEYS`, see
+`.env.example`. Building a Graphiti client (LLM + embedder + reranker setup)
+is real overhead, so this isn't done fresh on every request: each tenant
+gets one client, built on their first request and cached after that -- see
+`app/graph/tenant_graphiti_pool.py`.
 
 This is a reasonable baseline for one shared database serving multiple
 clients, not the strongest possible guarantee. Full separation would mean a
@@ -305,7 +312,8 @@ aissist-context/
 │   ├── graph/                   # Neo4j connection and Graphiti integration
 │   │   ├── neo4j_client.py
 │   │   ├── graph_repository.py
-│   │   └── graphiti_adapter.py
+│   │   ├── graphiti_adapter.py
+│   │   └── tenant_graphiti_pool.py  # One cached Graphiti client per tenant
 │   ├── ingestion/               # Turning raw text/records into graph writes
 │   ├── retrieval/                # Querying graph, semantic, and live data sources
 │   │   └── base.py               # Shared interface for query-based retrievers

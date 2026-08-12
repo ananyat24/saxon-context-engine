@@ -1,7 +1,7 @@
 [project]
-name = "aissist-context"
+name = "saxon-context-engine"
 version = "0.1.0"
-description = "Context Engine Architecture - Ontology, Graphiti & Neo4j"
+description = "Saxon AI Context Engine - ontology-guided temporal context engine for enterprise AI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -18,7 +18,7 @@ async def main():
         print("--- Seeding quickstart core episode ---")
         await graphiti.add_episode(
             name="seed episode",
-            episode_body="Ananya set up the AIssist Context Engine with Graphiti and Gemini.",
+            episode_body="Ananya set up the Saxon AI Context Engine with Graphiti and Gemini.",
             source=EpisodeType.text,
             source_description="seed quickstart",
             # reference_time is when the episode's content happened/was true --
