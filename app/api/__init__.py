@@ -1,3 +1,6 @@
+# Assembles the individual routers from health.py, entities.py, and context.py into
+# one api_router that app/main.py mounts under /api/v1. Add a new endpoint file's
+# router here to expose it.
 from fastapi import APIRouter
 from app.api.health import router as health_router
 from app.api.entities import router as entities_router

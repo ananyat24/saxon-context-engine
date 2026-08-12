@@ -1,9 +1,24 @@
+# Run with: python scripts/test_graph.py
+#
+# Demonstrates the feature that makes Graphiti more than "just" a graph database:
+# tracking facts over time. This simulates two systems (a CRM and an ERP) both
+# writing about the same customer, then a later CRM update that changes who manages
+# the account. The final query shows Graphiti automatically marking the old
+# "Sarah Chen manages this account" fact as INVALIDATED once the new one
+# ("Marcus Lee manages this account") is ingested -- it doesn't just overwrite the
+# old fact, it keeps both and marks which one is currently true.
+#
+# time.sleep(15) calls exist only because this project is on Gemini's free tier,
+# which allows just 5 requests/minute -- remove them if you're on a paid tier with
+# a higher rate limit.
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 from graphiti_core.nodes import EpisodeType
 from app.graph.graphiti_adapter import build_graphiti
 
+# Graphiti's "group_id" scopes data to a logical bucket (e.g. one customer's data
+# in a multi-tenant deployment) so a search can be limited to just that bucket.
 GROUP_ID = "acme_demo"
 now = datetime.now(timezone.utc)
 
@@ -63,6 +78,9 @@ async def main():
         print("--- Query again: check account rep status ---")
         results = await graphiti.search("Who manages the Contoso Ltd account?", group_ids=[GROUP_ID])
         for r in results:
+            # A fact with an expired_at or invalid_at timestamp has been superseded
+            # by a newer fact -- Graphiti keeps it in the graph as history rather
+            # than deleting it, it just stops treating it as currently true.
             valid = "VALID" if r.expired_at is None and r.invalid_at is None else "INVALIDATED"
             print(f"  [{valid}] {r.fact}")
 

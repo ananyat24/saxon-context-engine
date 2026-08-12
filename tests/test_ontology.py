@@ -15,6 +15,8 @@ def test_core_ontology_loads_and_validates():
 
 
 def test_registry_can_register_core_and_domain():
+    # Registering core.yaml then a domain pack mirrors what
+    # app/ontology/bootstrap.py does for the whole app at startup.
     registry = OntologyRegistry()
 
     core = OntologyLoader.load("ontology/core.yaml")

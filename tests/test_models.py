@@ -1,3 +1,6 @@
+# pytest discovers any function named test_* in a file named test_*.py and runs it
+# automatically -- there's no test runner boilerplate to write. A test "passes" if
+# it runs to completion without an `assert` failing or an exception being raised.
 from app.models.entity import Entity
 from app.models.relationship import Relationship
 

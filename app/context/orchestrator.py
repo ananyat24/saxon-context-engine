@@ -1,3 +1,11 @@
+# The main coordination point for answering a query: currently calls the graph
+# retriever and packages what it finds into a ContextPacket. As semantic and
+# live-data retrievers are implemented (see app/retrieval/), this is where their
+# results would get merged in alongside the graph facts.
+#
+# Note: this only fills in ContextPacket.metadata with a plain-text summary, not
+# the packet's structured `facts` list -- turning Graphiti's raw search hits into
+# proper Fact model instances is a follow-up step, not yet implemented.
 import logging
 from typing import List, Optional
 from graphiti_core import Graphiti
@@ -21,7 +29,7 @@ class ContextOrchestrator:
         return ContextPacket(
             query=query,
             metadata={
-                "group_id": group_ids[0] if group_ids else None,
+                "group_ids": group_ids,
                 "summary": summary_text,
             },
         )

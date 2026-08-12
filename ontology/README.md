@@ -35,22 +35,18 @@ Entity
       -> Interaction
       -> CustomerMeeting (sales extension)
 
-## Install
+## Adding a new domain
 
-Requires:
+1. Copy `ontology/customer-extension-template.yaml` (or an existing domain file
+   under `ontology/domains/`) as a starting point.
+2. Add entity types under `entities:`, each with `extends:` pointing at an
+   existing core or domain type -- never a bare new type with no parent.
+3. Add relationship types under `relationships:` only when an existing one
+   (`ontology/core.yaml`) doesn't already capture the meaning.
+4. Validate your changes:
 
-    pip install pyyaml
-
-Copy:
-- `app/ontology/` into the existing application's `app/ontology/`
-- `ontology/` into the repository root
-- `tests/test_ontology.py` into tests
-- `scripts/check_ontology.py` into scripts
-
-Run:
-
-    python scripts/check_ontology.py
-    pytest tests/test_ontology.py
+       python scripts/check_ontology.py
+       pytest tests/test_ontology.py
 
 ## Important
 

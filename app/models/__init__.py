@@ -1,3 +1,5 @@
+# Re-exports the core data models so other modules can write
+# `from app.models import Entity` instead of reaching into each individual file.
 from app.models.entity import Entity
 from app.models.relationship import Relationship
 from app.models.fact import Fact
