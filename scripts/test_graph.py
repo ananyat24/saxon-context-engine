@@ -8,9 +8,9 @@
 # ("Marcus Lee manages this account") is ingested -- it doesn't just overwrite the
 # old fact, it keeps both and marks which one is currently true.
 #
-# time.sleep(15) calls exist only because this project is on Gemini's free tier,
-# which allows just 5 requests/minute -- remove them if you're on a paid tier with
-# a higher rate limit.
+# time.sleep(15) calls exist only because Gemini's free tier caps requests per
+# minute (check current limits at ai.google.dev/pricing, they change over time) --
+# remove them if you're on a paid tier with a higher rate limit.
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone

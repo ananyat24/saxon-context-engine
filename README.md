@@ -98,31 +98,130 @@ NEO4J_PASSWORD=<your Neo4j password>
 GOOGLE_API_KEY=<your Gemini API key>
 ```
 
-### Try it, step by step
+## What you can do today
 
-Run these in order the first time; each one builds on the last.
+This walks through what actually works right now, in order, with what each
+step's output means. Run them in this order the first time; each one builds
+on the last. Each ingestion/search step calls the Gemini API a couple of
+times, so this whole sequence stays well within the free tier's rate limit.
+
+### 1. Confirm the database connection
 
 ```bash
-# 1. Confirm you can reach your Neo4j database
 python scripts/test_neo4j.py
+```
 
-# 2. Confirm the ontology (the rulebook of allowed entity/relationship types)
-# loads and validates
+Expected output: `Neo4j connection successful`. This only checks that the
+app can reach Neo4j with the credentials in `.env`. It doesn't touch
+Graphiti, the LLM, or the ontology at all, so it's the first thing to run
+when something else fails; if this fails too, the problem is Neo4j or `.env`,
+not the rest of the app.
+
+### 2. Validate the ontology
+
+```bash
 python scripts/check_ontology.py
+```
 
-# 3. One-time setup of the indices Neo4j needs
+Expected output:
+
+```
+OK: ontology\core.yaml
+OK: ontology\domains\finance.yaml
+...
+Entity types: 28
+Relationship types: 46
+```
+
+This loads and merges every ontology YAML file, the same way the app does
+at startup. It doesn't touch Neo4j. If you've edited or added a domain file,
+this is how to check it's valid before running anything else.
+
+### 3. Set up Neo4j's indices
+
+```bash
 python scripts/init_neo4j.py
+```
 
-# 4. Write one fact, then ask about it
+One-time setup so Neo4j can look things up quickly. Safe to run again later;
+it just re-applies the same schema.
+
+### 4. Ingest one sentence and ask about it
+
+```bash
 python scripts/seed_core_graph.py
+```
 
-# 5. A longer demo showing a fact change over time, and the old fact being
-# marked invalid once a new one supersedes it
+This is the smallest real end-to-end example: it sends one sentence to
+Graphiti, waits for the LLM to extract entities and facts from it, and then
+asks a question about what it just stored. A run against a database that
+already has some data in it looks like:
+
+```
+--- Seeding quickstart core episode ---
+Fact: Ananya set up the AIssist Context Engine with Graphiti and Gemini.
+Fact: Sarah Chen manages the enterprise customer account for Contoso Ltd.
+Fact: Contoso Ltd's account is managed by Marcus Lee
+```
+
+What this shows: the sentence you fed in came back out as a fact (proving
+ingestion and extraction work), and older facts already in the database
+also came back if they were relevant to the question asked (proving search
+works, not just storage).
+
+### 5. Watch a fact get superseded, not overwritten
+
+```bash
 python scripts/test_graph.py
 ```
 
-Run the test suite (the ontology and model tests don't need Neo4j running;
-the graph tests do):
+This is the core feature demo. It ingests that a CRM account is managed by
+Sarah Chen, ingests an unrelated order from an ERP system, then later
+ingests that the account is now managed by Marcus Lee instead. Querying
+"who manages this account" afterward returns both facts, one marked valid
+and one marked invalidated:
+
+```
+[VALID] Contoso Ltd's account is now managed by Marcus Lee, not Sarah Chen.
+[INVALIDATED] The account is managed by Sarah Chen.
+```
+
+Neither fact was deleted. The old one is still in the graph, just marked as
+no longer current. This is what makes the system useful for questions like
+"who used to manage this account" as well as "who manages it now."
+
+### 6. Query it over the API
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Then, in another terminal:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/context/query \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: local-dev-key" \
+  -d '{"query": "who manages the Contoso account"}'
+```
+
+Expected output, a `ContextPacket` with a plain-text summary of the current
+facts:
+
+```json
+{"query":"who manages the Contoso account", "entities":[], "relationships":[],
+ "facts":[], "events":[], "evidence":[], "timeline":[], "confidence":null,
+ "metadata":{"group_ids":["acme_demo"],"summary":"Contoso Ltd's account is managed by Marcus Lee\n..."}}
+```
+
+This proves the same thing step 5 did, but over HTTP with the tenant
+isolation described in [API access](#api-access) rather than by running a
+Python script directly. `entities`/`relationships`/`facts`/`events` come back
+empty for now; the summary in `metadata` is the only thing actually filled
+in today (see [Status](#status)).
+
+Run the test suite at any point (the ontology and model tests don't need
+Neo4j running; the graph tests do):
 
 ```bash
 pytest
@@ -293,3 +392,7 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
   search later means appending to that list rather than restructuring it.
   Live-data retrieval looks up one entity at a time rather than answering a
   free-text query, so it's left out of that shared interface.
+- **Hosting, once this needs to leave one laptop.** Everything currently
+  runs locally. [`docs/infrastructure-plan.md`](docs/infrastructure-plan.md)
+  scopes what's needed to make it reachable by others, phased from a $0
+  pilot setup to what a paying client would need.
