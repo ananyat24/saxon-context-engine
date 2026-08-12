@@ -39,8 +39,23 @@ testing the `legal` ontology domain pack and unstructured document ingestion.
 - **What was done**: picked 5 contracts of moderate length with several labeled clauses from the 510 in the full CUADv1.json, and extracted just those contracts' full text plus their non-empty clause annotations.
 - **Full dataset**: same source, `CUADv1.json` (510 contracts, ~13,000 annotations, ~40MB)
 
-## Not included, and why
+## Deliberately not included
 
-- **CRM Sales Opportunities** and **DataCo Smart Supply Chain** (both Kaggle) were part of the original recommendation but couldn't be pulled automatically: downloading from Kaggle requires an authenticated account and API key, which this session doesn't have. If you want these, either download them yourself and drop the CSVs in `data/raw/`, or share a Kaggle API key (`kaggle.json`) and they can be pulled programmatically next time.
-- **Synthea** (synthetic patient records) needs Java 17+ to run its generator; this machine only has Java 8 installed. Install a newer JDK and it can be generated locally — see [synthea.mitre.org](https://synthea.mitre.org/).
-- **Enron email corpus** was in the original list but isn't included here by choice, not a licensing block: it's real people's real personal correspondence, and even though it's been publicly available for research since a 2003 FERC investigation, redistributing it into a client-facing repo felt like a call worth checking with you first rather than making unilaterally. Say the word if you want it added.
+These were part of the original recommendation; each was checked and set
+aside for a specific reason, not overlooked. Revisit any of them by changing
+the underlying blocker, noted below.
+
+- **CRM Sales Opportunities** and **DataCo Smart Supply Chain** (both
+  Kaggle) — downloading requires an authenticated Kaggle account and API
+  key. **Decision: skip for now.** To revisit: either download the CSVs
+  yourself and drop them in `data/raw/`, or share a Kaggle API key
+  (`kaggle.json`).
+- **Synthea** (synthetic patient records) — its generator needs Java 17+;
+  this machine only has Java 8, and there's no package manager available to
+  install a newer JDK cleanly. **Decision: skip for now.** To revisit:
+  install Java 17+ (e.g. [Eclipse Temurin](https://adoptium.net/)) and a
+  small synthetic patient sample can be generated locally.
+- **Enron email corpus** — real people's real personal correspondence.
+  Publicly available for research since a 2003 FERC investigation, but
+  redistributing it into a client-facing repo was judged not worth doing
+  by default. **Decision: leave out.** To revisit: say so explicitly.
