@@ -139,6 +139,7 @@ async def run(args: argparse.Namespace) -> None:
     )
     ingested = 0
     failures: list[tuple[str, str]] = []
+    consecutive_rate_limits = 0
     try:
         for i, record in enumerate(batch, 1):
             logger.info(f"[{i}/{len(batch)}] {record.name}")
@@ -157,8 +158,37 @@ async def run(args: argparse.Namespace) -> None:
                 # exactly what failed rather than starting over.
                 logger.error(f"  failed: {e}")
                 failures.append((record.name, str(e)))
+
+                if "rate limit" in str(e).lower():
+                    consecutive_rate_limits += 1
+                    # One record is several LLM calls in a tight burst (extraction
+                    # plus multiple embedding calls), not one -- that burst alone
+                    # can exceed a per-minute cap regardless of the delay between
+                    # records. Retrying immediately just piles onto an already-
+                    # exhausted window and never lets it clear: a real run of this
+                    # script did exactly that, going 2 successes -> continuous
+                    # failures with a flat 15s delay. Back off hard instead, and
+                    # give up after a few in a row rather than burning through the
+                    # rest of the batch on a limit that isn't clearing.
+                    if consecutive_rate_limits >= 3:
+                        logger.error(
+                            f"\n{consecutive_rate_limits} rate limit errors in a row -- "
+                            f"stopping early rather than continuing to fail. Wait a few "
+                            f"minutes and re-run; it will resume from here."
+                        )
+                        break
+                    backoff = args.delay * 4
+                    logger.warning(f"  rate limited, backing off {backoff:.0f}s before continuing")
+                    time.sleep(backoff)
+                    continue
+                else:
+                    consecutive_rate_limits = 0
+
+                if i < len(batch):
+                    time.sleep(args.delay)
                 continue
 
+            consecutive_rate_limits = 0
             log.mark(args.group_id, record.name)
             ingested += 1
             if i < len(batch):
