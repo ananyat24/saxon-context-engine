@@ -6,4 +6,4 @@ pyyaml
 pytest
 fastapi
 uvicorn
-graphiti-core[anthropic,google-geni]>=0.29.3
+graphiti-core[anthropic,google-genai]>=0.29.3

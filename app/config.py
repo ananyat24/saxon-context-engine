@@ -71,6 +71,26 @@ class Settings(BaseSettings):
     small_llm_model: str = "gemini-flash-lite-latest"
     embedding_model: str = "gemini-embedding-001"
 
+    # Which LLM provider build_graphiti() constructs. "gemini" is what every
+    # tenant uses today (see TenantConfig.gemini_api_key); "azure_openai" is an
+    # operator-wide alternative -- one shared enterprise deployment rather than
+    # a key per tenant -- for when Gemini's free-tier rate limit is the
+    # bottleneck rather than per-tenant billing isolation. See
+    # app/graph/graphiti_adapter.py for how the two are wired up.
+    llm_provider: str = "gemini"
+
+    # Azure OpenAI connection details, used only when llm_provider is
+    # "azure_openai". All three are required in that case; get them from the
+    # Azure Portal resource's "Keys and Endpoint" page.
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_api_version: str = "2024-10-21"
+    # Deployment names, not model names -- Azure OpenAI resources are accessed
+    # by whatever name you gave the deployment when you created it, which may
+    # not match the underlying model's name.
+    azure_openai_llm_deployment: str = "gpt-4o-mini"
+    azure_openai_embedding_deployment: str = "text-embedding-3-small"
+
     app_env: str = "development"
     log_level: str = "INFO"
 

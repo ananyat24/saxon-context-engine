@@ -15,14 +15,66 @@ from typing import Any, Optional
 
 from graphiti_core import Graphiti
 from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
+from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
+from graphiti_core.embedder.azure_openai import AzureOpenAIEmbedderClient
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.gemini_client import GeminiClient
+from graphiti_core.llm_client.azure_openai_client import AzureOpenAILLMClient
+from openai import AsyncAzureOpenAI
 
 from app.config import settings
 from app.graph.neo4j_client import Neo4jClient
 
 logger = logging.getLogger(__name__)
+
+
+def _build_gemini_clients(api_key: str):
+    """Every tenant brings their own Gemini key (see app/config.py's TenantConfig),
+    which is why this path takes an api_key argument -- one Graphiti client per
+    tenant, each billed to that tenant's own Gemini account."""
+    llm_client = GeminiClient(
+        config=LLMConfig(api_key=api_key, model=settings.llm_model, small_model=settings.small_llm_model)
+    )
+    embedder = GeminiEmbedder(config=GeminiEmbedderConfig(api_key=api_key, embedding_model=settings.embedding_model))
+    cross_encoder = GeminiRerankerClient(config=LLMConfig(api_key=api_key))
+    return llm_client, embedder, cross_encoder
+
+
+def _build_azure_openai_clients():
+    """Azure OpenAI is an operator-wide resource, not a per-tenant one -- unlike
+    Gemini, there's no separate key per client here, every tenant's Graphiti
+    client is built from the same enterprise Azure deployment. Reach for this
+    when Gemini's free-tier rate limit is the actual bottleneck (see
+    scripts/ingest_samples.py's rate-limit backoff) rather than per-tenant
+    billing isolation, which Azure OpenAI doesn't provide on its own.
+    """
+    missing = [
+        name
+        for name, value in (
+            ("azure_openai_endpoint", settings.azure_openai_endpoint),
+            ("azure_openai_api_key", settings.azure_openai_api_key),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            f"llm_provider is 'azure_openai' but {', '.join(missing)} is not set. "
+            f"See .env.example."
+        )
+
+    azure_client = AsyncAzureOpenAI(
+        azure_endpoint=settings.azure_openai_endpoint,
+        api_key=settings.azure_openai_api_key,
+        api_version=settings.azure_openai_api_version,
+    )
+    llm_client = AzureOpenAILLMClient(
+        azure_client=azure_client,
+        config=LLMConfig(model=settings.azure_openai_llm_deployment, small_model=settings.azure_openai_llm_deployment),
+    )
+    embedder = AzureOpenAIEmbedderClient(azure_client=azure_client, model=settings.azure_openai_embedding_deployment)
+    cross_encoder = OpenAIRerankerClient(client=azure_client, config=LLMConfig(model=settings.azure_openai_llm_deployment))
+    return llm_client, embedder, cross_encoder
 
 
 def build_graphiti(
@@ -31,37 +83,33 @@ def build_graphiti(
     neo4j_password: Optional[str] = None,
     google_api_key: Optional[str] = None,
 ) -> Graphiti:
-    """Build a Graphiti client wired up to Neo4j and Google's Gemini models (used
-    here for entity extraction, embeddings, and reranking search results).
+    """Build a Graphiti client wired up to Neo4j and an LLM provider for entity
+    extraction, embeddings, and reranking search results.
 
-    Every argument is optional and falls back to app/config.py's `settings`, which
-    is populated from the .env file -- pass an argument explicitly only when you
-    need to point at a different database or key than the one in .env (e.g. in tests).
+    Which provider is controlled by settings.llm_provider ("gemini" or
+    "azure_openai"), not by any argument here -- it's an operator-wide choice,
+    not a per-call one. `google_api_key` is only used in "gemini" mode (and is
+    where each tenant's own key comes in, via TenantGraphitiPool); it's ignored
+    entirely in "azure_openai" mode, since that provider is one shared
+    enterprise resource rather than a key per tenant.
+
+    neo4j_uri/user/password fall back to settings regardless of provider --
+    pass them explicitly only to point at a different database than .env (e.g.
+    in tests).
     """
     uri = neo4j_uri or settings.neo4j_uri
     user = neo4j_user or settings.neo4j_user
     password = neo4j_password or settings.neo4j_password
-    api_key = google_api_key or settings.google_api_key
 
-    return Graphiti(
-        uri,
-        user,
-        password,
-        llm_client=GeminiClient(
-            config=LLMConfig(
-                api_key=api_key,
-                model=settings.llm_model,
-                small_model=settings.small_llm_model,
-            )
-        ),
-        embedder=GeminiEmbedder(
-            config=GeminiEmbedderConfig(
-                api_key=api_key,
-                embedding_model=settings.embedding_model,
-            )
-        ),
-        cross_encoder=GeminiRerankerClient(config=LLMConfig(api_key=api_key)),
-    )
+    if settings.llm_provider == "azure_openai":
+        llm_client, embedder, cross_encoder = _build_azure_openai_clients()
+    elif settings.llm_provider == "gemini":
+        api_key = google_api_key or settings.google_api_key
+        llm_client, embedder, cross_encoder = _build_gemini_clients(api_key)
+    else:
+        raise ValueError(f"Unknown llm_provider: {settings.llm_provider!r} (expected 'gemini' or 'azure_openai')")
+
+    return Graphiti(uri, user, password, llm_client=llm_client, embedder=embedder, cross_encoder=cross_encoder)
 
 
 class GraphitiAdapter:

@@ -466,6 +466,14 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
   search later means appending to that list rather than restructuring it.
   Live-data retrieval looks up one entity at a time rather than answering a
   free-text query, so it's left out of that shared interface.
-- **Hosting, once this needs to leave one laptop.** Everything currently
-  runs locally. A phased hosting/cost plan exists internally, not published
-  in this repo.
+- **Hosting, once this needs to leave one laptop.** A `Dockerfile` and
+  `scripts/deploy_azure.sh` (parameterized, no deployment-specific values
+  hardcoded) are ready for Azure Container Apps. Not deployed yet -- it
+  needs a network-reachable Neo4j first, since Container Apps can't reach a
+  Neo4j Desktop instance running on a laptop. A phased hosting/cost plan
+  exists internally, not published in this repo.
+- **Azure OpenAI as an alternative LLM provider.** `LLM_PROVIDER=azure_openai`
+  (see `.env.example`) switches `build_graphiti()` to a shared Azure OpenAI
+  resource instead of per-tenant Gemini keys -- useful when Gemini's
+  free-tier rate limit is the bottleneck rather than per-tenant billing
+  isolation. Wired up, not yet tested against a real Azure OpenAI resource.
