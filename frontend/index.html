@@ -3,20 +3,75 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Saxon AI Context Engine UI</title>
+    <title>Saxon AI Context Engine</title>
+    <link rel="icon" href="/static/assets/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inclusive+Sans:wght@400;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
     <header>
-        <h1>Saxon AI Context Engine</h1>
+        <div class="header-inner">
+            <img src="/static/assets/saxon-logo.webp" alt="Saxon AI" class="logo" />
+            <span class="header-divider"></span>
+            <span class="header-title">Context Engine</span>
+        </div>
+        <div id="healthBadge" class="badge badge-muted">checking&hellip;</div>
     </header>
+
     <main>
-        <section id="status">
-            <h2>API Health Check</h2>
-            <button id="checkBtn">Check API</button>
-            <pre id="result"></pre>
+        <!-- API key: every /graph and /context route is tenant-scoped and needs one.
+             Stored in localStorage only, on this browser, for demo convenience --
+             never sent anywhere but this API's own routes. -->
+        <section class="card" id="authCard">
+            <h2>Tenant API key</h2>
+            <p class="muted">Required for the graph and query panels below. Get one with
+                <code>python scripts/manage_tenants.py list</code>.</p>
+            <div class="row">
+                <input id="apiKey" type="password" placeholder="X-API-Key" autocomplete="off" />
+                <button id="saveKeyBtn" class="btn btn-primary">Use key</button>
+            </div>
+            <div id="authStatus" class="status-line"></div>
+        </section>
+
+        <div class="grid">
+            <!-- Proves the ontology is real: pulls the live merged registry, not a
+                 hardcoded list -- edit a domain YAML and this changes on restart. -->
+            <section class="card">
+                <h2>Ontology</h2>
+                <p class="muted">Entity and relationship types the graph is constrained to
+                    during extraction -- <a href="/api/v1/entities" target="_blank">/api/v1/entities</a></p>
+                <div id="ontologySummary" class="stat-row"></div>
+                <div id="entityTypes" class="pill-group"></div>
+                <details>
+                    <summary>Relationship types</summary>
+                    <div id="relTypes" class="pill-group"></div>
+                </details>
+            </section>
+
+            <!-- Proves the graph has real, tenant-scoped data -- not a mock. -->
+            <section class="card">
+                <h2>Graph</h2>
+                <div id="graphSummary" class="stat-row"></div>
+                <svg id="graphViz" viewBox="0 0 480 380" class="graph-viz"></svg>
+                <div id="graphEmpty" class="muted" style="display:none">
+                    No data for this tenant yet. Run <code>scripts/ingest_samples.py</code>.
+                </div>
+            </section>
+        </div>
+
+        <!-- The actual product: ask a question, get an answer assembled from the
+             graph -- the end-to-end proof, not just "data exists". -->
+        <section class="card">
+            <h2>Ask the context engine</h2>
+            <div class="row">
+                <input id="queryInput" type="text" placeholder="e.g. who manages the Contoso account" />
+                <button id="askBtn" class="btn btn-accent">Ask</button>
+            </div>
+            <pre id="queryResult" class="result-block"></pre>
         </section>
     </main>
+
     <script src="/static/app.js"></script>
 </body>
 </html>
