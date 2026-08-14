@@ -5,6 +5,8 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from app.api import api_router
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
 
@@ -38,7 +40,11 @@ app = FastAPI(
 # Every route under app/api/ becomes reachable at /api/v1/<route>, e.g. the health
 # check in app/api/health.py ends up at /api/v1/health.
 app.include_router(api_router, prefix="/api/v1")
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
+@app.get("/ui", response_class=FileResponse)
+def ui():
+    return FileResponse("frontend/index.html")
 
 @app.get("/")
 def root():

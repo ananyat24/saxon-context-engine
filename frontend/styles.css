@@ -1,0 +1,91 @@
+/* Premium UI styling for Saxon AI Context Engine */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+:root {
+  --bg-gradient: linear-gradient(135deg, #0d0d0d, #1a1a2e);
+  --card-bg: rgba(255, 255, 255, 0.07);
+  --card-border: rgba(255, 255, 255, 0.12);
+  --text-primary: #e0e0e0;
+  --accent: #ff7e5f;
+  --accent2: #feb47b;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg-gradient);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+header {
+  text-align: center;
+  padding: 2rem 0;
+  background: rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+h1 {
+  margin: 0;
+  font-size: 2.5rem;
+  background: linear-gradient(45deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+main {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 2rem;
+}
+
+section#status {
+  width: 100%;
+  max-width: 480px;
+  background: var(--card-bg);
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--card-border);
+  padding: 1.5rem;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  text-align: center;
+}
+
+section#status h2 {
+  margin-top: 0;
+  font-weight: 600;
+  font-size: 1.4rem;
+  margin-bottom: 1rem;
+}
+
+#checkBtn {
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border: none;
+  color: #fff;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#checkBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(255,124,95,0.4);
+}
+
+#result {
+  margin-top: 1rem;
+  background: rgba(0,0,0,0.2);
+  border-radius: 6px;
+  padding: 0.75rem;
+  font-family: monospace;
+  white-space: pre-wrap;
+  text-align: left;
+  min-height: 4rem;
+}
