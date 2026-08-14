@@ -16,15 +16,24 @@
             <span class="header-divider"></span>
             <span class="header-title">Context Engine</span>
         </div>
-        <div id="healthBadge" class="badge badge-muted">checking&hellip;</div>
+        <div class="header-right">
+            <button id="keyBtn" class="btn btn-key">
+                <span id="keyDot" class="key-dot"></span>
+                <span id="keyBtnLabel">API key</span>
+            </button>
+            <div id="healthBadge" class="badge badge-muted">checking&hellip;</div>
+        </div>
     </header>
 
-    <main>
-        <!-- API key: every /graph and /context route is tenant-scoped and needs one.
-             Stored in localStorage only, on this browser, for demo convenience --
-             never sent anywhere but this API's own routes. -->
-        <section class="card" id="authCard">
-            <h2>Tenant API key</h2>
+    <!-- API key popup: every /graph and /context route is tenant-scoped and
+         needs one. Stored in localStorage only, on this browser, for demo
+         convenience -- never sent anywhere but this API's own routes. -->
+    <div id="keyOverlay" class="overlay" hidden>
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Tenant API key</h2>
+                <button id="closeKeyBtn" class="modal-close" aria-label="Close">&times;</button>
+            </div>
             <p class="muted">Required for the graph and query panels below. Get one with
                 <code>python scripts/manage_tenants.py list</code>.</p>
             <div class="row">
@@ -32,8 +41,10 @@
                 <button id="saveKeyBtn" class="btn btn-primary">Use key</button>
             </div>
             <div id="authStatus" class="status-line"></div>
-        </section>
+        </div>
+    </div>
 
+    <main>
         <div class="grid">
             <!-- Proves the ontology is real: pulls the live merged registry, not a
                  hardcoded list -- edit a domain YAML and this changes on restart. -->

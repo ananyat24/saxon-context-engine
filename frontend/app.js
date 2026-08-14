@@ -17,13 +17,48 @@ function authHeaders() {
   return key ? { "X-API-Key": key } : {};
 }
 
-document.getElementById("apiKey").value = getApiKey();
+function updateKeyDot() {
+  const hasKey = !!getApiKey();
+  document.getElementById("keyDot").classList.toggle("set", hasKey);
+  document.getElementById("keyBtnLabel").textContent = hasKey ? "API key set" : "API key";
+}
+
+function openKeyModal() {
+  document.getElementById("apiKey").value = getApiKey();
+  document.getElementById("authStatus").textContent = "";
+  document.getElementById("keyOverlay").hidden = false;
+  document.getElementById("apiKey").focus();
+}
+
+function closeKeyModal() {
+  document.getElementById("keyOverlay").hidden = true;
+}
+
+document.getElementById("keyBtn").addEventListener("click", openKeyModal);
+document.getElementById("closeKeyBtn").addEventListener("click", closeKeyModal);
+// Click on the dimmed backdrop (not the modal card itself) also closes it.
+document.getElementById("keyOverlay").addEventListener("click", (e) => {
+  if (e.target.id === "keyOverlay") closeKeyModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !document.getElementById("keyOverlay").hidden) closeKeyModal();
+});
 
 document.getElementById("saveKeyBtn").addEventListener("click", () => {
   const key = document.getElementById("apiKey").value.trim();
   localStorage.setItem("saxon_api_key", key);
+  updateKeyDot();
+  document.getElementById("authStatus").textContent = key ? "Key saved." : "Key cleared.";
+  document.getElementById("authStatus").className = "status-line ok";
   loadTenantData();
+  if (key) setTimeout(closeKeyModal, 500);
 });
+
+document.getElementById("apiKey").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("saveKeyBtn").click();
+});
+
+updateKeyDot();
 
 // --- Health -------------------------------------------------------------
 async function loadHealth() {
@@ -69,7 +104,7 @@ async function loadGraph() {
     summaryEl.innerHTML = "";
     svg.innerHTML = "";
     emptyEl.style.display = "block";
-    emptyEl.textContent = "Enter an API key above to see this tenant's graph.";
+    emptyEl.textContent = 'Click "API key" in the top right to see this tenant\'s graph.';
     return;
   }
 
@@ -164,7 +199,7 @@ document.getElementById("askBtn").addEventListener("click", async () => {
   const query = document.getElementById("queryInput").value.trim();
   if (!query) return;
   if (!getApiKey()) {
-    resultEl.textContent = "Enter an API key above first.";
+    resultEl.textContent = 'Click "API key" in the top right first.';
     return;
   }
 
