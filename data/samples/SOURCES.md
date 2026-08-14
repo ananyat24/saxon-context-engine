@@ -38,3 +38,16 @@ testing the `legal` ontology domain pack and unstructured document ingestion.
 - **License**: CC BY 4.0 as stated on the project's site — the GitHub repo itself has no LICENSE file, so this rests on that public statement rather than a repo-level grant; see `NOTICE.md`.
 - **What was done**: picked 5 contracts of moderate length with several labeled clauses from the 510 in the full CUADv1.json, and extracted just those contracts' full text plus their non-empty clause annotations.
 - **Full dataset**: same source, `CUADv1.json` (510 contracts, ~13,000 annotations, ~40MB)
+
+## contoso_dw/
+
+A retail data warehouse in classic star-schema shape: sales transactions
+referencing customers, products, and stores. A second, independent business
+dataset from Northwind -- good for testing whether the same entity-resolution
+approach that works on Northwind's orders/customers holds up on a
+differently-shaped source, and for the `sales`/`supply_chain` domain packs.
+
+- **Source**: [Contoso Data Generator V2](https://github.com/sql-bi/Contoso-Data-Generator-V2-Data), The SQLBI Corp (`csv-10k.7z` release asset)
+- **License**: MIT — see `NOTICE.md`. All data is synthetic; no real people.
+- **What was done**: took an evenly-spaced 60-row sample of `sales.csv` (out of ~3,996) across the full date range, then kept only the customers (60 of ~105,000) and products (59 of 2,518) those sales actually reference. `store.csv` (74 rows) kept in full. Left out entirely: `date.csv` (calendar dimension) and `currencyexchange.csv` (daily FX rates) — neither has entities or facts worth extracting.
+- **Full dataset**: same source, other release assets go up to 100M rows in CSV/Parquet/Delta/Power BI formats
