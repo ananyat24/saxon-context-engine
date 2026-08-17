@@ -83,6 +83,10 @@ async function loadOntology() {
       <div class="stat"><span class="num">${data.entity_types.length}</span><span class="label">Entity types</span></div>
       <div class="stat"><span class="num">${data.relationship_types.length}</span><span class="label">Relationship types</span></div>
     `;
+    document.getElementById("ontologyInsight").textContent =
+      `Extraction only recognizes ${data.entity_types.length} kinds of things and ` +
+      `${data.relationship_types.length} kinds of connections between them, so the graph ` +
+      `stays focused on your domain instead of filling up with categories nobody reviewed.`;
     document.getElementById("entityTypes").innerHTML = data.entity_types
       .map((t) => `<span class="pill">${t}</span>`)
       .join("");
@@ -100,9 +104,12 @@ async function loadGraph() {
   const emptyEl = document.getElementById("graphEmpty");
   const svg = document.getElementById("graphViz");
 
+  const insightEl = document.getElementById("graphInsight");
+
   if (!getApiKey()) {
     summaryEl.innerHTML = "";
     svg.innerHTML = "";
+    insightEl.textContent = "";
     emptyEl.style.display = "block";
     emptyEl.textContent = 'Click "API key" in the top right to see this tenant\'s graph.';
     return;
@@ -117,9 +124,18 @@ async function loadGraph() {
 
     if (summaryRes.status === 401) {
       emptyEl.style.display = "block";
-      emptyEl.textContent = "Invalid API key.";
+      emptyEl.textContent = "That key isn't recognized for this API. Double-check it, or ask whoever set up your tenant for a fresh one.";
       summaryEl.innerHTML = "";
       svg.innerHTML = "";
+      insightEl.textContent = "";
+      return;
+    }
+    if (!summaryRes.ok || !nodesRes.ok || !relsRes.ok) {
+      emptyEl.style.display = "block";
+      emptyEl.textContent = "The graph database isn't reachable right now. Check that Neo4j is running, then reload the page.";
+      summaryEl.innerHTML = "";
+      svg.innerHTML = "";
+      insightEl.textContent = "";
       return;
     }
 
@@ -135,13 +151,55 @@ async function loadGraph() {
     if (nodes.length === 0) {
       emptyEl.style.display = "block";
       svg.innerHTML = "";
+      insightEl.textContent = "";
+      document.getElementById("suggestedQuestions").innerHTML = "";
     } else {
       emptyEl.style.display = "none";
       renderGraph(svg, nodes, rels);
+      insightEl.textContent = describeGraph(summary, nodes);
+      renderSuggestedQuestions(nodes);
     }
   } catch (err) {
     summaryEl.textContent = "Could not load graph.";
   }
+}
+
+// Turns the raw counts into a sentence a stakeholder can act on, rather than
+// making them infer what "4 nodes, 6 relationships" means on their own.
+function describeGraph(summary, nodes) {
+  const { node_count, relationship_count, entity_types_present } = summary;
+  const density = node_count > 0 ? (relationship_count / node_count).toFixed(1) : 0;
+  const types = entity_types_present && entity_types_present.length
+    ? entity_types_present.join(", ")
+    : "no recognized types yet";
+  return `This tenant is currently tracking ${node_count} entities (${types}) connected by ` +
+    `${relationship_count} relationships, or about ${density} connections per entity on average. ` +
+    `That's a demo-sized dataset for now; ingesting more source data will grow it.`;
+}
+
+// Turns real node names from this tenant's own graph into example questions,
+// so the "Ask" box isn't a blank prompt asking a stakeholder to guess syntax.
+function renderSuggestedQuestions(nodes) {
+  const container = document.getElementById("suggestedQuestions");
+  const names = nodes.map((n) => n.name).filter(Boolean).slice(0, 3);
+  if (names.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  const questions = [
+    `What do we know about ${names[0]}?`,
+    names[1] ? `How is ${names[0]} connected to ${names[1]}?` : null,
+    names[2] ? `What's changed recently about ${names[2]}?` : null,
+  ].filter(Boolean);
+  container.innerHTML = questions
+    .map((q) => `<button class="chip chip-suggest" type="button">${escapeXml(q)}</button>`)
+    .join("");
+  container.querySelectorAll(".chip-suggest").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.getElementById("queryInput").value = btn.textContent;
+      document.getElementById("askBtn").click();
+    });
+  });
 }
 
 // Minimal dependency-free graph render: places nodes evenly around a circle
@@ -195,15 +253,22 @@ function escapeXml(s) {
 
 // --- Ask the context engine -------------------------------------------------
 document.getElementById("askBtn").addEventListener("click", async () => {
-  const resultEl = document.getElementById("queryResult");
+  const answerEl = document.getElementById("queryAnswer");
+  const factsEl = document.getElementById("queryFacts");
+  const rawWrap = document.getElementById("queryRawWrap");
+  const rawEl = document.getElementById("queryRaw");
   const query = document.getElementById("queryInput").value.trim();
   if (!query) return;
   if (!getApiKey()) {
-    resultEl.textContent = 'Click "API key" in the top right first.';
+    answerEl.textContent = 'Click "API key" in the top right first.';
+    factsEl.innerHTML = "";
+    rawWrap.hidden = true;
     return;
   }
 
-  resultEl.textContent = "Asking…";
+  answerEl.textContent = "Asking…";
+  factsEl.innerHTML = "";
+  rawWrap.hidden = true;
   try {
     const res = await fetch(`${API}/context/query`, {
       method: "POST",
@@ -211,15 +276,50 @@ document.getElementById("askBtn").addEventListener("click", async () => {
       body: JSON.stringify({ query }),
     });
     if (res.status === 401) {
-      resultEl.textContent = "Invalid API key.";
+      answerEl.textContent = "That key isn't recognized for this API. Double-check it, or ask whoever set up your tenant for a fresh one.";
+      return;
+    }
+    if (!res.ok) {
+      answerEl.textContent = "The context engine hit an error answering that. Check that Neo4j is running, then try again.";
       return;
     }
     const data = await res.json();
-    resultEl.textContent = data.metadata?.summary || JSON.stringify(data, null, 2);
+    const summary = data.metadata?.summary;
+    const facts = data.metadata?.facts || [];
+
+    answerEl.textContent = summary && summary !== "No matching graph context found."
+      ? summary
+      : "Nothing in this tenant's graph matches that yet. Try a broader question, or ingest more data first.";
+
+    renderFacts(factsEl, facts);
+
+    rawEl.textContent = JSON.stringify(data, null, 2);
+    rawWrap.hidden = false;
   } catch (err) {
-    resultEl.textContent = `Error: ${err.message}`;
+    answerEl.textContent = `Error: ${err.message}`;
   }
 });
+
+// Every fact carries whether it's still true or was superseded -- surfacing
+// that plainly is the actual proof this is a temporal graph, not a lookup table.
+function renderFacts(container, facts) {
+  if (!facts.length) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = `<p class="fact-list-label">Facts this answer draws on:</p>` + facts
+    .map((f) => {
+      const current = f.is_valid !== false;
+      const badge = current
+        ? `<span class="fact-badge fact-badge-current">current</span>`
+        : `<span class="fact-badge fact-badge-superseded">superseded</span>`;
+      return `<div class="fact-card ${current ? "" : "fact-card-superseded"}">
+        <span class="fact-text">${escapeXml(f.fact || "")}</span>
+        ${badge}
+      </div>`;
+    })
+    .join("");
+}
 
 document.getElementById("queryInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("askBtn").click();

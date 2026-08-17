@@ -45,14 +45,23 @@
     </div>
 
     <main>
+        <p class="intro">
+            This page shows a live view of one tenant's knowledge graph, not a mock.
+            The <strong>Ontology</strong> panel shows what the graph is allowed to
+            extract, the <strong>Graph</strong> panel shows what it actually has so
+            far, and <strong>Ask</strong> lets you ask it a question the way you'd
+            ask a teammate, with the answer traced back to real facts.
+        </p>
         <div class="grid">
             <!-- Proves the ontology is real: pulls the live merged registry, not a
                  hardcoded list -- edit a domain YAML and this changes on restart. -->
             <section class="card">
                 <h2>Ontology</h2>
-                <p class="muted">Entity and relationship types the graph is constrained to
-                    during extraction -- <a href="/api/v1/entities" target="_blank">/api/v1/entities</a></p>
+                <p class="muted">These are the entity and relationship types that extraction is constrained to.
+                    Change them in a domain YAML file and they'll update here on restart, no code change needed.
+                    <a href="/api/v1/entities" target="_blank">/api/v1/entities</a></p>
                 <div id="ontologySummary" class="stat-row"></div>
+                <p id="ontologyInsight" class="insight"></p>
                 <div id="entityTypes" class="pill-group"></div>
                 <details>
                     <summary>Relationship types</summary>
@@ -63,10 +72,13 @@
             <!-- Proves the graph has real, tenant-scoped data -- not a mock. -->
             <section class="card">
                 <h2>Graph</h2>
+                <p class="muted">What's actually been extracted and stored for this tenant, scoped so
+                    no other tenant's data can appear here.</p>
                 <div id="graphSummary" class="stat-row"></div>
+                <p id="graphInsight" class="insight"></p>
                 <svg id="graphViz" viewBox="0 0 480 380" class="graph-viz"></svg>
                 <div id="graphEmpty" class="muted" style="display:none">
-                    No data for this tenant yet. Run <code>scripts/ingest_samples.py</code>.
+                    No data for this tenant yet. Run <code>scripts/ingest_samples.py</code> to load a sample dataset.
                 </div>
             </section>
         </div>
@@ -75,11 +87,20 @@
              graph -- the end-to-end proof, not just "data exists". -->
         <section class="card">
             <h2>Ask the context engine</h2>
+            <p class="muted">Ask in plain English. Every answer is built from facts the graph
+                actually holds, and it'll tell you whether each one is still current or has
+                since been superseded, since this is a temporal graph rather than a static snapshot.</p>
+            <div id="suggestedQuestions" class="chip-row"></div>
             <div class="row">
                 <input id="queryInput" type="text" placeholder="e.g. who manages the Contoso account" />
                 <button id="askBtn" class="btn btn-accent">Ask</button>
             </div>
-            <pre id="queryResult" class="result-block"></pre>
+            <div id="queryAnswer" class="result-block"></div>
+            <div id="queryFacts" class="fact-list"></div>
+            <details id="queryRawWrap" class="raw-details" hidden>
+                <summary>Raw response</summary>
+                <pre id="queryRaw" class="result-block"></pre>
+            </details>
         </section>
     </main>
 

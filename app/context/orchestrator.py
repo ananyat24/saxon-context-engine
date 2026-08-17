@@ -6,9 +6,10 @@
 # semantic search later is a one-line change here -- append a SemanticRetriever
 # to the list -- rather than a restructure of this class.
 #
-# Note: this only fills in ContextPacket.metadata with a plain-text summary, not
-# the packet's structured `facts` list -- turning retriever results into proper
-# Fact model instances is a follow-up step, not yet implemented.
+# Note: this fills in ContextPacket.metadata with a plain-text summary and the
+# raw per-fact records (including temporal validity), but not the packet's
+# structured `facts` list -- turning retriever results into proper Fact model
+# instances is a follow-up step, not yet implemented.
 import logging
 from typing import List, Optional
 from graphiti_core import Graphiti
@@ -40,5 +41,6 @@ class ContextOrchestrator:
             metadata={
                 "group_ids": group_ids,
                 "summary": summary_text,
+                "facts": raw_facts,
             },
         )
