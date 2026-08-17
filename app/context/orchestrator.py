@@ -11,6 +11,7 @@
 # structured `facts` list -- turning retriever results into proper Fact model
 # instances is a follow-up step, not yet implemented.
 import logging
+from datetime import datetime
 from typing import List, Optional
 from graphiti_core import Graphiti
 from app.models.context_packet import ContextPacket
@@ -18,6 +19,59 @@ from app.retrieval.base import TextRetriever
 from app.retrieval.graph_retriever import GraphRetriever
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_iso(timestamp) -> Optional[datetime]:
+    """Accepts either an ISO string or a neo4j.time.DateTime -- valid_at/invalid_at
+    arrive as the latter straight out of the driver, and only look like strings
+    once FastAPI serializes the HTTP response, so this has to handle both."""
+    if timestamp is None:
+        return None
+    if isinstance(timestamp, str):
+        try:
+            return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    to_native = getattr(timestamp, "to_native", None)
+    if callable(to_native):
+        return to_native()
+    return timestamp if isinstance(timestamp, datetime) else None
+
+
+def _find_transitions(facts: list[dict]) -> tuple[list[tuple[dict, dict]], set[int]]:
+    """Pairs an invalidated fact with whatever fact replaced it, so the summary can
+    describe the change instead of just stating the latest value and burying the
+    history in the raw facts list.
+
+    Graphiti sets a fact's invalid_at to the valid_at of whatever new fact
+    contradicted it, so matching on (source_node_uuid, timestamp) finds real
+    replacements rather than unrelated facts that happen to share a source. When
+    more than one old fact matches the same replacement (extraction sometimes
+    produces several overlapping edges for one real-world change), this just
+    keeps the first one to avoid repeating near-duplicate transition sentences.
+    """
+    by_source_and_valid_at: dict[tuple[str, str], dict] = {}
+    for f in facts:
+        if f.get("is_valid") and f.get("valid_at") and f.get("source_node_uuid"):
+            by_source_and_valid_at.setdefault((f["source_node_uuid"], f["valid_at"]), f)
+
+    transitions_by_replacement: dict[int, tuple[dict, dict]] = {}
+    for f in facts:
+        if f.get("is_valid") or not f.get("invalid_at") or not f.get("source_node_uuid"):
+            continue
+        replacement = by_source_and_valid_at.get((f["source_node_uuid"], f["invalid_at"]))
+        if replacement is not None:
+            transitions_by_replacement.setdefault(id(replacement), (f, replacement))
+
+    transitions = list(transitions_by_replacement.values())
+    replaced_fact_ids = {id(new) for _old, new in transitions}
+    return transitions, replaced_fact_ids
+
+
+def _describe_transition(old: dict, new: dict) -> str:
+    changed_at = _parse_iso(new.get("valid_at"))
+    when = f" on {changed_at:%B} {changed_at.day}, {changed_at.year}" if changed_at else ""
+    return f'This changed{when}: it used to read "{old["fact"]}" and now reads "{new["fact"]}".'
 
 
 class ContextOrchestrator:
@@ -33,8 +87,16 @@ class ContextOrchestrator:
         for retriever in self.retrievers:
             raw_facts.extend(await retriever.retrieve(query, group_ids=group_ids))
 
-        fact_statements = [f["fact"] for f in raw_facts if f.get("is_valid", True)]
-        summary_text = "\n".join(fact_statements) if fact_statements else "No matching graph context found."
+        transitions, replaced_fact_ids = _find_transitions(raw_facts)
+        transition_lines = [_describe_transition(old, new) for old, new in transitions]
+        plain_lines = [
+            f["fact"]
+            for f in raw_facts
+            if f.get("is_valid", True) and id(f) not in replaced_fact_ids
+        ]
+
+        summary_lines = transition_lines + plain_lines
+        summary_text = "\n".join(summary_lines) if summary_lines else "No matching graph context found."
 
         return ContextPacket(
             query=query,

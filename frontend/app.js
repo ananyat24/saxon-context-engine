@@ -4,7 +4,7 @@
 
 const API = "/api/v1";
 
-// --- API key handling ---------------------------------------------------
+// --- Access key handling ---------------------------------------------------
 // Kept in this browser's localStorage only, for demo convenience across
 // reloads. Never sent anywhere except this API's own routes via the
 // X-API-Key header.
@@ -20,7 +20,7 @@ function authHeaders() {
 function updateKeyDot() {
   const hasKey = !!getApiKey();
   document.getElementById("keyDot").classList.toggle("set", hasKey);
-  document.getElementById("keyBtnLabel").textContent = hasKey ? "API key set" : "API key";
+  document.getElementById("keyBtnLabel").textContent = hasKey ? "Key set" : "Access key";
 }
 
 function openKeyModal() {
@@ -66,10 +66,10 @@ async function loadHealth() {
   try {
     const res = await fetch(`${API}/health`);
     const data = await res.json();
-    badge.textContent = data.database_connected ? "database connected" : "database unreachable";
+    badge.textContent = data.database_connected ? "connected" : "not connected";
     badge.className = "badge " + (data.database_connected ? "badge-ok" : "badge-bad");
   } catch (err) {
-    badge.textContent = "API unreachable";
+    badge.textContent = "not reachable";
     badge.className = "badge badge-bad";
   }
 }
@@ -84,9 +84,9 @@ async function loadOntology() {
       <div class="stat"><span class="num">${data.relationship_types.length}</span><span class="label">Relationship types</span></div>
     `;
     document.getElementById("ontologyInsight").textContent =
-      `Extraction only recognizes ${data.entity_types.length} kinds of things and ` +
-      `${data.relationship_types.length} kinds of connections between them, so the graph ` +
-      `stays focused on your domain instead of filling up with categories nobody reviewed.`;
+      `Right now it's watching for ${data.entity_types.length} kinds of things and ` +
+      `${data.relationship_types.length} kinds of relationships between them, so it stays ` +
+      `focused on what matters to your business instead of picking up anything and everything.`;
     document.getElementById("entityTypes").innerHTML = data.entity_types
       .map((t) => `<span class="pill">${t}</span>`)
       .join("");
@@ -111,7 +111,7 @@ async function loadGraph() {
     svg.innerHTML = "";
     insightEl.textContent = "";
     emptyEl.style.display = "block";
-    emptyEl.textContent = 'Click "API key" in the top right to see this tenant\'s graph.';
+    emptyEl.textContent = 'Click "Access key" in the top right to see your information.';
     return;
   }
 
@@ -124,7 +124,7 @@ async function loadGraph() {
 
     if (summaryRes.status === 401) {
       emptyEl.style.display = "block";
-      emptyEl.textContent = "That key isn't recognized for this API. Double-check it, or ask whoever set up your tenant for a fresh one.";
+      emptyEl.textContent = "That key doesn't match anything on file. Double-check it, or ask whoever set this up for you for the right one.";
       summaryEl.innerHTML = "";
       svg.innerHTML = "";
       insightEl.textContent = "";
@@ -132,7 +132,7 @@ async function loadGraph() {
     }
     if (!summaryRes.ok || !nodesRes.ok || !relsRes.ok) {
       emptyEl.style.display = "block";
-      emptyEl.textContent = "The graph database isn't reachable right now. Check that Neo4j is running, then reload the page.";
+      emptyEl.textContent = "Can't reach the system right now. Try reloading the page in a moment.";
       summaryEl.innerHTML = "";
       svg.innerHTML = "";
       insightEl.textContent = "";
@@ -167,14 +167,11 @@ async function loadGraph() {
 // Turns the raw counts into a sentence a stakeholder can act on, rather than
 // making them infer what "4 nodes, 6 relationships" means on their own.
 function describeGraph(summary, nodes) {
-  const { node_count, relationship_count, entity_types_present } = summary;
+  const { node_count, relationship_count } = summary;
   const density = node_count > 0 ? (relationship_count / node_count).toFixed(1) : 0;
-  const types = entity_types_present && entity_types_present.length
-    ? entity_types_present.join(", ")
-    : "no recognized types yet";
-  return `This tenant is currently tracking ${node_count} entities (${types}) connected by ` +
-    `${relationship_count} relationships, or about ${density} connections per entity on average. ` +
-    `That's a demo-sized dataset for now; ingesting more source data will grow it.`;
+  return `So far it has found ${node_count} things and ${relationship_count} connections ` +
+    `between them, or about ${density} connections per thing on average. This is a small ` +
+    `starting set, and it'll grow as more information is added.`;
 }
 
 // Turns real node names from this tenant's own graph into example questions,
@@ -219,15 +216,40 @@ function renderGraph(svg, nodes, rels) {
 
   let svgContent = "";
 
+  // Two things can be connected more than once (e.g. an old and a new answer
+  // to "who manages this account"), sometimes in opposite directions (A
+  // manages B vs. B manages A). Grouping by the pair and spreading each one
+  // out to its own curve keeps their labels from landing on top of each
+  // other. The perpendicular used to space them out has to be computed once
+  // per pair rather than per relationship -- otherwise a reversed edge flips
+  // its own offset's sign and lands right back on top of a different edge in
+  // the same group instead of getting its own spot.
+  const groups = {};
   rels.forEach((rel) => {
-    const a = positions[rel.source];
-    const b = positions[rel.target];
-    if (!a || !b) return; // relationship points at a node outside the fetched limit
+    if (!positions[rel.source] || !positions[rel.target]) return;
+    const key = [rel.source, rel.target].sort().join("|");
+    (groups[key] = groups[key] || []).push(rel);
+  });
+
+  Object.keys(groups).forEach((key) => {
+    const group = groups[key];
+    const [nameA, nameB] = key.split("|");
+    const a = positions[nameA], b = positions[nameB];
     const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
-    svgContent += `<line class="gv-edge" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}">
-      <title>${escapeXml(rel.fact || "")}</title>
-    </line>`;
-    svgContent += `<text class="gv-edge-label" x="${midX}" y="${midY}" text-anchor="middle">${escapeXml(rel.type)}</text>`;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+
+    group.forEach((rel, i) => {
+      const spread = (i - (group.length - 1) / 2) * 24;
+      const ctrlX = midX + nx * spread * 2, ctrlY = midY + ny * spread * 2;
+      const labelX = midX + nx * spread, labelY = midY + ny * spread;
+
+      svgContent += `<path class="gv-edge" d="M ${a.x} ${a.y} Q ${ctrlX} ${ctrlY} ${b.x} ${b.y}" fill="none">
+        <title>${escapeXml(rel.fact || "")}</title>
+      </path>`;
+      svgContent += `<text class="gv-edge-label" x="${labelX}" y="${labelY}" text-anchor="middle">${escapeXml(rel.type)}</text>`;
+    });
   });
 
   nodes.forEach((n) => {
@@ -251,7 +273,7 @@ function escapeXml(s) {
   }[c]));
 }
 
-// --- Ask the context engine -------------------------------------------------
+// --- Ask a question -------------------------------------------------
 document.getElementById("askBtn").addEventListener("click", async () => {
   const answerEl = document.getElementById("queryAnswer");
   const factsEl = document.getElementById("queryFacts");
@@ -260,13 +282,13 @@ document.getElementById("askBtn").addEventListener("click", async () => {
   const query = document.getElementById("queryInput").value.trim();
   if (!query) return;
   if (!getApiKey()) {
-    answerEl.textContent = 'Click "API key" in the top right first.';
+    answerEl.textContent = 'Click "Access key" in the top right first.';
     factsEl.innerHTML = "";
     rawWrap.hidden = true;
     return;
   }
 
-  answerEl.textContent = "Asking…";
+  answerEl.textContent = "Thinking…";
   factsEl.innerHTML = "";
   rawWrap.hidden = true;
   try {
@@ -276,11 +298,11 @@ document.getElementById("askBtn").addEventListener("click", async () => {
       body: JSON.stringify({ query }),
     });
     if (res.status === 401) {
-      answerEl.textContent = "That key isn't recognized for this API. Double-check it, or ask whoever set up your tenant for a fresh one.";
+      answerEl.textContent = "That key doesn't match anything on file. Double-check it, or ask whoever set this up for you for the right one.";
       return;
     }
     if (!res.ok) {
-      answerEl.textContent = "The context engine hit an error answering that. Check that Neo4j is running, then try again.";
+      answerEl.textContent = "Something went wrong answering that. Try again in a moment.";
       return;
     }
     const data = await res.json();
@@ -289,7 +311,7 @@ document.getElementById("askBtn").addEventListener("click", async () => {
 
     answerEl.textContent = summary && summary !== "No matching graph context found."
       ? summary
-      : "Nothing in this tenant's graph matches that yet. Try a broader question, or ingest more data first.";
+      : "Nothing on file matches that yet. Try asking a broader question, or add more information first.";
 
     renderFacts(factsEl, facts);
 
@@ -300,25 +322,33 @@ document.getElementById("askBtn").addEventListener("click", async () => {
   }
 });
 
-// Every fact carries whether it's still true or was superseded -- surfacing
-// that plainly is the actual proof this is a temporal graph, not a lookup table.
+// Every fact carries whether it's still true or was superseded by something
+// newer -- surfacing that plainly is the actual proof this system tracks
+// history instead of just overwriting old information. Current facts are
+// shown first since they're what most people reading this actually want to
+// see; the superseded ones are still here for anyone who wants the history.
 function renderFacts(container, facts) {
   if (!facts.length) {
     container.innerHTML = "";
     return;
   }
-  container.innerHTML = `<p class="fact-list-label">Facts this answer draws on:</p>` + facts
+  const sorted = [...facts].sort((a, b) => (a.is_valid === false ? 1 : 0) - (b.is_valid === false ? 1 : 0));
+  const hasSuperseded = sorted.some((f) => f.is_valid === false);
+  const note = hasSuperseded
+    ? `<p class="fact-note">* "Superseded" means this used to be true, but something more recent has replaced it. It's kept here so nothing gets lost.</p>`
+    : "";
+  container.innerHTML = `<p class="fact-list-label">Where this answer comes from:</p>` + sorted
     .map((f) => {
       const current = f.is_valid !== false;
       const badge = current
         ? `<span class="fact-badge fact-badge-current">current</span>`
-        : `<span class="fact-badge fact-badge-superseded">superseded</span>`;
+        : `<span class="fact-badge fact-badge-superseded">superseded*</span>`;
       return `<div class="fact-card ${current ? "" : "fact-card-superseded"}">
         <span class="fact-text">${escapeXml(f.fact || "")}</span>
         ${badge}
       </div>`;
     })
-    .join("");
+    .join("") + note;
 }
 
 document.getElementById("queryInput").addEventListener("keydown", (e) => {

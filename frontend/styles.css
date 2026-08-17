@@ -300,6 +300,7 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
 }
 .fact-badge-current { background: var(--status-normal); color: #fff; }
 .fact-badge-superseded { background: var(--status-critical); color: #fff; }
+.fact-note { margin: 0.5rem 0 0; font-size: 0.78rem; color: var(--text-muted); }
 
 .raw-details { margin-top: 0.75rem; }
 .raw-details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }

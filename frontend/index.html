@@ -19,25 +19,25 @@
         <div class="header-right">
             <button id="keyBtn" class="btn btn-key">
                 <span id="keyDot" class="key-dot"></span>
-                <span id="keyBtnLabel">API key</span>
+                <span id="keyBtnLabel">Access key</span>
             </button>
             <div id="healthBadge" class="badge badge-muted">checking&hellip;</div>
         </div>
     </header>
 
-    <!-- API key popup: every /graph and /context route is tenant-scoped and
-         needs one. Stored in localStorage only, on this browser, for demo
-         convenience -- never sent anywhere but this API's own routes. -->
+    <!-- Access key popup: every /graph and /context route needs one to know
+         whose data to show. Stored in localStorage only, on this browser, for
+         demo convenience -- never sent anywhere but this API's own routes. -->
     <div id="keyOverlay" class="overlay" hidden>
         <div class="modal">
             <div class="modal-header">
-                <h2>Tenant API key</h2>
+                <h2>Access key</h2>
                 <button id="closeKeyBtn" class="modal-close" aria-label="Close">&times;</button>
             </div>
-            <p class="muted">Required for the graph and query panels below. Get one with
-                <code>python scripts/manage_tenants.py list</code>.</p>
+            <p class="muted">This unlocks the sections below so you can see your company's
+                information. If you don't have one, ask whoever set this up for you.</p>
             <div class="row">
-                <input id="apiKey" type="password" placeholder="X-API-Key" autocomplete="off" />
+                <input id="apiKey" type="password" placeholder="Paste your access key" autocomplete="off" />
                 <button id="saveKeyBtn" class="btn btn-primary">Use key</button>
             </div>
             <div id="authStatus" class="status-line"></div>
@@ -46,20 +46,18 @@
 
     <main>
         <p class="intro">
-            This page shows a live view of one tenant's knowledge graph, not a mock.
-            The <strong>Ontology</strong> panel shows what the graph is allowed to
-            extract, the <strong>Graph</strong> panel shows what it actually has so
-            far, and <strong>Ask</strong> lets you ask it a question the way you'd
-            ask a teammate, with the answer traced back to real facts.
+            This page shows what the system has learned from your company's information.
+            Below, you can see what it looks for, what it's found so far, and you can
+            ask it a question in plain English and see exactly where the answer comes from.
         </p>
         <div class="grid">
-            <!-- Proves the ontology is real: pulls the live merged registry, not a
-                 hardcoded list -- edit a domain YAML and this changes on restart. -->
             <section class="card">
-                <h2>Ontology</h2>
-                <p class="muted">These are the entity and relationship types that extraction is constrained to.
-                    Change them in a domain YAML file and they'll update here on restart, no code change needed.
-                    <a href="/api/v1/entities" target="_blank">/api/v1/entities</a></p>
+                <h2>What it looks for</h2>
+                <p class="muted">These are the kinds of people, companies, and things the system
+                    is set up to notice, and the kinds of relationships between them it pays
+                    attention to, like who manages which account, or which company ordered
+                    which product. Your team can add or change these at any time to match how
+                    your business actually works.</p>
                 <div id="ontologySummary" class="stat-row"></div>
                 <p id="ontologyInsight" class="insight"></p>
                 <div id="entityTypes" class="pill-group"></div>
@@ -69,27 +67,24 @@
                 </details>
             </section>
 
-            <!-- Proves the graph has real, tenant-scoped data -- not a mock. -->
             <section class="card">
-                <h2>Graph</h2>
-                <p class="muted">What's actually been extracted and stored for this tenant, scoped so
-                    no other tenant's data can appear here.</p>
+                <h2>What it's found so far</h2>
+                <p class="muted">This is the real information the system has gathered so far for
+                    your company only. Nobody else's information can show up here.</p>
                 <div id="graphSummary" class="stat-row"></div>
                 <p id="graphInsight" class="insight"></p>
                 <svg id="graphViz" viewBox="0 0 480 380" class="graph-viz"></svg>
                 <div id="graphEmpty" class="muted" style="display:none">
-                    No data for this tenant yet. Run <code>scripts/ingest_samples.py</code> to load a sample dataset.
+                    Nothing stored yet. Ask your team to load a sample dataset to see this in action.
                 </div>
             </section>
         </div>
 
-        <!-- The actual product: ask a question, get an answer assembled from the
-             graph -- the end-to-end proof, not just "data exists". -->
         <section class="card">
-            <h2>Ask the context engine</h2>
-            <p class="muted">Ask in plain English. Every answer is built from facts the graph
-                actually holds, and it'll tell you whether each one is still current or has
-                since been superseded, since this is a temporal graph rather than a static snapshot.</p>
+            <h2>Ask a question</h2>
+            <p class="muted">Type a question the way you'd ask a coworker. The answer comes only
+                from real information the system has on file, and if something has changed
+                recently, it'll tell you that too instead of only giving you the latest answer.</p>
             <div id="suggestedQuestions" class="chip-row"></div>
             <div class="row">
                 <input id="queryInput" type="text" placeholder="e.g. who manages the Contoso account" />
@@ -98,7 +93,7 @@
             <div id="queryAnswer" class="result-block"></div>
             <div id="queryFacts" class="fact-list"></div>
             <details id="queryRawWrap" class="raw-details" hidden>
-                <summary>Raw response</summary>
+                <summary>Technical details</summary>
                 <pre id="queryRaw" class="result-block"></pre>
             </details>
         </section>
