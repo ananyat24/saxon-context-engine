@@ -114,15 +114,36 @@ def _visible_user_ids_clause() -> str:
     """
 
 
+def _visible_entities_clause() -> str:
+    """Builds on _visible_user_ids_clause(): expands visible_owner_ids outward
+    to the entities they own via an indexed User lookup + relationship
+    traversal, rather than matching every :Entity in the knowledge base and
+    checking its owner against the visible-user list.
+
+    That second shape is what actually failed to scale under
+    scripts/load_test_query_scale.py at 100k entities (4.2s for a query the
+    module's own docstring claims is entity-count-independent): it touches
+    every entity in the group no matter how small the visible-user set is,
+    because the Entity side -- not the User side -- is where the match
+    starts. Starting from `visible_owner_ids` (bounded by org size) and
+    traversing outward via the existing ASSIGNED_TO edges instead costs
+    proportional to what those users actually own, which is what the
+    scaling claim requires. Binds `n`, one row per visible entity.
+    """
+    return (
+        _visible_user_ids_clause()
+        + """
+        UNWIND visible_owner_ids AS owner_id
+        MATCH (n:Entity {group_id: $group_id})-[:ASSIGNED_TO]->(:User {group_id: $group_id, id: owner_id})
+        WITH DISTINCT n
+    """
+    )
+
+
 def get_visible_node_count(group_id: str, user_id: str, repo: Optional[GraphRepository] = None) -> int:
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
-        _visible_user_ids_clause()
-        + """
-        MATCH (n:Entity {group_id: $group_id})-[:ASSIGNED_TO]->(owner:User)
-        WHERE owner.id IN visible_owner_ids
-        RETURN count(DISTINCT n) AS c
-        """,
+        _visible_entities_clause() + "RETURN count(n) AS c",
         {"group_id": group_id, "user_id": user_id},
     )
     return rows[0]["c"]
@@ -131,12 +152,12 @@ def get_visible_node_count(group_id: str, user_id: str, repo: Optional[GraphRepo
 def get_visible_relationship_count(group_id: str, user_id: str, repo: Optional[GraphRepository] = None) -> int:
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
-        _visible_user_ids_clause()
+        _visible_entities_clause()
         + """
-        MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id})
-        WHERE EXISTS { MATCH (a)-[:ASSIGNED_TO]->(oa:User) WHERE oa.id IN visible_owner_ids }
-           OR EXISTS { MATCH (b)-[:ASSIGNED_TO]->(ob:User) WHERE ob.id IN visible_owner_ids }
-        RETURN count(r) AS c
+        WITH collect(n.uuid) AS visible_entity_uuids
+        UNWIND visible_entity_uuids AS uuid
+        MATCH (n:Entity {group_id: $group_id, uuid: uuid})-[r:RELATES_TO]-(:Entity {group_id: $group_id})
+        RETURN count(DISTINCT r) AS c
         """,
         {"group_id": group_id, "user_id": user_id},
     )
@@ -146,12 +167,7 @@ def get_visible_relationship_count(group_id: str, user_id: str, repo: Optional[G
 def get_visible_entity_types(group_id: str, user_id: str, repo: Optional[GraphRepository] = None) -> list[list[str]]:
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
-        _visible_user_ids_clause()
-        + """
-        MATCH (n:Entity {group_id: $group_id})-[:ASSIGNED_TO]->(owner:User)
-        WHERE owner.id IN visible_owner_ids
-        RETURN DISTINCT labels(n) AS labels
-        """,
+        _visible_entities_clause() + "RETURN DISTINCT labels(n) AS labels",
         {"group_id": group_id, "user_id": user_id},
     )
     return [row["labels"] for row in rows]
@@ -162,11 +178,9 @@ def get_visible_nodes(
 ) -> list[dict]:
     repo = repo or GraphRepository()
     return repo.execute_cypher(
-        _visible_user_ids_clause()
+        _visible_entities_clause()
         + """
-        MATCH (n:Entity {group_id: $group_id})-[:ASSIGNED_TO]->(owner:User)
-        WHERE owner.id IN visible_owner_ids
-        RETURN DISTINCT n.uuid AS id, n.name AS name, labels(n) AS labels, n.summary AS summary, n.created_at AS created_at
+        RETURN n.uuid AS id, n.name AS name, labels(n) AS labels, n.summary AS summary, n.created_at AS created_at
         ORDER BY n.created_at DESC
         LIMIT $limit
         """,
@@ -179,12 +193,12 @@ def get_visible_relationships(
 ) -> list[dict]:
     repo = repo or GraphRepository()
     return repo.execute_cypher(
-        _visible_user_ids_clause()
+        _visible_entities_clause()
         + """
-        MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id})
-        WHERE EXISTS { MATCH (a)-[:ASSIGNED_TO]->(oa:User) WHERE oa.id IN visible_owner_ids }
-           OR EXISTS { MATCH (b)-[:ASSIGNED_TO]->(ob:User) WHERE ob.id IN visible_owner_ids }
-        RETURN a.name AS source, r.name AS type, b.name AS target, r.fact AS fact, r.created_at AS created_at
+        WITH collect(n.uuid) AS visible_entity_uuids
+        UNWIND visible_entity_uuids AS uuid
+        MATCH (a:Entity {group_id: $group_id, uuid: uuid})-[r:RELATES_TO]-(b:Entity {group_id: $group_id})
+        RETURN DISTINCT a.name AS source, r.name AS type, b.name AS target, r.fact AS fact, r.created_at AS created_at
         ORDER BY r.created_at DESC
         LIMIT $limit
         """,
@@ -204,12 +218,7 @@ def get_visible_entity_uuids(group_id: str, user_id: str, repo: Optional[GraphRe
     """
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
-        _visible_user_ids_clause()
-        + """
-        MATCH (n:Entity {group_id: $group_id})-[:ASSIGNED_TO]->(owner:User)
-        WHERE owner.id IN visible_owner_ids
-        RETURN DISTINCT n.uuid AS id
-        """,
+        _visible_entities_clause() + "RETURN n.uuid AS id",
         {"group_id": group_id, "user_id": user_id},
     )
     return {row["id"] for row in rows}

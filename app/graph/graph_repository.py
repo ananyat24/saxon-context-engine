@@ -233,12 +233,22 @@ class GraphRepository:
 
         if len(resolved_entities) == 1:
             # A single named entity resolved -- use its own edges directly
-            # (precise by construction) plus its summary as a single,
-            # already-consolidated lead line. Also skips a paid search call
-            # we'd otherwise throw away.
+            # (precise by construction). Also skips a paid search call we'd
+            # otherwise throw away.
             resolved = resolved_entities[0]
             facts = self._entity_own_facts(resolved["uuid"], visible_uuids)
-            if resolved.get("summary"):
+            if not facts and resolved.get("summary"):
+                # Only fall back to the entity's own `summary` property when it
+                # has no edges at all (e.g. an entity extracted with rich
+                # attributes but no relationships -- see the "Contoso Store
+                # Washington DC" case this was built for). When edges DO exist,
+                # summary must NOT be used: Graphiti's node summary is a running
+                # accumulation of every fact ever seen about the entity, with no
+                # temporal awareness -- for "Contoso Ltd", it still lists "Sarah
+                # Chen manages the account" verbatim even after Marcus Lee took
+                # over. Showing that as a lead line reintroduces exactly the
+                # inaccurate, already-superseded info the orchestrator's
+                # transition/is_valid handling exists to filter out.
                 facts.insert(0, {
                     "fact": resolved["summary"],
                     "source_node_uuid": resolved["uuid"],

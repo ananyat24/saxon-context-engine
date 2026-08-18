@@ -8,7 +8,7 @@
 # Routes also accept an optional ?as_user=, which further scopes results to
 # what that person can see in their org hierarchy -- see
 # app/graph/authorization.py for how that's enforced and why it scales.
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.config import TenantConfig
 from app.graph import authorization
@@ -29,25 +29,29 @@ def list_knowledge_bases(tenant: TenantConfig = Depends(require_tenant)):
 
 
 @router.get("/users")
-def list_users(knowledge_base: str | None = None, tenant: TenantConfig = Depends(require_tenant)):
+def list_users(request: Request, knowledge_base: str | None = None, tenant: TenantConfig = Depends(require_tenant)):
     """Every user in the selected knowledge base's org chart, with manager_id
     so a client can render it as a hierarchy rather than a flat list. Empty
     for knowledge bases that don't have role data seeded yet."""
     group_id = resolve_knowledge_base(tenant, knowledge_base)
-    return authorization.list_users(group_id)
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    return authorization.list_users(group_id, repo=repo)
 
 
 @router.get("/summary")
 def get_summary(
-    knowledge_base: str | None = None, as_user: str | None = None, tenant: TenantConfig = Depends(require_tenant)
+    request: Request,
+    knowledge_base: str | None = None,
+    as_user: str | None = None,
+    tenant: TenantConfig = Depends(require_tenant),
 ):
     """Node/relationship counts and which entity types are actually present
     for the selected knowledge base -- a quick "is there anything in here, and
     what kind of thing is it" view. Scoped further to as_user's visibility
     when given."""
     group_id = resolve_knowledge_base(tenant, knowledge_base)
-    user_id = authorization.resolve_as_user(group_id, as_user)
-    repo = GraphRepository()
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    user_id = authorization.resolve_as_user(group_id, as_user, repo=repo)
 
     if user_id is not None:
         node_count = authorization.get_visible_node_count(group_id, user_id, repo=repo)
@@ -82,6 +86,7 @@ def get_summary(
 
 @router.get("/nodes")
 def get_nodes(
+    request: Request,
     limit: int = 50,
     knowledge_base: str | None = None,
     as_user: str | None = None,
@@ -90,9 +95,9 @@ def get_nodes(
     """This knowledge base's nodes, most recently created first, scoped to
     as_user's visibility when given."""
     group_id = resolve_knowledge_base(tenant, knowledge_base)
-    user_id = authorization.resolve_as_user(group_id, as_user)
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    user_id = authorization.resolve_as_user(group_id, as_user, repo=repo)
     limit = max(1, min(limit, 200))  # keep an unbounded ?limit= from becoming a full graph dump
-    repo = GraphRepository()
 
     if user_id is not None:
         return authorization.get_visible_nodes(group_id, user_id, limit=limit, repo=repo)
@@ -110,6 +115,7 @@ def get_nodes(
 
 @router.get("/relationships")
 def get_relationships(
+    request: Request,
     limit: int = 50,
     knowledge_base: str | None = None,
     as_user: str | None = None,
@@ -118,9 +124,9 @@ def get_relationships(
     """This knowledge base's relationships, most recently created first,
     scoped to as_user's visibility when given."""
     group_id = resolve_knowledge_base(tenant, knowledge_base)
-    user_id = authorization.resolve_as_user(group_id, as_user)
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    user_id = authorization.resolve_as_user(group_id, as_user, repo=repo)
     limit = max(1, min(limit, 200))
-    repo = GraphRepository()
 
     if user_id is not None:
         return authorization.get_visible_relationships(group_id, user_id, limit=limit, repo=repo)

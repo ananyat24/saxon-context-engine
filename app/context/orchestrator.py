@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 from graphiti_core import Graphiti
+from app.graph.neo4j_client import Neo4jClient
 from app.models.context_packet import ContextPacket
 from app.retrieval.base import TextRetriever
 from app.retrieval.graph_retriever import GraphRetriever
@@ -77,8 +78,13 @@ def _describe_transition(old: dict, new: dict) -> str:
 class ContextOrchestrator:
     """Orchestrates multi-source context retrieval and packages the context response."""
 
-    def __init__(self, graphiti_instance: Graphiti, extra_retrievers: Optional[List[TextRetriever]] = None):
-        self.retrievers: List[TextRetriever] = [GraphRetriever(graphiti_instance)]
+    def __init__(
+        self,
+        graphiti_instance: Graphiti,
+        extra_retrievers: Optional[List[TextRetriever]] = None,
+        neo4j_client: Optional[Neo4jClient] = None,
+    ):
+        self.retrievers: List[TextRetriever] = [GraphRetriever(graphiti_instance, neo4j_client=neo4j_client)]
         if extra_retrievers:
             self.retrievers.extend(extra_retrievers)
 

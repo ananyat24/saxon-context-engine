@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.config import TenantConfig
 from app.context.orchestrator import ContextOrchestrator
 from app.graph import authorization
+from app.graph.graph_repository import GraphRepository
 from app.security import require_tenant, resolve_knowledge_base
 
 router = APIRouter()
@@ -31,13 +32,14 @@ class SearchQueryRequest(BaseModel):
 
 @router.post("/query")
 async def query_context(req: SearchQueryRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)):
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
     group_id = resolve_knowledge_base(tenant, req.knowledge_base)
-    user_id = authorization.resolve_as_user(group_id, req.as_user)
-    visible_uuids = authorization.get_visible_entity_uuids(group_id, user_id) if user_id is not None else None
+    user_id = authorization.resolve_as_user(group_id, req.as_user, repo=repo)
+    visible_uuids = authorization.get_visible_entity_uuids(group_id, user_id, repo=repo) if user_id is not None else None
 
     # Each tenant gets their own cached Graphiti client, built with their own
     # Gemini key on first use and reused after that -- see
     # app/graph/tenant_graphiti_pool.py.
     graphiti = await request.app.state.graphiti_pool.get_or_create(tenant)
-    orchestrator = ContextOrchestrator(graphiti)
+    orchestrator = ContextOrchestrator(graphiti, neo4j_client=request.app.state.neo4j_client)
     return await orchestrator.get_context_packet(req.query, group_ids=[group_id], visible_uuids=visible_uuids)

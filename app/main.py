@@ -9,11 +9,21 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api import api_router
 from app.graph import authorization
+from app.graph.graph_repository import GraphRepository
+from app.graph.neo4j_client import Neo4jClient
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # One Neo4j driver (its own internal connection pool) for the life of the
+    # process, shared by every request -- see app/graph/neo4j_client.py.
+    # GraphRepository.execute_cypher() otherwise opens a brand-new driver (a
+    # fresh TCP + Bolt handshake) on every single Cypher call with no client
+    # given, which is fine for a one-off script but doesn't hold up once a
+    # single request can fire off several Cypher calls (RBAC visibility,
+    # entity resolution, entity edges) under real concurrent load.
+    app.state.neo4j_client = Neo4jClient()
     # Each tenant has their own Gemini API key (see app/config.py's TenantConfig),
     # so there's no longer one process-wide Graphiti client to build here -- instead,
     # a pool that builds one client per tenant, lazily, the first time that tenant
@@ -24,11 +34,12 @@ async def lifespan(app: FastAPI):
     # Idempotent -- role-based visibility (app/graph/authorization.py) depends
     # on this index existing for its scaling claim to hold, so it's created on
     # every startup rather than assumed to already be there.
-    authorization.ensure_authorization_indexes()
+    authorization.ensure_authorization_indexes(repo=GraphRepository(neo4j_client=app.state.neo4j_client))
     try:
         yield
     finally:
         await app.state.graphiti_pool.close_all()
+        app.state.neo4j_client.close()
 
 
 # Title/description here are what a client sees in the Swagger UI at /docs --
