@@ -102,9 +102,9 @@ function setSelectedUser(id) {
   selectedUser = id;
 }
 
-// Renders the org chart as an indented list (rep under their manager under
-// their manager) rather than a flat alphabetical dropdown, so picking a name
-// also shows you where they sit before you even select them.
+// Orders the org chart top-down (exec, then managers, then reps) rather than
+// alphabetically, so picking a name also gives a rough sense of seniority --
+// without drawing the tree itself, which read as clutter in a dropdown.
 function buildUserOptions(users) {
   const byId = Object.fromEntries(users.map((u) => [u.id, u]));
 
@@ -120,9 +120,7 @@ function buildUserOptions(users) {
 
   const everyone = `<option value="">Everyone (no role filter)</option>`;
   const options = withDepth.map((u) => {
-    const indent = " ".repeat(u.depth); // em-space per level
-    const prefix = u.depth > 0 ? "└ " : ""; // small "└" tree marker
-    const label = `${indent}${prefix}${u.name} — ${u.role}`;
+    const label = `${u.name} (${u.role})`;
     return `<option value="${escapeXml(u.id)}">${escapeXml(label)}</option>`;
   });
   return everyone + options.join("");
@@ -375,17 +373,32 @@ function renderSuggestedQuestions(nodes) {
 
 // Minimal dependency-free graph render: places nodes evenly around a circle
 // and draws a line for each relationship between them. No physics/force
-// layout -- for the handful of nodes a demo tenant has, a circle is legible
-// and there's no library to load.
+// layout -- a circle is legible without a library to load, as long as the
+// circle itself grows with the node count instead of staying a fixed size.
 function renderGraph(svg, nodes, rels) {
-  const w = 480, h = 380, cx = w / 2, cy = h / 2, r = Math.min(w, h) / 2 - 60;
-  const nodeByName = {};
+  const count = nodes.length;
+  // A radius that worked for 4-6 nodes packs nodes (and their labels)
+  // shoulder to shoulder once there are 15-20 -- the arc length between
+  // neighbors shrinks as more nodes share the same circle. Growing the
+  // radius (and the canvas around it) with node count keeps that spacing
+  // roughly constant instead.
+  const r = Math.max(130, count * 13);
+  const pad = 90; // room for labels/edge curves sticking out past the circle
+  const w = r * 2 + pad * 2;
+  const h = w;
+  const cx = w / 2, cy = h / 2;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+
+  // Denser graphs also need shorter labels and smaller text so neighboring
+  // labels have a chance of not colliding even with more room between nodes.
+  const labelMaxLen = count > 25 ? 10 : count > 15 ? 14 : 18;
+  const fontSize = count > 25 ? 7 : count > 15 ? 8 : 9;
+
   const positions = {};
 
   nodes.forEach((n, i) => {
-    const angle = (2 * Math.PI * i) / nodes.length - Math.PI / 2;
+    const angle = (2 * Math.PI * i) / count - Math.PI / 2;
     positions[n.name] = { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
-    nodeByName[n.name] = n;
   });
 
   let svgContent = "";
@@ -422,16 +435,20 @@ function renderGraph(svg, nodes, rels) {
       svgContent += `<path class="gv-edge" d="M ${a.x} ${a.y} Q ${ctrlX} ${ctrlY} ${b.x} ${b.y}" fill="none">
         <title>${escapeXml(rel.fact || "")}</title>
       </path>`;
-      svgContent += `<text class="gv-edge-label" x="${labelX}" y="${labelY}" text-anchor="middle">${escapeXml(rel.type)}</text>`;
+      svgContent += `<text class="gv-edge-label" style="font-size:${Math.max(6, fontSize - 2)}px" x="${labelX}" y="${labelY}" text-anchor="middle">${escapeXml(rel.type)}</text>`;
     });
   });
 
-  nodes.forEach((n) => {
+  nodes.forEach((n, i) => {
     const p = positions[n.name];
-    svgContent += `<circle class="gv-node" cx="${p.x}" cy="${p.y}" r="7">
+    // Alternate how far the label sits from its node so two labels on
+    // adjacent, closely-spaced nodes don't land at the same height and
+    // overlap -- only really visible once a graph has 15+ nodes on the circle.
+    const labelOffset = 12 + (i % 2) * 9;
+    svgContent += `<circle class="gv-node" cx="${p.x}" cy="${p.y}" r="6">
       <title>${escapeXml(n.summary || n.name)}</title>
     </circle>`;
-    svgContent += `<text class="gv-label" x="${p.x}" y="${p.y - 12}" text-anchor="middle">${escapeXml(truncate(n.name, 18))}</text>`;
+    svgContent += `<text class="gv-label" style="font-size:${fontSize}px" x="${p.x}" y="${p.y - labelOffset}" text-anchor="middle">${escapeXml(truncate(n.name, labelMaxLen))}</text>`;
   });
 
   svg.innerHTML = svgContent;
