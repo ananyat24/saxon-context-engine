@@ -54,20 +54,24 @@ class GraphRepository:
             if client is not self._owned_client:
                 client.close()
 
-    def _resolve_named_entity(
+    def _resolve_named_entities(
         self, query_text: str, group_id: str, visible_uuids: Optional[set[str]]
-    ) -> Optional[dict[str, Any]]:
-        """Looks for a specifically-named entity in the query and matches it against
-        real node names in this knowledge base, so a query like "What's changed
-        about Rhodes Furniture?" can be grounded to that exact node instead of
-        left to semantic search to guess at. Returns the matched row, "not_found"
-        if a name-shaped candidate was mentioned but doesn't exist (or isn't
-        visible to this caller), or None if the query doesn't name anything
-        specific enough to resolve (a normal open-ended query).
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Looks for specifically-named entities in the query and matches each
+        against real node names in this knowledge base, so a query like "What's
+        changed about Rhodes Furniture?" can be grounded to that exact node
+        instead of left to semantic search to guess at.
+
+        Returns (resolved_rows, saw_unresolved_candidate) -- resolved_rows is
+        deduped by uuid (so "Contoso Store Washington DC" and, say, an overlapping
+        shorter candidate matching the same node don't count twice), and
+        saw_unresolved_candidate is True if some name-shaped phrase in the query
+        didn't match anything visible, which the caller uses to say "not found"
+        rather than silently falling back to an ungrounded search.
         """
         candidates = _extract_candidate_entities(query_text)
-        if not candidates:
-            return None
+        resolved: dict[str, dict[str, Any]] = {}
+        saw_unresolved = False
 
         for candidate in candidates:
             rows = self.execute_cypher(
@@ -81,14 +85,23 @@ class GraphRepository:
                     "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary LIMIT 1",
                     {"group_id": group_id, "name": candidate},
                 )
-            if rows:
-                row = rows[0]
-                if visible_uuids is not None and row["uuid"] not in visible_uuids:
-                    # Exists, but this caller isn't authorized to see it -- keep
-                    # trying other candidates rather than leaking that it exists.
-                    continue
-                return row
-        return "not_found"
+            if rows and (visible_uuids is None or rows[0]["uuid"] in visible_uuids):
+                resolved[rows[0]["uuid"]] = rows[0]
+            else:
+                # Either nothing matched, or it matched something this caller
+                # can't see -- don't leak existence either way.
+                saw_unresolved = True
+
+        return list(resolved.values()), saw_unresolved
+
+    @staticmethod
+    def _to_native(value):
+        """execute_cypher() returns raw neo4j.time.DateTime objects (unlike
+        Graphiti's own search results, which come back as plain datetimes) --
+        FastAPI can't serialize those, so anything read via execute_cypher and
+        handed back as a fact needs this before it can go in an API response."""
+        to_native = getattr(value, "to_native", None)
+        return to_native() if callable(to_native) else value
 
     def _entity_own_facts(self, uuid: str, visible_uuids: Optional[set[str]]) -> list[dict[str, Any]]:
         """Pulls every edge directly touching a resolved entity straight from
@@ -109,16 +122,40 @@ class GraphRepository:
                 and row["target_node_uuid"] not in visible_uuids
             ):
                 continue
+            expired_at = self._to_native(row["expired_at"])
+            invalid_at = self._to_native(row["invalid_at"])
             facts.append({
                 "fact": row["fact"],
                 "source_node_uuid": row["source_node_uuid"],
                 "target_node_uuid": row["target_node_uuid"],
-                "valid_at": row["valid_at"],
-                "invalid_at": row["invalid_at"],
-                "expired_at": row["expired_at"],
-                "is_valid": row["expired_at"] is None and row["invalid_at"] is None,
+                "valid_at": self._to_native(row["valid_at"]),
+                "invalid_at": invalid_at,
+                "expired_at": expired_at,
+                "is_valid": expired_at is None and invalid_at is None,
             })
         return facts
+
+    def _relationship_path_facts(
+        self, uuid_a: str, uuid_b: str, visible_uuids: Optional[set[str]]
+    ) -> Optional[list[str]]:
+        """Finds the shortest chain of facts connecting two resolved entities, so
+        "How is X connected to Y?" answers the actual question asked instead of
+        just describing one of the two entities. Bounded to 4 hops -- beyond that
+        a "connection" is really just everything-connects-to-everything noise,
+        not a meaningful answer. Returns None if no such path exists (or none of
+        its nodes are visible to this caller)."""
+        rows = self.execute_cypher(
+            "MATCH p = shortestPath((a:Entity {uuid: $uuid_a})-[:RELATES_TO*1..4]-(b:Entity {uuid: $uuid_b})) "
+            "RETURN [rel IN relationships(p) | rel.fact] AS facts, "
+            "[n IN nodes(p) | n.uuid] AS path_uuids",
+            {"uuid_a": uuid_a, "uuid_b": uuid_b},
+        )
+        if not rows or not rows[0]["facts"]:
+            return None
+        row = rows[0]
+        if visible_uuids is not None and not all(u in visible_uuids for u in row["path_uuids"]):
+            return None
+        return row["facts"]
 
     async def search_graphiti_facts(
         self,
@@ -139,23 +176,28 @@ class GraphRepository:
         of which the caller owns just because it matched the search
         semantically.
 
-        If the query names a specific entity (e.g. "What's changed about
-        Rhodes Furniture?"), that name is resolved against the graph first and
-        its own edges/summary are used directly instead of relying on
-        Graphiti's hybrid search -- which has no relevance threshold and will
-        happily pad out an entity with few or no edges of its own using other
-        entities' unrelated facts that merely read similarly. A name that
-        doesn't resolve to anything real short-circuits with a clear "not
-        found" rather than substituting unrelated results.
+        If the query names one or more specific entities (e.g. "What's changed
+        about Rhodes Furniture?" or "How is X connected to Y?"), those names are
+        resolved against the graph first instead of relying on Graphiti's hybrid
+        search -- which has no relevance threshold and will happily pad out a
+        sparsely-connected entity with other entities' unrelated facts that
+        merely read similarly, or answer a two-entity connection question by
+        just describing one of them. A single resolved entity gets its own
+        edges/summary directly; two resolved entities get the path of facts
+        connecting them, if any. A name that doesn't resolve to anything real
+        short-circuits with a clear "not found" rather than substituting
+        unrelated results.
         """
         if not self.graphiti:
             logger.warning("Graphiti instance not set in GraphRepository.")
             return []
 
         group_id = group_ids[0] if group_ids else None
-        resolved = self._resolve_named_entity(query_text, group_id, visible_uuids) if group_id else None
+        resolved_entities, saw_unresolved = (
+            self._resolve_named_entities(query_text, group_id, visible_uuids) if group_id else ([], False)
+        )
 
-        if resolved == "not_found":
+        if saw_unresolved and not resolved_entities:
             return [{
                 "fact": "No entity matching that name was found in this knowledge base.",
                 "source_node_uuid": "",
@@ -166,13 +208,35 @@ class GraphRepository:
                 "is_valid": True,
             }]
 
-        if resolved:
-            # A named entity resolved -- use its own edges directly (precise by
-            # construction) plus its summary as a single, already-consolidated
-            # lead line, instead of Graphiti's hybrid search, which has no
-            # relevance threshold and would pad out a sparse entity with other
-            # entities' unrelated facts. Also skips a paid search call we'd
-            # otherwise throw away.
+        if len(resolved_entities) >= 2:
+            a, b = resolved_entities[0], resolved_entities[1]
+            path_facts = self._relationship_path_facts(a["uuid"], b["uuid"], visible_uuids)
+            if path_facts:
+                return [{
+                    "fact": fact,
+                    "source_node_uuid": "",
+                    "target_node_uuid": "",
+                    "valid_at": None,
+                    "invalid_at": None,
+                    "expired_at": None,
+                    "is_valid": True,
+                } for fact in path_facts]
+            return [{
+                "fact": f'No connection found between "{a["name"]}" and "{b["name"]}" in this knowledge base.',
+                "source_node_uuid": "",
+                "target_node_uuid": "",
+                "valid_at": None,
+                "invalid_at": None,
+                "expired_at": None,
+                "is_valid": True,
+            }]
+
+        if len(resolved_entities) == 1:
+            # A single named entity resolved -- use its own edges directly
+            # (precise by construction) plus its summary as a single,
+            # already-consolidated lead line. Also skips a paid search call
+            # we'd otherwise throw away.
+            resolved = resolved_entities[0]
             facts = self._entity_own_facts(resolved["uuid"], visible_uuids)
             if resolved.get("summary"):
                 facts.insert(0, {
