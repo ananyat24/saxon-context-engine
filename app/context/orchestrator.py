@@ -82,10 +82,15 @@ class ContextOrchestrator:
         if extra_retrievers:
             self.retrievers.extend(extra_retrievers)
 
-    async def get_context_packet(self, query: str, group_ids: Optional[List[str]] = None) -> ContextPacket:
+    async def get_context_packet(
+        self,
+        query: str,
+        group_ids: Optional[List[str]] = None,
+        visible_uuids: Optional[set[str]] = None,
+    ) -> ContextPacket:
         raw_facts = []
         for retriever in self.retrievers:
-            raw_facts.extend(await retriever.retrieve(query, group_ids=group_ids))
+            raw_facts.extend(await retriever.retrieve(query, group_ids=group_ids, visible_uuids=visible_uuids))
 
         transitions, replaced_fact_ids = _find_transitions(raw_facts)
         transition_lines = [_describe_transition(old, new) for old, new in transitions]

@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -71,13 +71,24 @@ def parse_date(value: str, formats: tuple[str, ...]) -> Optional[datetime]:
     return None
 
 
-def read_csv_records(path: Path, spec: FileSourceSpec) -> Iterator[SourceRecord]:
-    """Yield one SourceRecord per row of a CSV."""
+def read_csv_records(
+    path: Path, spec: FileSourceSpec, row_filter: Optional[Callable[[dict], bool]] = None
+) -> Iterator[SourceRecord]:
+    """Yield one SourceRecord per row of a CSV.
+
+    row_filter, if given, skips rows it returns False for -- e.g. limiting a
+    dimension table to just the rows a small slice of a fact table actually
+    references, so a curated sample stays connected instead of pulling in
+    unrelated rows that nothing else in the sample points to.
+    """
     from app.ingestion.structured import StructuredIngestor
 
     ingestor = StructuredIngestor()
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
+            if row_filter is not None and not row_filter(row):
+                continue
+
             record_id = row.get(spec.id_column, "").strip()
             if not record_id:
                 continue

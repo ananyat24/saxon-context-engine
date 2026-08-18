@@ -29,8 +29,8 @@ from app.config import TenantConfig, settings
 
 def require_tenant(x_api_key: str = Header(..., alias="X-API-Key")) -> TenantConfig:
     """FastAPI dependency: looks up the caller's API key and returns the
-    TenantConfig (group_id + their own Gemini key) it's allowed to use.
-    Raises 401 for an unknown/missing key.
+    TenantConfig (their knowledge bases + their own Gemini key) it's allowed to
+    use. Raises 401 for an unknown/missing key.
 
     Route handlers should use the returned TenantConfig directly and must not
     also accept a group_id or API-key field from the request body -- that would
@@ -40,3 +40,20 @@ def require_tenant(x_api_key: str = Header(..., alias="X-API-Key")) -> TenantCon
     if tenant is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
     return tenant
+
+
+def resolve_knowledge_base(tenant: TenantConfig, knowledge_base: str | None) -> str:
+    """Turns a client-supplied knowledge_base id (or None) into the group_id to
+    actually query. A tenant can have more than one knowledge base, but this
+    still enforces the same boundary require_tenant does for the tenant as a
+    whole: the requested id must be one of *this* tenant's own knowledge bases,
+    or the request is rejected -- a client can pick among its own datasets, but
+    never reach one it wasn't given.
+    """
+    kb_id = knowledge_base or tenant.default_knowledge_base_id()
+    if kb_id not in tenant.knowledge_base_ids():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown knowledge base '{kb_id}' for this tenant.",
+        )
+    return kb_id

@@ -1,11 +1,14 @@
-# Add, list, or remove a client's API key -- the whole point of this script is
-# that onboarding a new tenant never requires touching code or hand-editing JSON.
-# It reads and writes config/tenants.json directly (see app/config.py for how the
-# running app loads that same file). The app must be restarted to pick up changes,
-# since settings are only read once at startup.
+# Add, list, or remove a client's API key, and manage which knowledge bases
+# (datasets) they can query -- the whole point of this script is that
+# onboarding a new tenant, or giving an existing one another dataset, never
+# requires touching code or hand-editing JSON. It reads and writes
+# config/tenants.json directly (see app/config.py for how the running app
+# loads that same file). The app must be restarted to pick up changes, since
+# settings are only read once at startup.
 #
 # Usage:
 #   python scripts/manage_tenants.py add --name "Acme Corp" --gemini-key AIza...
+#   python scripts/manage_tenants.py add-knowledge-base acme_corp --id northwind --label "Northwind"
 #   python scripts/manage_tenants.py list
 #   python scripts/manage_tenants.py remove acme_corp
 import argparse
@@ -40,24 +43,53 @@ def mask(api_key: str) -> str:
     return f"{api_key[:4]}...{api_key[-4:]}"
 
 
+def find_by_tenant_id(tenants: dict, tenant_id: str):
+    for api_key, cfg in tenants.items():
+        if cfg["tenant_id"] == tenant_id:
+            return api_key, cfg
+    return None
+
+
 def cmd_add(args: argparse.Namespace) -> None:
     tenants = load()
-    group_id = args.group_id or slugify(args.name)
+    tenant_id = args.tenant_id or slugify(args.name)
 
-    if any(cfg["group_id"] == group_id for cfg in tenants.values()):
-        print(f"A tenant with group_id '{group_id}' already exists. Use --group-id to pick a different one, "
+    if find_by_tenant_id(tenants, tenant_id):
+        print(f"A tenant with tenant_id '{tenant_id}' already exists. Use --tenant-id to pick a different one, "
               f"or `remove` the existing one first.", file=sys.stderr)
         sys.exit(1)
 
     api_key = args.api_key or secrets.token_urlsafe(32)
-    tenants[api_key] = {"group_id": group_id, "gemini_api_key": args.gemini_key}
+    tenants[api_key] = {
+        "tenant_id": tenant_id,
+        "gemini_api_key": args.gemini_key,
+        "knowledge_bases": [{"id": tenant_id, "label": args.name}],
+    }
     save(tenants)
 
-    print(f"Added tenant '{group_id}'.")
+    print(f"Added tenant '{tenant_id}' with knowledge base '{tenant_id}' ({args.name}).")
     print()
     print(f"  API key: {api_key}")
     print()
     print("Give this key to the client -- it will not be shown again by `list`.")
+    print("Restart the API for this change to take effect.")
+
+
+def cmd_add_knowledge_base(args: argparse.Namespace) -> None:
+    tenants = load()
+    match = find_by_tenant_id(tenants, args.tenant_id)
+    if not match:
+        print(f"No tenant found with tenant_id '{args.tenant_id}'.", file=sys.stderr)
+        sys.exit(1)
+    _api_key, cfg = match
+
+    if any(kb["id"] == args.id for kb in cfg["knowledge_bases"]):
+        print(f"Tenant '{args.tenant_id}' already has a knowledge base '{args.id}'.", file=sys.stderr)
+        sys.exit(1)
+
+    cfg["knowledge_bases"].append({"id": args.id, "label": args.label})
+    save(tenants)
+    print(f"Added knowledge base '{args.id}' ({args.label}) to tenant '{args.tenant_id}'.")
     print("Restart the API for this change to take effect.")
 
 
@@ -67,19 +99,21 @@ def cmd_list(args: argparse.Namespace) -> None:
         print("No tenants configured yet. Add one with `add --name ... --gemini-key ...`.")
         return
     for api_key, cfg in tenants.items():
-        print(f"{cfg['group_id']:30s} key={mask(api_key)}  gemini_key={mask(cfg['gemini_api_key'])}")
+        kb_desc = ", ".join(f"{kb['id']} ({kb['label']})" for kb in cfg["knowledge_bases"])
+        print(f"{cfg['tenant_id']:20s} key={mask(api_key)}  gemini_key={mask(cfg['gemini_api_key'])}")
+        print(f"{'':20s} knowledge bases: {kb_desc}")
 
 
 def cmd_remove(args: argparse.Namespace) -> None:
     tenants = load()
-    matches = [k for k, cfg in tenants.items() if cfg["group_id"] == args.group_id]
-    if not matches:
-        print(f"No tenant found with group_id '{args.group_id}'.", file=sys.stderr)
+    match = find_by_tenant_id(tenants, args.tenant_id)
+    if not match:
+        print(f"No tenant found with tenant_id '{args.tenant_id}'.", file=sys.stderr)
         sys.exit(1)
-    for k in matches:
-        del tenants[k]
+    api_key, _cfg = match
+    del tenants[api_key]
     save(tenants)
-    print(f"Removed tenant '{args.group_id}'. Restart the API for this change to take effect.")
+    print(f"Removed tenant '{args.tenant_id}'. Restart the API for this change to take effect.")
 
 
 def main() -> None:
@@ -89,15 +123,21 @@ def main() -> None:
     p_add = sub.add_parser("add", help="Add a new tenant and generate their API key")
     p_add.add_argument("--name", required=True, help="Human-readable client name, e.g. \"Acme Corp\"")
     p_add.add_argument("--gemini-key", required=True, help="The client's own Gemini API key")
-    p_add.add_argument("--group-id", help="Override the auto-generated group_id (slug of --name)")
+    p_add.add_argument("--tenant-id", help="Override the auto-generated tenant_id (slug of --name)")
     p_add.add_argument("--api-key", help="Override the auto-generated API key (random by default)")
     p_add.set_defaults(func=cmd_add)
 
-    p_list = sub.add_parser("list", help="List configured tenants (keys shown masked)")
+    p_add_kb = sub.add_parser("add-knowledge-base", help="Give an existing tenant another dataset to query")
+    p_add_kb.add_argument("tenant_id")
+    p_add_kb.add_argument("--id", required=True, help="group_id for this dataset, e.g. \"northwind\"")
+    p_add_kb.add_argument("--label", required=True, help="Human-readable name shown in a picker, e.g. \"Northwind\"")
+    p_add_kb.set_defaults(func=cmd_add_knowledge_base)
+
+    p_list = sub.add_parser("list", help="List configured tenants and their knowledge bases (keys shown masked)")
     p_list.set_defaults(func=cmd_list)
 
-    p_remove = sub.add_parser("remove", help="Remove a tenant by group_id")
-    p_remove.add_argument("group_id")
+    p_remove = sub.add_parser("remove", help="Remove a tenant by tenant_id")
+    p_remove.add_argument("tenant_id")
     p_remove.set_defaults(func=cmd_remove)
 
     args = parser.parse_args()

@@ -41,6 +41,7 @@ SAMPLES = Path("data/samples")
 # spent plus one more option for the LLM to weigh.
 DATASET_DOMAINS = {
     "northwind": ["sales", "supply_chain"],
+    "contoso": ["sales", "supply_chain"],
     "manufacturing": ["manufacturing"],
     "legal": ["legal"],
 }
@@ -65,22 +66,114 @@ NORTHWIND_SPECS = [
                    skip_columns={"ShipAddress", "ShipPostalCode", "RequiredDate"}),
 ]
 
+# How many orders to sample for a small Northwind ingest. Same relational
+# problem as Contoso: orders.csv only carries CustomerID/EmployeeID/ShipVia,
+# not product info (that's in order_details.csv, which nothing here ingests),
+# so a small sample is built by sampling orders first and pulling only the
+# customers/employees/shippers those specific orders reference. Products and
+# suppliers aren't part of this sample since orders.csv doesn't link to them.
+NORTHWIND_ORDERS_SAMPLE = 5
+
+
+def _collect_northwind_sample() -> list[SourceRecord]:
+    import csv as _csv
+
+    base = SAMPLES / "northwind"
+    with (base / "orders.csv").open("r", encoding="utf-8-sig", newline="") as f:
+        order_rows = list(_csv.DictReader(f))[:NORTHWIND_ORDERS_SAMPLE]
+
+    customer_ids = {row["CustomerID"] for row in order_rows}
+    employee_ids = {row["EmployeeID"] for row in order_rows}
+    shipper_ids = {row["ShipVia"] for row in order_rows}
+    order_ids = {row["OrderID"] for row in order_rows}
+
+    customers_spec, _products, _suppliers, shippers_spec, employees_spec, orders_spec = NORTHWIND_SPECS
+
+    records: list[SourceRecord] = []
+    records.extend(read_csv_records(
+        base / customers_spec.filename, customers_spec,
+        row_filter=lambda row, a=customer_ids: row.get("CustomerID") in a,
+    ))
+    records.extend(read_csv_records(
+        base / employees_spec.filename, employees_spec,
+        row_filter=lambda row, a=employee_ids: row.get("EmployeeID") in a,
+    ))
+    records.extend(read_csv_records(
+        base / shippers_spec.filename, shippers_spec,
+        row_filter=lambda row, a=shipper_ids: row.get("ShipperID") in a,
+    ))
+    records.extend(read_csv_records(
+        base / orders_spec.filename, orders_spec,
+        row_filter=lambda row, a=order_ids: row.get("OrderID") in a,
+    ))
+    return records
+
 MANUFACTURING_SPECS = [
     FileSourceSpec("ai4i2020_sample.csv", "Machine reading", "UDI",
                    skip_columns={"RNF"}),
 ]
 
+# Same ordering rationale as Northwind above: customers/products/stores are
+# the "nouns" a sale refers to, so they need to exist first.
+CONTOSO_SPECS = [
+    # StartDT/EndDT/GeoAreaKey are warehouse plumbing (slowly-changing-dimension
+    # bookkeeping), not facts about the person -- skipped so extraction spends
+    # its attention (and tokens) on the columns that actually describe them.
+    FileSourceSpec("customer.csv", "Customer", "CustomerKey",
+                   skip_columns={"Latitude", "Longitude", "MiddleInitial", "StartDT", "EndDT", "GeoAreaKey"}),
+    FileSourceSpec("product.csv", "Product", "ProductKey", name_column="ProductName"),
+    FileSourceSpec("store.csv", "Store", "StoreKey", name_column="Description"),
+    FileSourceSpec("sales.csv", "Sale", "OrderKey", date_column="OrderDate"),
+]
+
+# How many sales rows to sample for a small Contoso ingest. Unlike Northwind's
+# collect() (which hands over every row and lets --limit truncate the front of
+# the list), Contoso's tables are relational: truncating a flat concatenation
+# would ingest a pile of customer profiles with no sales pointing at them,
+# since customer.csv sorts first. Sampling sales first and then pulling only
+# the customers/products/stores those specific sales reference keeps a small
+# ingest genuinely connected instead of just small.
+CONTOSO_SALES_SAMPLE = 6
+
+
+def _collect_contoso() -> list[SourceRecord]:
+    import csv as _csv
+
+    base = SAMPLES / "contoso_dw"
+    with (base / "sales.csv").open("r", encoding="utf-8-sig", newline="") as f:
+        sales_rows = list(_csv.DictReader(f))[:CONTOSO_SALES_SAMPLE]
+
+    referenced = {
+        "CustomerKey": {row["CustomerKey"] for row in sales_rows},
+        "ProductKey": {row["ProductKey"] for row in sales_rows},
+        "StoreKey": {row["StoreKey"] for row in sales_rows},
+    }
+
+    records: list[SourceRecord] = []
+    for spec, key_column in zip(CONTOSO_SPECS[:3], ["CustomerKey", "ProductKey", "StoreKey"]):
+        path = base / spec.filename
+        allowed = referenced[key_column]
+        records.extend(read_csv_records(path, spec, row_filter=lambda row, k=key_column, a=allowed: row.get(k) in a))
+
+    # Sales themselves aren't filtered further -- these specific rows are the
+    # sample the customers/products/stores above were chosen to match.
+    sales_spec = CONTOSO_SPECS[3]
+    sampled_order_keys = {row["OrderKey"] for row in sales_rows}
+    records.extend(
+        read_csv_records(
+            base / sales_spec.filename, sales_spec,
+            row_filter=lambda row, a=sampled_order_keys: row.get("OrderKey") in a,
+        )
+    )
+    return records
+
 
 def collect(dataset: str) -> list[SourceRecord]:
     if dataset == "northwind":
-        records = []
-        for spec in NORTHWIND_SPECS:
-            path = SAMPLES / "northwind" / spec.filename
-            if not path.exists():
-                logger.warning(f"Missing {path}, skipping")
-                continue
-            records.extend(read_csv_records(path, spec))
-        return records
+        return _collect_northwind_sample()
+
+    if dataset == "contoso":
+        return _collect_contoso()
 
     if dataset == "manufacturing":
         records = []
@@ -215,7 +308,7 @@ async def run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("dataset", choices=["northwind", "manufacturing", "legal"])
+    parser.add_argument("dataset", choices=["northwind", "contoso", "manufacturing", "legal"])
     parser.add_argument("--group-id", default="samples", help="Tenant/data-isolation bucket (default: samples)")
     parser.add_argument("--limit", type=int, default=20, help="Max records to ingest this run (default: 20)")
     # 15s because one record is several LLM calls, not one -- 4s between

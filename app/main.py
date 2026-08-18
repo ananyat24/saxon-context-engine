@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api import api_router
+from app.graph import authorization
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
 
 
@@ -20,6 +21,10 @@ async def lifespan(app: FastAPI):
     # place for this kind of shared, per-process object; routes reach it via
     # `request.app.state.graphiti_pool`.
     app.state.graphiti_pool = TenantGraphitiPool()
+    # Idempotent -- role-based visibility (app/graph/authorization.py) depends
+    # on this index existing for its scaling claim to hold, so it's created on
+    # every startup rather than assumed to already be there.
+    authorization.ensure_authorization_indexes()
     try:
         yield
     finally:

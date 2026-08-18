@@ -298,25 +298,36 @@ own that separation is only as strong as whatever calls the API: if a caller
 could put any `group_id` it wanted directly into a request, the separation
 would be advisory rather than enforced.
 
-To close that gap, `POST /api/v1/context/query` requires an `X-API-Key`
-header. `app/security.py` looks the key up in `config/tenants.json` and
-returns that tenant's config: their `group_id`, and their own Gemini API
-key. The request body has no `group_id` or key field, so there's nothing for
-a caller to override. An invalid or missing key is rejected before any Neo4j
-or Gemini call is made.
+To close that gap, `POST /api/v1/context/query` (and the `GET /api/v1/graph/*`
+routes) require an `X-API-Key` header. `app/security.py` looks the key up in
+`config/tenants.json` and returns that tenant's config, including the list of
+knowledge bases (`group_id`s) it's allowed to query. An invalid or missing key
+is rejected before any Neo4j or Gemini call is made.
+
+A tenant can have more than one knowledge base -- e.g. one API key that can
+switch between "Contoso" and "Northwind" datasets -- so requests may include
+an optional `knowledge_base` (defaulting to the tenant's first one if
+omitted). That value is still validated against *that tenant's own* list via
+`resolve_knowledge_base` before it's used: a caller can pick among its own
+datasets, but can never name a `group_id` outside its own list.
 
 ```bash
+# List the knowledge bases this key can query
+curl http://localhost:8000/api/v1/graph/knowledge-bases -H "X-API-Key: local-dev-key"
+
 curl -X POST http://localhost:8000/api/v1/context/query \
   -H "Content-Type: application/json" \
   -H "X-API-Key: local-dev-key" \
-  -d '{"query": "who manages the Contoso account"}'
+  -d '{"query": "who manages the Contoso account", "knowledge_base": "acme_demo"}'
 ```
 
 Each tenant also brings their own Gemini API key rather than sharing one
 operator-owned key. Building a Graphiti client (LLM + embedder + reranker
 setup) is real overhead, so this isn't done fresh on every request: each
-tenant gets one client, built on their first request and cached after that --
-see `app/graph/tenant_graphiti_pool.py`.
+tenant gets one client (shared across all of that tenant's knowledge bases,
+since `group_id` is just a data partition, not a separate connection), built
+on their first request and cached after that -- see
+`app/graph/tenant_graphiti_pool.py`.
 
 This is a reasonable baseline for one shared database serving multiple
 clients, not the strongest possible guarantee. Full separation would mean a
@@ -325,14 +336,64 @@ infrastructure but removes any risk of an application bug leaking one
 client's data into another's. Worth revisiting if a client's compliance
 requirements call for it.
 
+### Role-based visibility
+
+`knowledge_base` controls *which dataset* a request sees; `as_user` controls
+*how much of it*. A given knowledge base can have an org hierarchy seeded
+into it, and a request scoped to a specific person only sees what's assigned
+to them plus what's assigned to everyone who reports to them -- a rep sees
+their own accounts, their manager sees the rep's accounts too, and so on up
+the chain. Omitting `as_user` (the default) returns the whole knowledge base,
+unfiltered.
+
+This is deliberately a separate layer from Graphiti's own fact graph, not
+another ontology domain. Who-reports-to-whom and who-owns-what is exact
+organizational data -- the kind a real deployment gets from an HR/CRM sync or
+an admin action -- not something to have an LLM infer from text. So instead
+of extracted entities, it's `:User` nodes and `:REPORTS_TO`/`:ASSIGNED_TO`
+edges written directly via Cypher (see `scripts/seed_roles.py`), scoped to a
+knowledge base's `group_id` like everything else. `app/graph/authorization.py`
+enforces it at query time, and validates a request's `as_user` against that
+knowledge base's own org chart the same way `resolve_knowledge_base` validates
+`knowledge_base` -- a caller can pick anyone in the chart it can already see,
+never an id from a knowledge base it can't.
+
+This is built to stay cheap regardless of how large the knowledge base gets:
+resolving "who does this person outrank" only ever traverses the `:User`
+subgraph (sized to the org -- hundreds or thousands of people), never the
+business-entity graph itself, so the expensive dimension (how many customers,
+orders, contracts exist) never enters into that part of the query.
+
+```bash
+# Everyone in contoso_dw's seeded org chart, with manager_id so a client can
+# render it as a hierarchy
+curl "http://localhost:8000/api/v1/graph/users?knowledge_base=contoso_dw" \
+  -H "X-API-Key: local-dev-key"
+
+# The CRO sees the whole knowledge base; a rep sees only their own accounts
+curl "http://localhost:8000/api/v1/graph/summary?knowledge_base=contoso_dw&as_user=jordan_blake" \
+  -H "X-API-Key: local-dev-key"
+curl "http://localhost:8000/api/v1/graph/summary?knowledge_base=contoso_dw&as_user=diego_ramirez" \
+  -H "X-API-Key: local-dev-key"
+```
+
+Seed an org chart for a knowledge base with `python scripts/seed_roles.py`
+(currently hardcoded to `contoso_dw`'s own already-ingested customers --
+adapt the `USERS`/`ASSIGNMENTS` lists at the top of that script for another
+knowledge base or a real org chart).
+
 ### Adding a client's API key
 
 No code editing or hand-written JSON required -- use `scripts/manage_tenants.py`,
 which reads and writes `config/tenants.json` for you:
 
 ```bash
-# Add a new client, generating a random API key for them
+# Add a new client, generating a random API key for them. This also creates
+# their first knowledge base, using the same id as the tenant.
 python scripts/manage_tenants.py add --name "Acme Corp" --gemini-key <their Gemini API key>
+
+# Give an existing client another dataset to switch between
+python scripts/manage_tenants.py add-knowledge-base acme_corp --id northwind --label "Northwind"
 
 # See who's configured (keys shown masked, not in full)
 python scripts/manage_tenants.py list
@@ -368,7 +429,7 @@ saxon-context-engine/
 ├── app/
 │   ├── main.py                  # FastAPI app entry point
 │   ├── config.py                # Settings, loaded from .env
-│   ├── security.py              # API key -> tenant (group_id) lookup
+│   ├── security.py              # API key -> tenant + knowledge base lookup
 │   ├── models/                  # Entity, Relationship, Fact, Event, Evidence, ContextPacket
 │   ├── ontology/                # Loads, validates, and merges ontology YAML files
 │   │   ├── loader.py

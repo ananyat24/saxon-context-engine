@@ -68,6 +68,19 @@ header {
 .badge-bad { background: var(--status-critical); color: #fff; }
 .badge-muted { background: rgba(255,255,255,0.15); color: #cdd6e2; }
 
+.kb-select {
+  background: rgba(255,255,255,0.1);
+  color: #f3f6fa;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.kb-select[hidden] { display: none; }
+.kb-select option { color: var(--text-primary); }
+
 .header-right { display: flex; align-items: center; gap: 0.75rem; }
 
 .btn-key {

@@ -18,7 +18,7 @@
 #   LOCATION="your Azure region" \
 #   NEO4J_URI="neo4j+s://xxxx.databases.neo4j.io" \
 #   NEO4J_PASSWORD="..." \
-#   TENANT_API_KEYS='{"...": {"group_id": "...", "gemini_api_key": "..."}}' \
+#   TENANT_API_KEYS='{"...": {"tenant_id": "...", "gemini_api_key": "...", "knowledge_bases": [{"id": "...", "label": "..."}]}}' \
 #   ./scripts/deploy_azure.sh
 #
 # All the values below are read from your environment rather than hardcoded,

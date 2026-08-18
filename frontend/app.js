@@ -17,6 +17,154 @@ function authHeaders() {
   return key ? { "X-API-Key": key } : {};
 }
 
+// --- Knowledge base selection -----------------------------------------------
+// Which dataset (group_id) the Graph and Ask panels are scoped to. Persisted
+// per-browser so switching pages/reloading doesn't silently reset it back to
+// the default. The server still validates this against the tenant's own list
+// on every request (see app/security.py's resolve_knowledge_base) -- this is
+// just which one the UI asks for, not a trust boundary.
+function getSelectedKnowledgeBase() {
+  return localStorage.getItem("saxon_kb") || "";
+}
+
+function setSelectedKnowledgeBase(id) {
+  localStorage.setItem("saxon_kb", id);
+}
+
+// Builds "?a=1&b=2"-style query strings without worrying about which param
+// comes first needing "?" vs "&".
+function buildQuery(params) {
+  const kb = getSelectedKnowledgeBase();
+  if (kb) params.knowledge_base = kb;
+  const user = getSelectedUser();
+  if (user) params.as_user = user;
+  const qs = new URLSearchParams(params).toString();
+  return qs ? `?${qs}` : "";
+}
+
+async function loadKnowledgeBases() {
+  const select = document.getElementById("kbSelect");
+  if (!getApiKey()) {
+    select.hidden = true;
+    select.innerHTML = "";
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/graph/knowledge-bases`, { headers: authHeaders() });
+    if (!res.ok) {
+      select.hidden = true;
+      return;
+    }
+    const data = await res.json();
+    const current = getSelectedKnowledgeBase();
+    const stillValid = data.knowledge_bases.some((kb) => kb.id === current);
+    if (!stillValid) setSelectedKnowledgeBase(data.default);
+
+    select.innerHTML = data.knowledge_bases
+      .map((kb) => `<option value="${escapeXml(kb.id)}">${escapeXml(kb.label)}</option>`)
+      .join("");
+    select.value = getSelectedKnowledgeBase();
+    select.hidden = data.knowledge_bases.length <= 1;
+  } catch (err) {
+    select.hidden = true;
+  }
+}
+
+document.getElementById("kbSelect").addEventListener("change", async (e) => {
+  setSelectedKnowledgeBase(e.target.value);
+  setSelectedUser(""); // a different knowledge base has a different (or no) org chart
+  await loadUsers();
+  loadGraph();
+  document.getElementById("queryAnswer").textContent = "";
+  document.getElementById("queryFacts").innerHTML = "";
+  document.getElementById("queryRawWrap").hidden = true;
+});
+
+// --- "View as" (role-based visibility) --------------------------------------
+// Which person's view of the selected knowledge base the Graph and Ask panels
+// show. Not persisted across reloads like the knowledge base is -- switching
+// who you're looking through is a live comparison you're making right now,
+// not a standing preference. The server still validates this id belongs to
+// the selected knowledge base's own org chart on every request (see
+// app/graph/authorization.py's resolve_as_user) -- this is just which one the
+// UI asks for, not a trust boundary.
+let selectedUser = "";
+// id -> {id, name, role, manager_id}, refreshed by loadUsers(). Lets
+// describeGraph() say who "viewing as" actually refers to without a second
+// fetch just to look up a name.
+let userDirectory = {};
+
+function getSelectedUser() {
+  return selectedUser;
+}
+
+function setSelectedUser(id) {
+  selectedUser = id;
+}
+
+// Renders the org chart as an indented list (rep under their manager under
+// their manager) rather than a flat alphabetical dropdown, so picking a name
+// also shows you where they sit before you even select them.
+function buildUserOptions(users) {
+  const byId = Object.fromEntries(users.map((u) => [u.id, u]));
+
+  function depth(u, seen = new Set()) {
+    if (!u.manager_id || seen.has(u.id)) return 0; // seen guards a bad/cyclic manager_id
+    const manager = byId[u.manager_id];
+    if (!manager) return 0;
+    return 1 + depth(manager, new Set(seen).add(u.id));
+  }
+
+  const withDepth = users.map((u) => ({ ...u, depth: depth(u) }));
+  withDepth.sort((a, b) => a.depth - b.depth || a.name.localeCompare(b.name));
+
+  const everyone = `<option value="">Everyone (no role filter)</option>`;
+  const options = withDepth.map((u) => {
+    const indent = " ".repeat(u.depth); // em-space per level
+    const prefix = u.depth > 0 ? "└ " : ""; // small "└" tree marker
+    const label = `${indent}${prefix}${u.name} — ${u.role}`;
+    return `<option value="${escapeXml(u.id)}">${escapeXml(label)}</option>`;
+  });
+  return everyone + options.join("");
+}
+
+async function loadUsers() {
+  const select = document.getElementById("userSelect");
+  const kb = getSelectedKnowledgeBase();
+  if (!getApiKey() || !kb) {
+    select.hidden = true;
+    select.innerHTML = "";
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/graph/users${buildQuery({})}`, { headers: authHeaders() });
+    if (!res.ok) {
+      select.hidden = true;
+      return;
+    }
+    const users = await res.json();
+    userDirectory = Object.fromEntries(users.map((u) => [u.id, u]));
+    if (users.length === 0) {
+      select.hidden = true;
+      select.innerHTML = "";
+      return;
+    }
+    select.innerHTML = buildUserOptions(users);
+    select.value = getSelectedUser();
+    select.hidden = false;
+  } catch (err) {
+    select.hidden = true;
+  }
+}
+
+document.getElementById("userSelect").addEventListener("change", (e) => {
+  setSelectedUser(e.target.value);
+  loadGraph();
+  document.getElementById("queryAnswer").textContent = "";
+  document.getElementById("queryFacts").innerHTML = "";
+  document.getElementById("queryRawWrap").hidden = true;
+});
+
 function updateKeyDot() {
   const hasKey = !!getApiKey();
   document.getElementById("keyDot").classList.toggle("set", hasKey);
@@ -99,7 +247,15 @@ async function loadOntology() {
 }
 
 // --- Graph ----------------------------------------------------------------
+// Bumped on every loadGraph() call so a response that arrives after the user
+// has already switched knowledge bases again can recognize it's stale and
+// discard itself, instead of overwriting the panel with the wrong dataset's
+// numbers. Switching the dropdown quickly (or a slow response racing a fast
+// one) could otherwise land whichever fetch happens to resolve last.
+let graphRequestId = 0;
+
 async function loadGraph() {
+  const requestId = ++graphRequestId;
   const summaryEl = document.getElementById("graphSummary");
   const emptyEl = document.getElementById("graphEmpty");
   const svg = document.getElementById("graphViz");
@@ -117,10 +273,12 @@ async function loadGraph() {
 
   try {
     const [summaryRes, nodesRes, relsRes] = await Promise.all([
-      fetch(`${API}/graph/summary`, { headers: authHeaders() }),
-      fetch(`${API}/graph/nodes?limit=15`, { headers: authHeaders() }),
-      fetch(`${API}/graph/relationships?limit=25`, { headers: authHeaders() }),
+      fetch(`${API}/graph/summary${buildQuery({})}`, { headers: authHeaders() }),
+      fetch(`${API}/graph/nodes${buildQuery({ limit: 15 })}`, { headers: authHeaders() }),
+      fetch(`${API}/graph/relationships${buildQuery({ limit: 25 })}`, { headers: authHeaders() }),
     ]);
+
+    if (requestId !== graphRequestId) return; // a newer selection has already superseded this one
 
     if (summaryRes.status === 401) {
       emptyEl.style.display = "block";
@@ -142,6 +300,7 @@ async function loadGraph() {
     const summary = await summaryRes.json();
     const nodes = await nodesRes.json();
     const rels = await relsRes.json();
+    if (requestId !== graphRequestId) return; // superseded again while parsing the responses
 
     summaryEl.innerHTML = `
       <div class="stat"><span class="num">${summary.node_count}</span><span class="label">Nodes</span></div>
@@ -151,7 +310,10 @@ async function loadGraph() {
     if (nodes.length === 0) {
       emptyEl.style.display = "block";
       svg.innerHTML = "";
-      insightEl.textContent = "";
+      // Still explain *whose* empty view this is -- a rep with nothing
+      // assigned to them yet should read as "this person can't see anything
+      // here," not as a broken page.
+      insightEl.textContent = getSelectedUser() ? describeGraph(summary, nodes) : "";
       document.getElementById("suggestedQuestions").innerHTML = "";
     } else {
       emptyEl.style.display = "none";
@@ -165,13 +327,25 @@ async function loadGraph() {
 }
 
 // Turns the raw counts into a sentence a stakeholder can act on, rather than
-// making them infer what "4 nodes, 6 relationships" means on their own.
+// making them infer what "4 nodes, 6 relationships" means on their own. When
+// a user is selected, this is also the proof that role-based visibility is
+// actually filtering, not just decorating the page with a dropdown -- it
+// names whose view this is and how much of the knowledge base that leaves out.
 function describeGraph(summary, nodes) {
   const { node_count, relationship_count } = summary;
   const density = node_count > 0 ? (relationship_count / node_count).toFixed(1) : 0;
-  return `So far it has found ${node_count} things and ${relationship_count} connections ` +
-    `between them, or about ${density} connections per thing on average. This is a small ` +
-    `starting set, and it'll grow as more information is added.`;
+  const base = `${node_count} things and ${relationship_count} connections between them` +
+    (node_count > 0 ? `, or about ${density} connections per thing on average` : "");
+
+  const userId = getSelectedUser();
+  const user = userId ? userDirectory[userId] : null;
+  if (user) {
+    return `Viewing as ${user.name} (${user.role}): they can see ${base}. ` +
+      `That's everything assigned to them plus everyone who reports to them in the org chart, ` +
+      `not the whole knowledge base. Switch "Everyone" in the role dropdown to see it all.`;
+  }
+  return `So far it has found ${base}. This is a small starting set, and it'll grow as more ` +
+    `information is added.`;
 }
 
 // Turns real node names from this tenant's own graph into example questions,
@@ -274,7 +448,13 @@ function escapeXml(s) {
 }
 
 // --- Ask a question -------------------------------------------------
+// Same staleness problem as loadGraph()'s graphRequestId: asking a second
+// question (or switching knowledge bases) before the first answer comes back
+// shouldn't let the first, slower response overwrite the newer one.
+let askRequestId = 0;
+
 document.getElementById("askBtn").addEventListener("click", async () => {
+  const requestId = ++askRequestId;
   const answerEl = document.getElementById("queryAnswer");
   const factsEl = document.getElementById("queryFacts");
   const rawWrap = document.getElementById("queryRawWrap");
@@ -295,8 +475,14 @@ document.getElementById("askBtn").addEventListener("click", async () => {
     const res = await fetch(`${API}/context/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({
+        query,
+        knowledge_base: getSelectedKnowledgeBase() || undefined,
+        as_user: getSelectedUser() || undefined,
+      }),
     });
+    if (requestId !== askRequestId) return; // a newer question has already superseded this one
+
     if (res.status === 401) {
       answerEl.textContent = "That key doesn't match anything on file. Double-check it, or ask whoever set this up for you for the right one.";
       return;
@@ -306,6 +492,8 @@ document.getElementById("askBtn").addEventListener("click", async () => {
       return;
     }
     const data = await res.json();
+    if (requestId !== askRequestId) return;
+
     const summary = data.metadata?.summary;
     const facts = data.metadata?.facts || [];
 
@@ -356,8 +544,10 @@ document.getElementById("queryInput").addEventListener("keydown", (e) => {
 });
 
 // --- Init -------------------------------------------------------------------
-function loadTenantData() {
+async function loadTenantData() {
   loadOntology();
+  await loadKnowledgeBases();
+  await loadUsers();
   loadGraph();
 }
 

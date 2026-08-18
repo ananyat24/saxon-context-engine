@@ -12,5 +12,7 @@ from typing import Any, Optional, Protocol
 
 
 class TextRetriever(Protocol):
-    async def retrieve(self, query: str, group_ids: Optional[list[str]] = None) -> list[dict[str, Any]]:
+    async def retrieve(
+        self, query: str, group_ids: Optional[list[str]] = None, visible_uuids: Optional[set[str]] = None
+    ) -> list[dict[str, Any]]:
         ...

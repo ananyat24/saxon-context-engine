@@ -39,10 +39,27 @@ class GraphRepository:
                 client.close()
 
     async def search_graphiti_facts(
-        self, query_text: str, group_ids: Optional[list[str]] = None
+        self,
+        query_text: str,
+        group_ids: Optional[list[str]] = None,
+        visible_uuids: Optional[set[str]] = None,
     ) -> list[dict[str, Any]]:
         """Query Graphiti for facts relevant to query_text, including whether each
-        fact is still currently valid or has since been superseded/invalidated."""
+        fact is still currently valid or has since been superseded/invalidated.
+
+        `visible_uuids`, if given, drops any fact where *neither* end is
+        something this caller directly owns -- role-based visibility for the
+        Ask path (see app/graph/authorization.py). Graphiti's own search has
+        no concept of this, so it's applied here as a post-filter; that's
+        cheap rather than a scaling risk, since Graphiti already caps its own
+        result count before this ever runs, so this loop is bounded by that
+        cap, not by knowledge base size. Requiring only *one* end to be owned
+        (not both) is deliberate: a visible customer's employer or assets
+        should still show up as context about that customer, even though the
+        employer/asset itself isn't separately assigned to anyone. What this
+        does still prevent is a fact between two entities *neither* of which
+        the caller owns just because it matched the search semantically.
+        """
         if not self.graphiti:
             logger.warning("Graphiti instance not set in GraphRepository.")
             return []
@@ -50,10 +67,14 @@ class GraphRepository:
         results = await self.graphiti.search(query_text, group_ids=group_ids)
         facts = []
         for r in results:
+            source_uuid = getattr(r, "source_node_uuid", "")
+            target_uuid = getattr(r, "target_node_uuid", "")
+            if visible_uuids is not None and source_uuid not in visible_uuids and target_uuid not in visible_uuids:
+                continue
             facts.append({
                 "fact": r.fact,
-                "source_node_uuid": getattr(r, "source_node_uuid", ""),
-                "target_node_uuid": getattr(r, "target_node_uuid", ""),
+                "source_node_uuid": source_uuid,
+                "target_node_uuid": target_uuid,
                 "valid_at": getattr(r, "valid_at", None),
                 "invalid_at": getattr(r, "invalid_at", None),
                 "expired_at": getattr(r, "expired_at", None),

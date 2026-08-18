@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 class TenantGraphitiPool:
-    """Builds and caches one Graphiti client per tenant, keyed by group_id."""
+    """Builds and caches one Graphiti client per tenant, keyed by tenant_id.
+
+    One tenant can have several knowledge bases (group_ids) sharing this one
+    client -- group_id is just a data partition tag on nodes/edges, not a
+    separate connection, so switching knowledge bases never needs a new client."""
 
     def __init__(self) -> None:
         self._clients: dict[str, Graphiti] = {}
@@ -29,25 +33,25 @@ class TenantGraphitiPool:
         self._lock = asyncio.Lock()
 
     async def get_or_create(self, tenant: TenantConfig) -> Graphiti:
-        existing = self._clients.get(tenant.group_id)
+        existing = self._clients.get(tenant.tenant_id)
         if existing is not None:
             return existing
 
         async with self._lock:
             # Re-check: another request may have built it while we waited for the lock.
-            existing = self._clients.get(tenant.group_id)
+            existing = self._clients.get(tenant.tenant_id)
             if existing is not None:
                 return existing
 
-            logger.info(f"Building Graphiti client for tenant '{tenant.group_id}'")
+            logger.info(f"Building Graphiti client for tenant '{tenant.tenant_id}'")
             client = build_graphiti(google_api_key=tenant.gemini_api_key)
-            self._clients[tenant.group_id] = client
+            self._clients[tenant.tenant_id] = client
             return client
 
     async def close_all(self) -> None:
-        for group_id, client in self._clients.items():
+        for tenant_id, client in self._clients.items():
             try:
                 await client.close()
             except Exception as e:
-                logger.error(f"Error closing Graphiti client for tenant '{group_id}': {e}")
+                logger.error(f"Error closing Graphiti client for tenant '{tenant_id}': {e}")
         self._clients.clear()

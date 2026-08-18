@@ -1,28 +1,43 @@
 # POST /api/v1/context/query -- the main "ask a question, get assembled context back"
 # endpoint. Delegates all the actual work to ContextOrchestrator; this file is just
 # the HTTP request/response wiring around it.
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.config import TenantConfig
 from app.context.orchestrator import ContextOrchestrator
-from app.security import require_tenant
+from app.graph import authorization
+from app.security import require_tenant, resolve_knowledge_base
 
 router = APIRouter()
 
 
 class SearchQueryRequest(BaseModel):
-    query: str
-    # Note: no group_id/API-key field here on purpose. Which tenant a request
-    # belongs to -- and therefore whose data and whose Gemini key it uses -- is
-    # determined by the X-API-Key header (via require_tenant below), not by
-    # anything the caller states in the request body. See app/security.py.
+    # Capped so a client can't send an arbitrarily large string straight into
+    # a paid LLM call -- every query here costs real tokens on the tenant's
+    # own Gemini key, and there's no other rate limiting in front of this yet.
+    query: str = Field(min_length=1, max_length=2000)
+    # Which of the tenant's own knowledge bases to search; defaults to that
+    # tenant's first one if omitted. Note there's no API-key field here --
+    # which tenant a request belongs to, and therefore whose Gemini key it
+    # uses, is determined by the X-API-Key header (via require_tenant below),
+    # not by anything the caller states in the request body. See app/security.py.
+    knowledge_base: Optional[str] = None
+    # Answer only from what this person can see in the org hierarchy, rather
+    # than the whole knowledge base -- see app/graph/authorization.py.
+    as_user: Optional[str] = None
 
 
 @router.post("/query")
 async def query_context(req: SearchQueryRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)):
+    group_id = resolve_knowledge_base(tenant, req.knowledge_base)
+    user_id = authorization.resolve_as_user(group_id, req.as_user)
+    visible_uuids = authorization.get_visible_entity_uuids(group_id, user_id) if user_id is not None else None
+
     # Each tenant gets their own cached Graphiti client, built with their own
     # Gemini key on first use and reused after that -- see
     # app/graph/tenant_graphiti_pool.py.
     graphiti = await request.app.state.graphiti_pool.get_or_create(tenant)
     orchestrator = ContextOrchestrator(graphiti)
-    return await orchestrator.get_context_packet(req.query, group_ids=[tenant.group_id])
+    return await orchestrator.get_context_packet(req.query, group_ids=[group_id], visible_uuids=visible_uuids)

@@ -18,7 +18,7 @@ class GraphRetriever:
         self.repository = GraphRepository(graphiti_instance)
 
     async def retrieve(
-        self, query: str, group_ids: Optional[list[str]] = None
+        self, query: str, group_ids: Optional[list[str]] = None, visible_uuids: Optional[set[str]] = None
     ) -> list[dict[str, Any]]:
         logger.info(f"Retrieving graph context for query: '{query}'")
-        return await self.repository.search_graphiti_facts(query, group_ids=group_ids)
+        return await self.repository.search_graphiti_facts(query, group_ids=group_ids, visible_uuids=visible_uuids)

@@ -13,16 +13,43 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class KnowledgeBase(BaseModel):
+    """One selectable dataset within a tenant, e.g. "Northwind" or "Contoso Data
+    Warehouse". `id` is the group_id used to scope Neo4j queries and Graphiti
+    search (see app/security.py's resolve_knowledge_base); `label` is what a
+    client shows in a picker."""
+
+    id: str
+    label: str
+
+
 class TenantConfig(BaseModel):
-    """One client's identity and their own Gemini API key.
+    """One client's identity, their own Gemini API key, and the knowledge bases
+    (datasets) they're allowed to query.
 
     Each tenant brings their own Gemini key rather than sharing the operator's --
     see app/graph/tenant_graphiti_pool.py for why, and app/security.py for how a
     request gets matched to one of these via its API key.
+
+    A tenant can have more than one knowledge base (multiple group_ids under one
+    Gemini key/client) so a client can switch between datasets without needing a
+    separate API key per dataset. Every request still must name one of *this*
+    tenant's own knowledge bases -- see app/security.py's resolve_knowledge_base --
+    so a client can never reach a group_id outside its own list.
     """
 
-    group_id: str
+    tenant_id: str
     gemini_api_key: str
+    # min_length=1: default_knowledge_base_id() assumes there's at least one.
+    # Failing to load an empty-list tenant at startup is better than a 500 the
+    # first time someone hits an endpoint for it.
+    knowledge_bases: list[KnowledgeBase] = Field(min_length=1)
+
+    def default_knowledge_base_id(self) -> str:
+        return self.knowledge_bases[0].id
+
+    def knowledge_base_ids(self) -> set[str]:
+        return {kb.id for kb in self.knowledge_bases}
 
 
 # Where tenants are managed day-to-day: `python scripts/manage_tenants.py add/list/
@@ -53,11 +80,12 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "password"
 
-    # Maps API keys to a TenantConfig (their group_id + their own Gemini key).
+    # Maps API keys to a TenantConfig (their own Gemini key + knowledge bases).
     # Normally populated from config/tenants.json (see TENANT_CONFIG_PATH above),
     # not from this field directly -- but it can also be set as a JSON object in
     # .env for platforms that prefer environment-variable configuration, e.g.:
-    #   TENANT_API_KEYS={"<api-key>": {"group_id": "<tenant>", "gemini_api_key": "<their-key>"}}
+    #   TENANT_API_KEYS={"<api-key>": {"tenant_id": "<tenant>", "gemini_api_key": "<their-key>",
+    #                                   "knowledge_bases": [{"id": "<group_id>", "label": "<name>"}]}}
     # Empty by default, meaning no API key will be valid until at least one tenant
     # is added (via the script, or this variable).
     tenant_api_keys: dict[str, TenantConfig] = Field(default_factory=dict)
