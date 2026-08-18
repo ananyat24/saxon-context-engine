@@ -382,7 +382,7 @@ function renderGraph(svg, nodes, rels) {
   // neighbors shrinks as more nodes share the same circle. Growing the
   // radius (and the canvas around it) with node count keeps that spacing
   // roughly constant instead.
-  const r = Math.max(130, count * 13);
+  const r = Math.max(140, count * 16);
   const pad = 90; // room for labels/edge curves sticking out past the circle
   const w = r * 2 + pad * 2;
   const h = w;
@@ -391,7 +391,7 @@ function renderGraph(svg, nodes, rels) {
 
   // Denser graphs also need shorter labels and smaller text so neighboring
   // labels have a chance of not colliding even with more room between nodes.
-  const labelMaxLen = count > 25 ? 10 : count > 15 ? 14 : 18;
+  const labelMaxLen = count > 25 ? 9 : count > 15 ? 11 : count > 10 ? 14 : 18;
   const fontSize = count > 25 ? 7 : count > 15 ? 8 : 9;
 
   const positions = {};
@@ -444,7 +444,7 @@ function renderGraph(svg, nodes, rels) {
     // Alternate how far the label sits from its node so two labels on
     // adjacent, closely-spaced nodes don't land at the same height and
     // overlap -- only really visible once a graph has 15+ nodes on the circle.
-    const labelOffset = 12 + (i % 2) * 9;
+    const labelOffset = 12 + (i % 2) * 14;
     svgContent += `<circle class="gv-node" cx="${p.x}" cy="${p.y}" r="6">
       <title>${escapeXml(n.summary || n.name)}</title>
     </circle>`;
