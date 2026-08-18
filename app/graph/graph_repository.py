@@ -3,11 +3,27 @@
 # and Graphiti's own higher-level search API, which understands time ("what was true
 # on this date") on top of the same underlying graph.
 import logging
+import re
 from typing import Any, Optional
 from graphiti_core import Graphiti
 from app.graph.neo4j_client import Neo4jClient
 
 logger = logging.getLogger(__name__)
+
+# Graphiti's search ranks edges by RRF-fused vector/text similarity with no
+# relevance threshold -- it always returns its top-N, even when nothing in the
+# graph is actually related to the query. That's fine for open-ended questions,
+# but for a query naming a specific entity (e.g. "What's changed about Rhodes
+# Furniture?") it means an entity with few or no edges of its own gets padded
+# out with other entities' unrelated facts that just happen to read similarly.
+# This regex pulls out multi-word capitalized phrases so a named entity can be
+# resolved directly against the graph and its own edges/summary used instead.
+_PROPER_NOUN_RE = re.compile(r"\b[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*)+\b")
+
+
+def _extract_candidate_entities(query_text: str) -> list[str]:
+    candidates = set(_PROPER_NOUN_RE.findall(query_text))
+    return sorted(candidates, key=len, reverse=True)
 
 
 class GraphRepository:
@@ -38,31 +54,138 @@ class GraphRepository:
             if client is not self._owned_client:
                 client.close()
 
+    def _resolve_named_entity(
+        self, query_text: str, group_id: str, visible_uuids: Optional[set[str]]
+    ) -> Optional[dict[str, Any]]:
+        """Looks for a specifically-named entity in the query and matches it against
+        real node names in this knowledge base, so a query like "What's changed
+        about Rhodes Furniture?" can be grounded to that exact node instead of
+        left to semantic search to guess at. Returns the matched row, "not_found"
+        if a name-shaped candidate was mentioned but doesn't exist (or isn't
+        visible to this caller), or None if the query doesn't name anything
+        specific enough to resolve (a normal open-ended query).
+        """
+        candidates = _extract_candidate_entities(query_text)
+        if not candidates:
+            return None
+
+        for candidate in candidates:
+            rows = self.execute_cypher(
+                "MATCH (n:Entity {group_id: $group_id}) WHERE toLower(n.name) = toLower($name) "
+                "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary LIMIT 1",
+                {"group_id": group_id, "name": candidate},
+            )
+            if not rows:
+                rows = self.execute_cypher(
+                    "MATCH (n:Entity {group_id: $group_id}) WHERE toLower(n.name) CONTAINS toLower($name) "
+                    "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary LIMIT 1",
+                    {"group_id": group_id, "name": candidate},
+                )
+            if rows:
+                row = rows[0]
+                if visible_uuids is not None and row["uuid"] not in visible_uuids:
+                    # Exists, but this caller isn't authorized to see it -- keep
+                    # trying other candidates rather than leaking that it exists.
+                    continue
+                return row
+        return "not_found"
+
+    def _entity_own_facts(self, uuid: str, visible_uuids: Optional[set[str]]) -> list[dict[str, Any]]:
+        """Pulls every edge directly touching a resolved entity straight from
+        Neo4j -- precise by construction, unlike semantic search, since it can
+        only ever return facts that are actually about this entity."""
+        rows = self.execute_cypher(
+            "MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-(m) "
+            "RETURN r.fact AS fact, r.valid_at AS valid_at, r.invalid_at AS invalid_at, "
+            "r.expired_at AS expired_at, startNode(r).uuid AS source_node_uuid, "
+            "endNode(r).uuid AS target_node_uuid",
+            {"uuid": uuid},
+        )
+        facts = []
+        for row in rows:
+            if (
+                visible_uuids is not None
+                and row["source_node_uuid"] not in visible_uuids
+                and row["target_node_uuid"] not in visible_uuids
+            ):
+                continue
+            facts.append({
+                "fact": row["fact"],
+                "source_node_uuid": row["source_node_uuid"],
+                "target_node_uuid": row["target_node_uuid"],
+                "valid_at": row["valid_at"],
+                "invalid_at": row["invalid_at"],
+                "expired_at": row["expired_at"],
+                "is_valid": row["expired_at"] is None and row["invalid_at"] is None,
+            })
+        return facts
+
     async def search_graphiti_facts(
         self,
         query_text: str,
         group_ids: Optional[list[str]] = None,
         visible_uuids: Optional[set[str]] = None,
     ) -> list[dict[str, Any]]:
-        """Query Graphiti for facts relevant to query_text, including whether each
-        fact is still currently valid or has since been superseded/invalidated.
+        """Query for facts relevant to query_text, including whether each fact is
+        still currently valid or has since been superseded/invalidated.
 
         `visible_uuids`, if given, drops any fact where *neither* end is
         something this caller directly owns -- role-based visibility for the
-        Ask path (see app/graph/authorization.py). Graphiti's own search has
-        no concept of this, so it's applied here as a post-filter; that's
-        cheap rather than a scaling risk, since Graphiti already caps its own
-        result count before this ever runs, so this loop is bounded by that
-        cap, not by knowledge base size. Requiring only *one* end to be owned
-        (not both) is deliberate: a visible customer's employer or assets
-        should still show up as context about that customer, even though the
-        employer/asset itself isn't separately assigned to anyone. What this
-        does still prevent is a fact between two entities *neither* of which
-        the caller owns just because it matched the search semantically.
+        Ask path (see app/graph/authorization.py). Requiring only *one* end to
+        be owned (not both) is deliberate: a visible customer's employer or
+        assets should still show up as context about that customer, even
+        though the employer/asset itself isn't separately assigned to anyone.
+        What this does still prevent is a fact between two entities *neither*
+        of which the caller owns just because it matched the search
+        semantically.
+
+        If the query names a specific entity (e.g. "What's changed about
+        Rhodes Furniture?"), that name is resolved against the graph first and
+        its own edges/summary are used directly instead of relying on
+        Graphiti's hybrid search -- which has no relevance threshold and will
+        happily pad out an entity with few or no edges of its own using other
+        entities' unrelated facts that merely read similarly. A name that
+        doesn't resolve to anything real short-circuits with a clear "not
+        found" rather than substituting unrelated results.
         """
         if not self.graphiti:
             logger.warning("Graphiti instance not set in GraphRepository.")
             return []
+
+        group_id = group_ids[0] if group_ids else None
+        resolved = self._resolve_named_entity(query_text, group_id, visible_uuids) if group_id else None
+
+        if resolved == "not_found":
+            return [{
+                "fact": "No entity matching that name was found in this knowledge base.",
+                "source_node_uuid": "",
+                "target_node_uuid": "",
+                "valid_at": None,
+                "invalid_at": None,
+                "expired_at": None,
+                "is_valid": True,
+            }]
+
+        if resolved:
+            # A named entity resolved -- use its own edges directly (precise by
+            # construction) plus its summary as a single, already-consolidated
+            # lead line, instead of Graphiti's hybrid search, which has no
+            # relevance threshold and would pad out a sparse entity with other
+            # entities' unrelated facts. Also skips a paid search call we'd
+            # otherwise throw away.
+            facts = self._entity_own_facts(resolved["uuid"], visible_uuids)
+            if resolved.get("summary"):
+                facts.insert(0, {
+                    "fact": resolved["summary"],
+                    "source_node_uuid": resolved["uuid"],
+                    "target_node_uuid": resolved["uuid"],
+                    "valid_at": None,
+                    "invalid_at": None,
+                    "expired_at": None,
+                    "is_valid": True,
+                    "kind": "entity_summary",
+                })
+            return facts
 
         results = await self.graphiti.search(query_text, group_ids=group_ids)
         facts = []

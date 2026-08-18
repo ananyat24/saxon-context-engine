@@ -92,15 +92,36 @@ class ContextOrchestrator:
         for retriever in self.retrievers:
             raw_facts.extend(await retriever.retrieve(query, group_ids=group_ids, visible_uuids=visible_uuids))
 
-        transitions, replaced_fact_ids = _find_transitions(raw_facts)
+        # A resolved entity's own summary (see GraphRepository._resolve_named_entity)
+        # is already one consolidated, holistic statement about it, generated at
+        # ingestion time -- lead with that rather than the individual edges below it.
+        entity_summary_lines = [
+            line
+            for f in raw_facts
+            if f.get("kind") == "entity_summary"
+            for line in f["fact"].splitlines()
+            if line.strip()
+        ]
+        edge_facts = [f for f in raw_facts if f.get("kind") != "entity_summary"]
+
+        transitions, replaced_fact_ids = _find_transitions(edge_facts)
         transition_lines = [_describe_transition(old, new) for old, new in transitions]
         plain_lines = [
             f["fact"]
-            for f in raw_facts
+            for f in edge_facts
             if f.get("is_valid", True) and id(f) not in replaced_fact_ids
         ]
 
-        summary_lines = transition_lines + plain_lines
+        # A resolved entity's summary can restate facts that are also present as
+        # individual edges verbatim (Graphiti doesn't guarantee the two are
+        # distinct) -- dedupe by exact text, keeping first occurrence, so the
+        # same sentence never shows up twice.
+        summary_lines = []
+        seen = set()
+        for line in entity_summary_lines + transition_lines + plain_lines:
+            if line not in seen:
+                seen.add(line)
+                summary_lines.append(line)
         summary_text = "\n".join(summary_lines) if summary_lines else "No matching graph context found."
 
         return ContextPacket(
