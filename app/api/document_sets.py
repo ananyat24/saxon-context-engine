@@ -68,6 +68,31 @@ def create_document_set(
     return _serialize(created, tenant)
 
 
+@router.put("/{document_set_id}")
+def update_document_set(
+    document_set_id: str,
+    req: CreateDocumentSetRequest,
+    request: Request,
+    tenant: TenantConfig = Depends(require_tenant),
+):
+    """Full replace, not a partial patch -- the edit form always submits a
+    complete name/connectors/is_public, same shape as create (see
+    CreateDocumentSetRequest)."""
+    unknown = set(req.connector_ids) - tenant.knowledge_base_ids()
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown connector(s) for this tenant: {', '.join(sorted(unknown))}",
+        )
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    updated = document_sets.update_document_set(
+        tenant.tenant_id, document_set_id, req.name.strip(), req.connector_ids, req.is_public, repo=repo
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document set not found.")
+    return _serialize(updated, tenant)
+
+
 @router.delete("/{document_set_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_document_set(document_set_id: str, request: Request, tenant: TenantConfig = Depends(require_tenant)):
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)

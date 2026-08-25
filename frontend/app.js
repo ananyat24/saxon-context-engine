@@ -100,17 +100,23 @@ let documentSetDirectory = [];
 // Not persisted across reloads, same reasoning as selectedUser: this is a
 // live choice about the question you're about to ask, not a standing setting.
 let selectedDocumentSet = "";
+// Which document set the create/edit form below is currently editing, if
+// any -- "" means the form is in "new document set" mode. The form itself
+// is shared between create and edit (same fields either way) rather than
+// duplicating it, so editing "just" means pre-filling it and switching what
+// the submit button does.
+let editingDocSetId = "";
 
 function getSelectedDocumentSet() {
   return selectedDocumentSet;
 }
 
-function renderDocSetConnectorPicker() {
+function renderDocSetConnectorPicker(checkedIds = []) {
   const container = document.getElementById("docSetConnectors");
   container.innerHTML = knowledgeBaseDirectory
     .map(
       (kb) => `<label>
-        <input type="checkbox" value="${escapeXml(kb.id)}" />
+        <input type="checkbox" value="${escapeXml(kb.id)}" ${checkedIds.includes(kb.id) ? "checked" : ""} />
         ${escapeXml(kb.label)}
       </label>`
     )
@@ -137,12 +143,24 @@ function renderDocSetsTable() {
         <td>${connectorLabels}</td>
         <td><span class="badge badge-ok">${escapeXml(ds.status)}</span></td>
         <td>${publicBadge}</td>
-        <td><button class="delete-btn" type="button" data-delete-id="${escapeXml(ds.id)}">Delete</button></td>
+        <td>
+          <button class="delete-btn" type="button" data-edit-id="${escapeXml(ds.id)}">Edit</button>
+          <button class="delete-btn" type="button" data-delete-id="${escapeXml(ds.id)}">Delete</button>
+        </td>
       </tr>`;
     })
     .join("");
+  body.querySelectorAll("[data-edit-id]").forEach((btn) => {
+    btn.addEventListener("click", () => startEditDocSet(btn.dataset.editId));
+  });
   body.querySelectorAll("[data-delete-id]").forEach((btn) => {
-    btn.addEventListener("click", () => deleteDocumentSet(btn.dataset.deleteId));
+    btn.addEventListener("click", () => {
+      const ds = documentSetDirectory.find((d) => d.id === btn.dataset.deleteId);
+      const label = ds ? `"${ds.name}"` : "this document set";
+      if (window.confirm(`Delete ${label}? This can't be undone.`)) {
+        deleteDocumentSet(btn.dataset.deleteId);
+      }
+    });
   });
 }
 
@@ -192,6 +210,34 @@ document.getElementById("scopeSelect").addEventListener("change", (e) => {
   selectedDocumentSet = e.target.value;
 });
 
+function resetDocSetForm() {
+  editingDocSetId = "";
+  document.getElementById("docSetFormSummary").textContent = "New document set";
+  document.getElementById("createDocSetBtn").textContent = "Create document set";
+  document.getElementById("cancelDocSetEditBtn").hidden = true;
+  document.getElementById("docSetName").value = "";
+  document.getElementById("docSetPublic").checked = true;
+  renderDocSetConnectorPicker();
+  document.getElementById("docSetStatus").textContent = "";
+}
+
+function startEditDocSet(id) {
+  const ds = documentSetDirectory.find((d) => d.id === id);
+  if (!ds) return;
+  editingDocSetId = id;
+  document.getElementById("docSetFormWrap").open = true;
+  document.getElementById("docSetFormSummary").textContent = `Editing "${ds.name}"`;
+  document.getElementById("createDocSetBtn").textContent = "Save changes";
+  document.getElementById("cancelDocSetEditBtn").hidden = false;
+  document.getElementById("docSetName").value = ds.name;
+  document.getElementById("docSetPublic").checked = ds.is_public;
+  renderDocSetConnectorPicker(ds.connectors.map((c) => c.id));
+  document.getElementById("docSetStatus").textContent = "";
+  document.getElementById("docSetFormWrap").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+document.getElementById("cancelDocSetEditBtn").addEventListener("click", resetDocSetForm);
+
 document.getElementById("createDocSetBtn").addEventListener("click", async () => {
   const statusEl = document.getElementById("docSetStatus");
   const name = document.getElementById("docSetName").value.trim();
@@ -199,6 +245,7 @@ document.getElementById("createDocSetBtn").addEventListener("click", async () =>
     document.querySelectorAll("#docSetConnectors input:checked")
   ).map((el) => el.value);
   const isPublic = document.getElementById("docSetPublic").checked;
+  const isEditing = !!editingDocSetId;
 
   if (!name) {
     statusEl.textContent = "Give this document set a name.";
@@ -211,23 +258,25 @@ document.getElementById("createDocSetBtn").addEventListener("click", async () =>
     return;
   }
 
-  statusEl.textContent = "Creating…";
+  statusEl.textContent = isEditing ? "Saving…" : "Creating…";
   statusEl.className = "status-line";
   try {
-    const res = await fetch(`${API}/document-sets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ name, connector_ids: connectorIds, is_public: isPublic }),
-    });
+    const res = await fetch(
+      isEditing ? `${API}/document-sets/${encodeURIComponent(editingDocSetId)}` : `${API}/document-sets`,
+      {
+        method: isEditing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ name, connector_ids: connectorIds, is_public: isPublic }),
+      }
+    );
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      statusEl.textContent = body.detail || "Could not create that document set.";
+      statusEl.textContent = body.detail || `Could not ${isEditing ? "save" : "create"} that document set.`;
       statusEl.className = "status-line bad";
       return;
     }
-    document.getElementById("docSetName").value = "";
-    document.getElementById("docSetPublic").checked = true;
-    statusEl.textContent = "Created.";
+    resetDocSetForm();
+    statusEl.textContent = isEditing ? "Saved." : "Created.";
     statusEl.className = "status-line ok";
     await loadDocumentSets();
   } catch (err) {
@@ -244,7 +293,176 @@ async function deleteDocumentSet(id) {
     });
     if (!res.ok && res.status !== 204) return;
     if (selectedDocumentSet === id) selectedDocumentSet = "";
+    if (editingDocSetId === id) resetDocSetForm();
     await loadDocumentSets();
+  } catch (err) {
+    // Silently leave the row in place -- the delete button itself is the
+    // retry affordance, no need for a dedicated error banner here.
+  }
+}
+
+// --- Source connectors -------------------------------------------------------
+// Pulls content in from an external source (a web page today) into one of
+// the tenant's knowledge bases -- see app/graph/connectors.py and
+// app/api/connectors.py. Distinct from "connector" as used in the Document
+// Sets section above (there it means one of the tenant's existing knowledge
+// bases); here it means the thing that gets data INTO one in the first
+// place. Every connector here belongs to the current tenant only (enforced
+// server-side).
+let connectorDirectory = [];
+
+function renderConnectorKbSelect() {
+  const select = document.getElementById("connectorKbSelect");
+  select.innerHTML = knowledgeBaseDirectory
+    .map((kb) => `<option value="${escapeXml(kb.id)}">${escapeXml(kb.label)}</option>`)
+    .join("");
+}
+
+function formatSyncStatus(c) {
+  const labels = {
+    never_synced: "Never synced",
+    synced: "Synced",
+    unchanged: "Up to date",
+    error: "Error",
+  };
+  const label = labels[c.status] || c.status;
+  const cls = c.status === "error" ? "badge-bad" : c.status === "never_synced" ? "badge-muted" : "badge-ok";
+  const title = c.status === "error" && c.last_error ? ` title="${escapeXml(c.last_error)}"` : "";
+  return `<span class="badge ${cls}"${title}>${escapeXml(label)}</span>`;
+}
+
+function renderConnectorsTable() {
+  const body = document.getElementById("connectorsBody");
+  const empty = document.getElementById("connectorsEmpty");
+  if (connectorDirectory.length === 0) {
+    body.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  const kbLabel = (id) => knowledgeBaseDirectory.find((kb) => kb.id === id)?.label || id;
+  body.innerHTML = connectorDirectory
+    .map((c) => {
+      const lastSynced = c.last_synced_at ? new Date(c.last_synced_at).toLocaleString() : "—";
+      return `<tr data-id="${escapeXml(c.id)}">
+        <td>${escapeXml(c.name)}</td>
+        <td><span class="muted" style="font-size:0.8rem">${escapeXml(c.url)}</span></td>
+        <td>${escapeXml(kbLabel(c.group_id))}</td>
+        <td>${formatSyncStatus(c)}</td>
+        <td><span class="muted" style="font-size:0.8rem">${escapeXml(lastSynced)}</span></td>
+        <td>
+          <button class="sync-btn" type="button" data-sync-id="${escapeXml(c.id)}">Sync now</button>
+          <button class="delete-btn" type="button" data-delete-connector-id="${escapeXml(c.id)}">Delete</button>
+        </td>
+      </tr>`;
+    })
+    .join("");
+  body.querySelectorAll("[data-sync-id]").forEach((btn) => {
+    btn.addEventListener("click", () => syncConnector(btn.dataset.syncId));
+  });
+  body.querySelectorAll("[data-delete-connector-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const c = connectorDirectory.find((x) => x.id === btn.dataset.deleteConnectorId);
+      const label = c ? `"${c.name}"` : "this connector";
+      if (window.confirm(`Remove ${label}? This won't remove anything already added to the graph.`)) {
+        deleteConnector(btn.dataset.deleteConnectorId);
+      }
+    });
+  });
+}
+
+async function loadConnectors() {
+  const card = document.getElementById("connectorsCard");
+  if (!getApiKey()) {
+    card.hidden = true;
+    connectorDirectory = [];
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/connectors`, { headers: authHeaders() });
+    if (!res.ok) {
+      card.hidden = true;
+      return;
+    }
+    connectorDirectory = await res.json();
+    card.hidden = false;
+    renderConnectorKbSelect();
+    renderConnectorsTable();
+  } catch (err) {
+    card.hidden = true;
+  }
+}
+
+document.getElementById("createConnectorBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("connectorStatus");
+  const name = document.getElementById("connectorName").value.trim();
+  const url = document.getElementById("connectorUrl").value.trim();
+  const groupId = document.getElementById("connectorKbSelect").value;
+
+  if (!name || !url) {
+    statusEl.textContent = "Give the connector a name and a URL.";
+    statusEl.className = "status-line bad";
+    return;
+  }
+
+  statusEl.textContent = "Adding…";
+  statusEl.className = "status-line";
+  try {
+    const res = await fetch(`${API}/connectors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ name, type: "web", group_id: groupId, url }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      statusEl.textContent = body.detail || "Could not add that connector.";
+      statusEl.className = "status-line bad";
+      return;
+    }
+    document.getElementById("connectorName").value = "";
+    document.getElementById("connectorUrl").value = "";
+    statusEl.textContent = "Added. Click \"Sync now\" on it below to pull its content in.";
+    statusEl.className = "status-line ok";
+    await loadConnectors();
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+    statusEl.className = "status-line bad";
+  }
+});
+
+async function syncConnector(id) {
+  const row = document.querySelector(`#connectorsBody tr[data-id="${CSS.escape(id)}"]`);
+  const btn = row?.querySelector("[data-sync-id]");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Syncing…";
+  }
+  try {
+    const res = await fetch(`${API}/connectors/${encodeURIComponent(id)}/sync`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    // A 402 (spend cap hit) or any other non-2xx still means the connector's
+    // own status was recorded server-side (see app/api/connectors.py) --
+    // reloading the list picks that up either way, so there's no separate
+    // error branch needed here beyond letting the reload happen.
+    await res.json().catch(() => ({}));
+  } catch (err) {
+    // Network failure before a response came back at all -- the connector's
+    // last known status just stays what it was; reload still runs below so
+    // the row doesn't stay stuck on "Syncing...".
+  }
+  await loadConnectors();
+}
+
+async function deleteConnector(id) {
+  try {
+    const res = await fetch(`${API}/connectors/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!res.ok && res.status !== 204) return;
+    await loadConnectors();
   } catch (err) {
     // Silently leave the row in place -- the delete button itself is the
     // retry affordance, no need for a dedicated error banner here.
@@ -787,6 +1005,7 @@ async function loadTenantData() {
   loadOntology();
   await loadKnowledgeBases();
   await loadUsers();
+  await loadConnectors();
   await loadDocumentSets();
   loadGraph();
 }

@@ -88,6 +88,38 @@ def create_document_set(
     return {"id": doc_set_id, "name": name, "connector_ids": connector_ids, "is_public": is_public}
 
 
+def update_document_set(
+    tenant_id: str,
+    document_set_id: str,
+    name: str,
+    connector_ids: list[str],
+    is_public: bool,
+    repo: Optional[GraphRepository] = None,
+) -> Optional[dict]:
+    """Overwrites name/connector_ids/is_public on an existing set. All three
+    are required (not a partial patch) -- the UI's edit form always submits a
+    complete set of values, same as create, so there's no ambiguity to
+    resolve about what a missing field would mean. Returns None if the id
+    doesn't belong to this tenant, the same boundary every other lookup here
+    enforces."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        """
+        MATCH (d:DocumentSet {id: $id, tenant_id: $tenant_id})
+        SET d.name = $name, d.connector_ids = $connector_ids, d.is_public = $is_public
+        RETURN d.id AS id, d.name AS name, d.connector_ids AS connector_ids, d.is_public AS is_public
+        """,
+        {
+            "id": document_set_id,
+            "tenant_id": tenant_id,
+            "name": name,
+            "connector_ids": connector_ids,
+            "is_public": is_public,
+        },
+    )
+    return rows[0] if rows else None
+
+
 def delete_document_set(tenant_id: str, document_set_id: str, repo: Optional[GraphRepository] = None) -> bool:
     """Returns whether anything was actually deleted, so the route can 404 on
     an id that doesn't belong to this tenant instead of silently no-opping."""

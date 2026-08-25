@@ -1,0 +1,146 @@
+# Connectors: a configured link to an external data source (a web page today;
+# SharePoint/Google Drive/etc. are meant to slot in later as new `type`
+# values without changing this storage layer or the API shape). Each
+# connector feeds one of the tenant's existing knowledge bases -- syncing it
+# fetches the source's content and runs it through the same
+# IngestionPipeline every other source in this codebase already uses (see
+# app/api/connectors.py), so nothing about extraction/graph-writing is
+# connector-specific.
+#
+# Stored as :Connector nodes in Neo4j, same rationale as :DocumentSet (see
+# app/graph/document_sets.py's module docstring): this is app-owned data a
+# client creates/deletes live through the UI, and it has to survive a
+# redeploy, which a local JSON file can't.
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
+
+from app.graph.graph_repository import GraphRepository
+
+
+def ensure_connector_indexes(repo: Optional[GraphRepository] = None) -> None:
+    """Idempotent, safe to call on every startup -- same pattern as
+    authorization.ensure_authorization_indexes."""
+    repo = repo or GraphRepository()
+    repo.execute_cypher(
+        "CREATE INDEX connector_tenant_id IF NOT EXISTS FOR (c:Connector) ON (c.tenant_id)"
+    )
+
+
+_FIELDS = (
+    "id, tenant_id, name, type, group_id, url, status, last_synced_at, "
+    "last_error, content_hash"
+)
+
+
+def list_connectors(tenant_id: str, repo: Optional[GraphRepository] = None) -> list[dict]:
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        f"""
+        MATCH (c:Connector {{tenant_id: $tenant_id}})
+        RETURN {_as_return(_FIELDS)}
+        ORDER BY c.created_at DESC
+        """,
+        {"tenant_id": tenant_id},
+    )
+    for row in rows:
+        row["last_synced_at"] = GraphRepository._to_native(row["last_synced_at"])
+    return rows
+
+
+def get_connector(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> Optional[dict]:
+    """Looked up by id AND tenant_id together -- same boundary every other
+    per-tenant lookup in this codebase enforces (see resolve_knowledge_base):
+    a caller can only ever reach a connector belonging to their own tenant."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        f"""
+        MATCH (c:Connector {{id: $id, tenant_id: $tenant_id}})
+        RETURN {_as_return(_FIELDS)}
+        """,
+        {"id": connector_id, "tenant_id": tenant_id},
+    )
+    if not rows:
+        return None
+    rows[0]["last_synced_at"] = GraphRepository._to_native(rows[0]["last_synced_at"])
+    return rows[0]
+
+
+def create_connector(
+    tenant_id: str,
+    name: str,
+    connector_type: str,
+    group_id: str,
+    url: str,
+    repo: Optional[GraphRepository] = None,
+) -> dict:
+    repo = repo or GraphRepository()
+    connector_id = str(uuid.uuid4())
+    repo.execute_cypher(
+        """
+        CREATE (c:Connector {
+            id: $id, tenant_id: $tenant_id, name: $name, type: $type, group_id: $group_id,
+            url: $url, status: 'never_synced', last_synced_at: null, last_error: null,
+            content_hash: null, created_at: datetime()
+        })
+        """,
+        {
+            "id": connector_id,
+            "tenant_id": tenant_id,
+            "name": name,
+            "type": connector_type,
+            "group_id": group_id,
+            "url": url,
+        },
+    )
+    return {
+        "id": connector_id, "tenant_id": tenant_id, "name": name, "type": connector_type,
+        "group_id": group_id, "url": url, "status": "never_synced", "last_synced_at": None,
+        "last_error": None, "content_hash": None,
+    }
+
+
+def delete_connector(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> bool:
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) WITH c DETACH DELETE c RETURN count(c) AS deleted",
+        {"id": connector_id, "tenant_id": tenant_id},
+    )
+    return bool(rows) and rows[0]["deleted"] > 0
+
+
+def record_sync_result(
+    tenant_id: str,
+    connector_id: str,
+    *,
+    status: str,
+    last_error: Optional[str] = None,
+    content_hash: Optional[str] = None,
+    repo: Optional[GraphRepository] = None,
+) -> None:
+    """Called once a sync attempt finishes, success or not. `status` is one
+    of "synced" (new content ingested), "unchanged" (fetched fine, but
+    matched content_hash from last time so nothing was re-ingested -- see
+    app/ingestion/web_source.py's content_hash), or "error". content_hash is
+    only updated on an actual "synced" outcome, so an "error" or "unchanged"
+    run doesn't clobber the fingerprint a real sync last recorded."""
+    repo = repo or GraphRepository()
+    set_clauses = ["c.status = $status", "c.last_synced_at = $last_synced_at", "c.last_error = $last_error"]
+    params = {
+        "id": connector_id,
+        "tenant_id": tenant_id,
+        "status": status,
+        "last_synced_at": datetime.now(timezone.utc).isoformat(),
+        "last_error": last_error,
+    }
+    if content_hash is not None:
+        set_clauses.append("c.content_hash = $content_hash")
+        params["content_hash"] = content_hash
+    repo.execute_cypher(
+        f"MATCH (c:Connector {{id: $id, tenant_id: $tenant_id}}) SET {', '.join(set_clauses)}",
+        params,
+    )
+
+
+def _as_return(fields: str) -> str:
+    return ", ".join(f"c.{f.strip()} AS {f.strip()}" for f in fields.split(","))

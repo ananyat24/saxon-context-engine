@@ -163,6 +163,49 @@
             </section>
         </div>
 
+        <section id="connectorsCard" class="card" hidden>
+            <h2>Source connectors</h2>
+            <p class="muted">Pull content in from an external source and add it to one of your
+                knowledge bases. Each sync fetches the latest content and only re-processes it
+                if it's actually changed since last time.</p>
+            <table class="doc-sets-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Source</th>
+                        <th>Feeds into</th>
+                        <th>Status</th>
+                        <th>Last synced</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="connectorsBody"></tbody>
+            </table>
+            <p id="connectorsEmpty" class="muted" style="display:none">No source connectors yet -- add one below.</p>
+
+            <details id="connectorFormWrap" class="raw-details">
+                <summary>New source connector</summary>
+                <div class="row">
+                    <input id="connectorName" type="text" placeholder="e.g. Company blog" />
+                </div>
+                <div class="row">
+                    <input id="connectorUrl" type="text" placeholder="https://example.com/page-to-pull-in" />
+                </div>
+                <div class="row">
+                    <select id="connectorKbSelect" class="kb-select connector-kb-select"></select>
+                </div>
+                <p class="muted" style="font-size:0.8rem">
+                    Only a single web page today (fetched once per "Sync now" click, not on a
+                    schedule) -- SharePoint, Google Drive, and other source types are planned
+                    to slot into this same list next.
+                </p>
+                <div class="row">
+                    <button id="createConnectorBtn" class="btn btn-accent">Add connector</button>
+                </div>
+                <div id="connectorStatus" class="status-line"></div>
+            </details>
+        </section>
+
         <section id="docSetsCard" class="card" hidden>
             <h2>Document sets</h2>
             <p class="muted">Group your connectors into a named bundle, then use it to control
@@ -182,8 +225,8 @@
             </table>
             <p id="docSetsEmpty" class="muted" style="display:none">No document sets yet -- create one below.</p>
 
-            <details class="raw-details">
-                <summary>New document set</summary>
+            <details id="docSetFormWrap" class="raw-details">
+                <summary id="docSetFormSummary">New document set</summary>
                 <div class="row">
                     <input id="docSetName" type="text" placeholder="e.g. Kidde Fenwal - AI Initiatives" />
                 </div>
@@ -194,6 +237,7 @@
                 </label>
                 <div class="row">
                     <button id="createDocSetBtn" class="btn btn-accent">Create document set</button>
+                    <button id="cancelDocSetEditBtn" class="btn btn-outline" type="button" hidden>Cancel</button>
                 </div>
                 <div id="docSetStatus" class="status-line"></div>
             </details>

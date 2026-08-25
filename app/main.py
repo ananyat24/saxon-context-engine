@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api import api_router
-from app.graph import authorization, document_sets
+from app.graph import authorization, connectors, document_sets
 from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
     repo = GraphRepository(neo4j_client=app.state.neo4j_client)
     authorization.ensure_authorization_indexes(repo=repo)
     document_sets.ensure_document_set_indexes(repo=repo)
+    connectors.ensure_connector_indexes(repo=repo)
     try:
         yield
     finally:
