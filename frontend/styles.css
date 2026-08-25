@@ -345,6 +345,68 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
 .raw-details { margin-top: 0.75rem; }
 .raw-details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
 
+.doc-sets-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+.doc-sets-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.6rem 0.4rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.doc-sets-table td {
+  padding: 0.6rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  vertical-align: top;
+}
+.doc-sets-table tr:last-child td { border-bottom: none; }
+
+.doc-set-connector-picker {
+  margin: 0.6rem 0;
+}
+.doc-set-connector-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--surface-alt);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem 0.25rem 0.5rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0.5rem 0;
+  cursor: pointer;
+}
+
+.delete-btn {
+  background: none;
+  border: none;
+  color: var(--status-critical);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.4rem;
+}
+.delete-btn:hover { text-decoration: underline; }
+
+.scope-select { margin-bottom: 0.75rem; color: var(--text-primary); background: var(--surface-alt); border-color: var(--border-subtle); }
+.scope-select[hidden] { display: none; }
+
 .graph-viz {
   width: 100%;
   height: auto;

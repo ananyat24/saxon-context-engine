@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api import api_router
-from app.graph import authorization
+from app.graph import authorization, document_sets
 from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
@@ -34,7 +34,9 @@ async def lifespan(app: FastAPI):
     # Idempotent -- role-based visibility (app/graph/authorization.py) depends
     # on this index existing for its scaling claim to hold, so it's created on
     # every startup rather than assumed to already be there.
-    authorization.ensure_authorization_indexes(repo=GraphRepository(neo4j_client=app.state.neo4j_client))
+    repo = GraphRepository(neo4j_client=app.state.neo4j_client)
+    authorization.ensure_authorization_indexes(repo=repo)
+    document_sets.ensure_document_set_indexes(repo=repo)
     try:
         yield
     finally:

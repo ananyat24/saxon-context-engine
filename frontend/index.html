@@ -142,11 +142,48 @@
             </section>
         </div>
 
+        <section id="docSetsCard" class="card" hidden>
+            <h2>Document sets</h2>
+            <p class="muted">Group your connectors into a named bundle, then use it to control
+                which of them a question below searches across -- instead of picking exactly
+                one connector every time.</p>
+            <table class="doc-sets-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Connectors</th>
+                        <th>Status</th>
+                        <th>Public</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="docSetsBody"></tbody>
+            </table>
+            <p id="docSetsEmpty" class="muted" style="display:none">No document sets yet -- create one below.</p>
+
+            <details class="raw-details">
+                <summary>New document set</summary>
+                <div class="row">
+                    <input id="docSetName" type="text" placeholder="e.g. Kidde Fenwal - AI Initiatives" />
+                </div>
+                <div id="docSetConnectors" class="pill-group doc-set-connector-picker"></div>
+                <label class="checkbox-row">
+                    <input id="docSetPublic" type="checkbox" checked />
+                    Public
+                </label>
+                <div class="row">
+                    <button id="createDocSetBtn" class="btn btn-accent">Create document set</button>
+                </div>
+                <div id="docSetStatus" class="status-line"></div>
+            </details>
+        </section>
+
         <section class="card">
             <h2>Ask a question</h2>
             <p class="muted">Type a question the way you'd ask a coworker. The answer comes only
                 from real information the system has on file, and if something has changed
                 recently, it'll tell you that too instead of only giving you the latest answer.</p>
+            <select id="scopeSelect" class="kb-select scope-select" hidden></select>
             <div id="suggestedQuestions" class="chip-row"></div>
             <div class="row">
                 <input id="queryInput" type="text" placeholder="e.g. who manages the Contoso account" />

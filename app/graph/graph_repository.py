@@ -74,22 +74,24 @@ class GraphRepository:
             if client is not self._owned_client:
                 client.close()
 
-    def _match_entity_by_name(self, name: str, group_id: str) -> Optional[dict[str, Any]]:
+    def _match_entity_by_name(self, name: str, group_ids: list[str]) -> Optional[dict[str, Any]]:
         """One round trip instead of two: tries an exact match and a substring
         match in a single query (ORDER BY prefers the exact match when both
         would hit), rather than a separate follow-up query only issued when the
-        first came back empty."""
+        first came back empty. Matches across every connector in group_ids --
+        a multi-connector document set (see app/graph/document_sets.py) needs
+        entity resolution to work across all of them, not just the first."""
         rows = self.execute_cypher(
-            "MATCH (n:Entity {group_id: $group_id}) "
-            "WHERE toLower(n.name) = toLower($name) OR toLower(n.name) CONTAINS toLower($name) "
+            "MATCH (n:Entity) WHERE n.group_id IN $group_ids "
+            "AND (toLower(n.name) = toLower($name) OR toLower(n.name) CONTAINS toLower($name)) "
             "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary "
             "ORDER BY CASE WHEN toLower(n.name) = toLower($name) THEN 0 ELSE 1 END LIMIT 1",
-            {"group_id": group_id, "name": name},
+            {"group_ids": group_ids, "name": name},
         )
         return rows[0] if rows else None
 
     async def _resolve_named_entities(
-        self, query_text: str, group_id: str, visible_uuids: Optional[set[str]]
+        self, query_text: str, group_ids: list[str], visible_uuids: Optional[set[str]]
     ) -> tuple[list[dict[str, Any]], bool]:
         """Looks for specifically-named entities in the query and matches each
         against real node names in this knowledge base, so a query like "What's
@@ -123,7 +125,7 @@ class GraphRepository:
             return [], False
 
         rows = await asyncio.gather(
-            *(asyncio.to_thread(self._match_entity_by_name, c, group_id) for c in all_candidates)
+            *(asyncio.to_thread(self._match_entity_by_name, c, group_ids) for c in all_candidates)
         )
 
         resolved: dict[str, dict[str, Any]] = {}
@@ -239,9 +241,8 @@ class GraphRepository:
             logger.warning("Graphiti instance not set in GraphRepository.")
             return []
 
-        group_id = group_ids[0] if group_ids else None
         resolved_entities, saw_unresolved = (
-            await self._resolve_named_entities(query_text, group_id, visible_uuids) if group_id else ([], False)
+            await self._resolve_named_entities(query_text, group_ids, visible_uuids) if group_ids else ([], False)
         )
 
         if saw_unresolved and not resolved_entities:

@@ -42,11 +42,17 @@ function buildQuery(params) {
   return qs ? `?${qs}` : "";
 }
 
+// Every connector (knowledge base) this tenant has, kept around so the
+// document-set create form can offer them as checkboxes without a second
+// fetch -- populated by loadKnowledgeBases().
+let knowledgeBaseDirectory = [];
+
 async function loadKnowledgeBases() {
   const select = document.getElementById("kbSelect");
   if (!getApiKey()) {
     select.hidden = true;
     select.innerHTML = "";
+    knowledgeBaseDirectory = [];
     return;
   }
   try {
@@ -56,6 +62,7 @@ async function loadKnowledgeBases() {
       return;
     }
     const data = await res.json();
+    knowledgeBaseDirectory = data.knowledge_bases;
     const current = getSelectedKnowledgeBase();
     const stillValid = data.knowledge_bases.some((kb) => kb.id === current);
     if (!stillValid) setSelectedKnowledgeBase(data.default);
@@ -74,11 +81,174 @@ document.getElementById("kbSelect").addEventListener("change", async (e) => {
   setSelectedKnowledgeBase(e.target.value);
   setSelectedUser(""); // a different knowledge base has a different (or no) org chart
   await loadUsers();
+  renderScopeSelect(); // "This connector only" option's label follows the new selection
   loadGraph();
   document.getElementById("queryAnswer").textContent = "";
   document.getElementById("queryFacts").innerHTML = "";
   document.getElementById("queryRawWrap").hidden = true;
 });
+
+// --- Document sets ----------------------------------------------------------
+// Named bundles of one or more connectors (knowledge bases), used to scope
+// the "Ask a question" panel across several of them at once instead of
+// picking exactly one -- see app/graph/document_sets.py. Every set here
+// belongs to the current tenant only (enforced server-side).
+let documentSetDirectory = [];
+// Which document set (if any) the Ask panel is scoped to right now. "" means
+// "just the single connector picked in the header" -- the original behavior.
+// Not persisted across reloads, same reasoning as selectedUser: this is a
+// live choice about the question you're about to ask, not a standing setting.
+let selectedDocumentSet = "";
+
+function getSelectedDocumentSet() {
+  return selectedDocumentSet;
+}
+
+function renderDocSetConnectorPicker() {
+  const container = document.getElementById("docSetConnectors");
+  container.innerHTML = knowledgeBaseDirectory
+    .map(
+      (kb) => `<label>
+        <input type="checkbox" value="${escapeXml(kb.id)}" />
+        ${escapeXml(kb.label)}
+      </label>`
+    )
+    .join("");
+}
+
+function renderDocSetsTable() {
+  const body = document.getElementById("docSetsBody");
+  const empty = document.getElementById("docSetsEmpty");
+  if (documentSetDirectory.length === 0) {
+    body.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  body.innerHTML = documentSetDirectory
+    .map((ds) => {
+      const connectorLabels = ds.connectors.map((c) => escapeXml(c.label)).join(", ");
+      const publicBadge = ds.is_public
+        ? `<span class="badge badge-ok">Public</span>`
+        : `<span class="badge badge-muted">Private</span>`;
+      return `<tr data-id="${escapeXml(ds.id)}">
+        <td>${escapeXml(ds.name)}</td>
+        <td>${connectorLabels}</td>
+        <td><span class="badge badge-ok">${escapeXml(ds.status)}</span></td>
+        <td>${publicBadge}</td>
+        <td><button class="delete-btn" type="button" data-delete-id="${escapeXml(ds.id)}">Delete</button></td>
+      </tr>`;
+    })
+    .join("");
+  body.querySelectorAll("[data-delete-id]").forEach((btn) => {
+    btn.addEventListener("click", () => deleteDocumentSet(btn.dataset.deleteId));
+  });
+}
+
+function renderScopeSelect() {
+  const select = document.getElementById("scopeSelect");
+  if (documentSetDirectory.length === 0) {
+    select.hidden = true;
+    select.innerHTML = "";
+    return;
+  }
+  const currentKb = knowledgeBaseDirectory.find((kb) => kb.id === getSelectedKnowledgeBase());
+  const singleOption = `<option value="">This connector only${currentKb ? ` (${escapeXml(currentKb.label)})` : ""}</option>`;
+  const setOptions = documentSetDirectory
+    .map((ds) => `<option value="${escapeXml(ds.id)}">${escapeXml(ds.name)} (${ds.connectors.length} connectors)</option>`)
+    .join("");
+  select.innerHTML = singleOption + setOptions;
+  select.value = documentSetDirectory.some((ds) => ds.id === selectedDocumentSet) ? selectedDocumentSet : "";
+  selectedDocumentSet = select.value;
+  select.hidden = false;
+}
+
+async function loadDocumentSets() {
+  const card = document.getElementById("docSetsCard");
+  if (!getApiKey()) {
+    card.hidden = true;
+    documentSetDirectory = [];
+    renderScopeSelect();
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/document-sets`, { headers: authHeaders() });
+    if (!res.ok) {
+      card.hidden = true;
+      return;
+    }
+    documentSetDirectory = await res.json();
+    card.hidden = false;
+    renderDocSetConnectorPicker();
+    renderDocSetsTable();
+    renderScopeSelect();
+  } catch (err) {
+    card.hidden = true;
+  }
+}
+
+document.getElementById("scopeSelect").addEventListener("change", (e) => {
+  selectedDocumentSet = e.target.value;
+});
+
+document.getElementById("createDocSetBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("docSetStatus");
+  const name = document.getElementById("docSetName").value.trim();
+  const connectorIds = Array.from(
+    document.querySelectorAll("#docSetConnectors input:checked")
+  ).map((el) => el.value);
+  const isPublic = document.getElementById("docSetPublic").checked;
+
+  if (!name) {
+    statusEl.textContent = "Give this document set a name.";
+    statusEl.className = "status-line bad";
+    return;
+  }
+  if (connectorIds.length === 0) {
+    statusEl.textContent = "Pick at least one connector.";
+    statusEl.className = "status-line bad";
+    return;
+  }
+
+  statusEl.textContent = "Creating…";
+  statusEl.className = "status-line";
+  try {
+    const res = await fetch(`${API}/document-sets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ name, connector_ids: connectorIds, is_public: isPublic }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      statusEl.textContent = body.detail || "Could not create that document set.";
+      statusEl.className = "status-line bad";
+      return;
+    }
+    document.getElementById("docSetName").value = "";
+    document.getElementById("docSetPublic").checked = true;
+    statusEl.textContent = "Created.";
+    statusEl.className = "status-line ok";
+    await loadDocumentSets();
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+    statusEl.className = "status-line bad";
+  }
+});
+
+async function deleteDocumentSet(id) {
+  try {
+    const res = await fetch(`${API}/document-sets/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!res.ok && res.status !== 204) return;
+    if (selectedDocumentSet === id) selectedDocumentSet = "";
+    await loadDocumentSets();
+  } catch (err) {
+    // Silently leave the row in place -- the delete button itself is the
+    // retry affordance, no need for a dedicated error banner here.
+  }
+}
 
 // --- "View as" (role-based visibility) --------------------------------------
 // Which person's view of the selected knowledge base the Graph and Ask panels
@@ -506,14 +676,22 @@ document.getElementById("askBtn").addEventListener("click", async () => {
   factsEl.innerHTML = "";
   rawWrap.hidden = true;
   try {
+    // A document set scoped to several connectors at once takes priority over
+    // the single-connector picker in the header when one's selected -- see
+    // app/api/context.py, which doesn't support as_user alongside it yet.
+    const docSet = getSelectedDocumentSet();
     const res = await fetch(`${API}/context/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({
-        query,
-        knowledge_base: getSelectedKnowledgeBase() || undefined,
-        as_user: getSelectedUser() || undefined,
-      }),
+      body: JSON.stringify(
+        docSet
+          ? { query, document_set: docSet }
+          : {
+              query,
+              knowledge_base: getSelectedKnowledgeBase() || undefined,
+              as_user: getSelectedUser() || undefined,
+            }
+      ),
     });
     if (requestId !== askRequestId) return; // a newer question has already superseded this one
 
@@ -586,6 +764,7 @@ async function loadTenantData() {
   loadOntology();
   await loadKnowledgeBases();
   await loadUsers();
+  await loadDocumentSets();
   loadGraph();
 }
 

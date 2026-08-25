@@ -169,7 +169,7 @@ def warm_up(repo: GraphRepository, n_entities: int, root_user: str, leaf_user: s
     they're meant to reveal.
     """
     print("Warming up query plan cache (compiles each query shape once)...")
-    asyncio.run(repo._resolve_named_entities("What do we know about Warmup Placeholder?", GROUP_ID, None))
+    asyncio.run(repo._resolve_named_entities("What do we know about Warmup Placeholder?", [GROUP_ID], None))
     repo._relationship_path_facts("lt-entity-0", "lt-entity-1", None)
     authorization.get_visible_entity_uuids(GROUP_ID, root_user, repo=repo)
     authorization.get_visible_entity_uuids(GROUP_ID, leaf_user, repo=repo)
@@ -186,10 +186,10 @@ def run_timings(repo: GraphRepository, n_entities: int, root_user: str, leaf_use
     )[0]["name"]
 
     with timed("Exact-name entity resolution (indexed equality match)"):
-        asyncio.run(repo._resolve_named_entities(f"What do we know about {target_name}?", GROUP_ID, None))
+        asyncio.run(repo._resolve_named_entities(f"What do we know about {target_name}?", [GROUP_ID], None))
 
     with timed("Entity resolution for a name with no match (worst case: falls through to CONTAINS scan)"):
-        asyncio.run(repo._resolve_named_entities("What do we know about Totally Nonexistent Widget?", GROUP_ID, None))
+        asyncio.run(repo._resolve_named_entities("What do we know about Totally Nonexistent Widget?", [GROUP_ID], None))
 
     a, b = random.randrange(n_entities), random.randrange(n_entities)
     with timed(f"Relationship path between two random entities (bounded 4 hops)"):
@@ -205,7 +205,7 @@ def run_timings(repo: GraphRepository, n_entities: int, root_user: str, leaf_use
 
     with timed("Full single-entity resolved-query path (resolution + own-edges + RBAC filter)"):
         resolved, _ = asyncio.run(
-            repo._resolve_named_entities(f"What do we know about Synthetic Store {a}?", GROUP_ID, root_visible)
+            repo._resolve_named_entities(f"What do we know about Synthetic Store {a}?", [GROUP_ID], root_visible)
         )
         if resolved:
             repo._entity_own_facts(resolved[0]["uuid"], root_visible)
