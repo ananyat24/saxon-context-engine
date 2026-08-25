@@ -43,7 +43,21 @@ def _extract_candidate_entities(query_text: str) -> list[str]:
 
 
 def _extract_id_candidates(query_text: str) -> list[str]:
-    return sorted(set(_ID_PHRASE_RE.findall(query_text)), key=len, reverse=True)
+    phrases = set(_ID_PHRASE_RE.findall(query_text))
+    # Extraction sometimes drops the type-word prefix for one record but not
+    # its siblings -- e.g. four Northwind orders end up named "Order 10250"
+    # etc., but one ends up named just "10248", an inconsistency in how the
+    # ingesting LLM happened to name that one record, not something a query
+    # can know about. Without this, "what's the status of order 10248"
+    # produces a candidate ("order 10248") that CONTAINS-matches nothing --
+    # too long to be found inside the shorter actual name -- so resolution
+    # silently fails and the query falls through to padded semantic search
+    # instead of the one order actually asked about. Adding just the bare
+    # trailing token (the id itself) as its own candidate covers that case
+    # too, without loosening the match logic itself to accept shorter
+    # substrings generally.
+    bare_ids = {phrase.rsplit(" ", 1)[-1] for phrase in phrases if " " in phrase}
+    return sorted(phrases | bare_ids, key=len, reverse=True)
 
 
 class GraphRepository:
