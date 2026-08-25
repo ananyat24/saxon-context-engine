@@ -2,6 +2,7 @@
 # raw Cypher queries (Neo4j's query language, similar in spirit to SQL) via Neo4jClient,
 # and Graphiti's own higher-level search API, which understands time ("what was true
 # on this date") on top of the same underlying graph.
+import asyncio
 import logging
 import re
 from typing import Any, Optional
@@ -87,7 +88,7 @@ class GraphRepository:
         )
         return rows[0] if rows else None
 
-    def _resolve_named_entities(
+    async def _resolve_named_entities(
         self, query_text: str, group_id: str, visible_uuids: Optional[set[str]]
     ) -> tuple[list[dict[str, Any]], bool]:
         """Looks for specifically-named entities in the query and matches each
@@ -103,6 +104,12 @@ class GraphRepository:
         match ordinary text like "since 2023", so an unresolved one there just
         falls through to normal search instead of forcing a "not found".
 
+        Every candidate's lookup is independent, so they run concurrently (each
+        off the event loop via to_thread, since execute_cypher is a blocking
+        call) instead of one after another -- a query naming two entities (e.g.
+        "How is X connected to Y?") no longer pays for two round trips back to
+        back.
+
         Returns (resolved_rows, saw_unresolved_candidate) -- resolved_rows is
         deduped by uuid (so "Contoso Store Washington DC" and, say, an overlapping
         shorter candidate matching the same node don't count twice), and
@@ -110,22 +117,27 @@ class GraphRepository:
         query didn't match anything visible, which the caller uses to say "not
         found" rather than silently falling back to an ungrounded search.
         """
+        proper_nouns = _extract_candidate_entities(query_text)
+        all_candidates = proper_nouns + _extract_id_candidates(query_text)
+        if not all_candidates:
+            return [], False
+
+        rows = await asyncio.gather(
+            *(asyncio.to_thread(self._match_entity_by_name, c, group_id) for c in all_candidates)
+        )
+
         resolved: dict[str, dict[str, Any]] = {}
         saw_unresolved = False
-
-        for candidate in _extract_candidate_entities(query_text):
-            row = self._match_entity_by_name(candidate, group_id)
+        proper_noun_set = set(proper_nouns)
+        for candidate, row in zip(all_candidates, rows):
             if row and (visible_uuids is None or row["uuid"] in visible_uuids):
                 resolved[row["uuid"]] = row
-            else:
+            elif candidate in proper_noun_set:
                 # Either nothing matched, or it matched something this caller
-                # can't see -- don't leak existence either way.
+                # can't see -- don't leak existence either way. An id-phrase
+                # candidate that misses is expected (see docstring) and never
+                # counts here.
                 saw_unresolved = True
-
-        for candidate in _extract_id_candidates(query_text):
-            row = self._match_entity_by_name(candidate, group_id)
-            if row and (visible_uuids is None or row["uuid"] in visible_uuids):
-                resolved[row["uuid"]] = row
 
         return list(resolved.values()), saw_unresolved
 
@@ -229,7 +241,7 @@ class GraphRepository:
 
         group_id = group_ids[0] if group_ids else None
         resolved_entities, saw_unresolved = (
-            self._resolve_named_entities(query_text, group_id, visible_uuids) if group_id else ([], False)
+            await self._resolve_named_entities(query_text, group_id, visible_uuids) if group_id else ([], False)
         )
 
         if saw_unresolved and not resolved_entities:
