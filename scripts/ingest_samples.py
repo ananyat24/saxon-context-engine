@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 from app.graph.graphiti_adapter import build_graphiti
+from app.graph.spend_limiter import SpendLimitExceeded
 from app.ingestion.file_source import FileSourceSpec, SourceRecord, read_csv_records, read_text_records
 from app.ingestion.ingest_log import IngestLog
 from app.ingestion.pipeline import IngestionPipeline
@@ -244,6 +245,13 @@ async def run(args: argparse.Namespace) -> None:
                     group_id=args.group_id,
                     reference_time=record.reference_time,
                 )
+            except SpendLimitExceeded as e:
+                # Unlike a rate limit, this isn't transient -- retrying later
+                # won't clear it, so stop the whole run rather than burning
+                # through the rest of the batch re-raising on every record.
+                logger.error(f"  {e}")
+                failures.append((record.name, str(e)))
+                break
             except Exception as e:
                 # One bad record (or a rate-limit hit) shouldn't discard the
                 # progress already made -- the log is saved in `finally` below,

@@ -7,3 +7,8 @@ pytest
 fastapi
 uvicorn
 graphiti-core[anthropic,google-genai]>=0.29.3
+# Pinned below 1.0 -- graphiti_core's bundled AnthropicClient (llm_client/anthropic_client.py)
+# calls messages.create(..., temperature=...) in a shape that breaks under anthropic 1.x's
+# API changes ("AsyncMessages.create() got an unexpected keyword argument 'temperature'").
+# 0.121.0 is confirmed working against the installed graphiti-core version.
+anthropic<1.0.0

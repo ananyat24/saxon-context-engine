@@ -20,10 +20,29 @@ logger = logging.getLogger(__name__)
 # resolved directly against the graph and its own edges/summary used instead.
 _PROPER_NOUN_RE = re.compile(r"\b[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*)+\b")
 
+# Records ingested without a human-readable name (see FileSourceSpec.name_column
+# in app/ingestion/file_source.py) end up named "<Type> <id>", e.g. "Order
+# 10248" -- a single capitalized word plus a numeric id, which _PROPER_NOUN_RE
+# above never matches (it requires two consecutive capitalized words). Without
+# this, "order 10248" falls through to plain semantic search, which has no
+# relevance threshold and pads the answer out with facts about several other,
+# unrelated orders that just happen to score similarly. This is deliberately
+# looser (case-insensitive, no second-word capitalization requirement) so it
+# also catches how people actually type these queries -- lowercase, "#" before
+# the number, etc. Precisely because it's loose, an unresolved match here must
+# NOT be treated the way an unresolved proper noun is (see _resolve_named_entities)
+# -- "since 2023" or "in 2024" would also match this pattern and aren't meant to
+# short-circuit an otherwise normal query into a false "not found".
+_ID_PHRASE_RE = re.compile(r"\b[A-Za-z][\w'.-]*\s+#?[\w-]*\d[\w-]*\b")
+
 
 def _extract_candidate_entities(query_text: str) -> list[str]:
     candidates = set(_PROPER_NOUN_RE.findall(query_text))
     return sorted(candidates, key=len, reverse=True)
+
+
+def _extract_id_candidates(query_text: str) -> list[str]:
+    return sorted(set(_ID_PHRASE_RE.findall(query_text)), key=len, reverse=True)
 
 
 class GraphRepository:
@@ -54,43 +73,59 @@ class GraphRepository:
             if client is not self._owned_client:
                 client.close()
 
+    def _match_entity_by_name(self, name: str, group_id: str) -> Optional[dict[str, Any]]:
+        """One round trip instead of two: tries an exact match and a substring
+        match in a single query (ORDER BY prefers the exact match when both
+        would hit), rather than a separate follow-up query only issued when the
+        first came back empty."""
+        rows = self.execute_cypher(
+            "MATCH (n:Entity {group_id: $group_id}) "
+            "WHERE toLower(n.name) = toLower($name) OR toLower(n.name) CONTAINS toLower($name) "
+            "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary "
+            "ORDER BY CASE WHEN toLower(n.name) = toLower($name) THEN 0 ELSE 1 END LIMIT 1",
+            {"group_id": group_id, "name": name},
+        )
+        return rows[0] if rows else None
+
     def _resolve_named_entities(
         self, query_text: str, group_id: str, visible_uuids: Optional[set[str]]
     ) -> tuple[list[dict[str, Any]], bool]:
         """Looks for specifically-named entities in the query and matches each
         against real node names in this knowledge base, so a query like "What's
-        changed about Rhodes Furniture?" can be grounded to that exact node
-        instead of left to semantic search to guess at.
+        changed about Rhodes Furniture?" or "What's the status of order 10248?"
+        can be grounded to that exact node instead of left to semantic search
+        to guess at.
+
+        Two candidate sources feed this: proper nouns (_extract_candidate_entities,
+        e.g. "Rhodes Furniture") and id-style phrases (_extract_id_candidates,
+        e.g. "order 10248"). Only a proper noun that fails to resolve counts as
+        saw_unresolved_candidate -- an id-style phrase is loose enough to also
+        match ordinary text like "since 2023", so an unresolved one there just
+        falls through to normal search instead of forcing a "not found".
 
         Returns (resolved_rows, saw_unresolved_candidate) -- resolved_rows is
         deduped by uuid (so "Contoso Store Washington DC" and, say, an overlapping
         shorter candidate matching the same node don't count twice), and
-        saw_unresolved_candidate is True if some name-shaped phrase in the query
-        didn't match anything visible, which the caller uses to say "not found"
-        rather than silently falling back to an ungrounded search.
+        saw_unresolved_candidate is True if some proper-noun-shaped phrase in the
+        query didn't match anything visible, which the caller uses to say "not
+        found" rather than silently falling back to an ungrounded search.
         """
-        candidates = _extract_candidate_entities(query_text)
         resolved: dict[str, dict[str, Any]] = {}
         saw_unresolved = False
 
-        for candidate in candidates:
-            rows = self.execute_cypher(
-                "MATCH (n:Entity {group_id: $group_id}) WHERE toLower(n.name) = toLower($name) "
-                "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary LIMIT 1",
-                {"group_id": group_id, "name": candidate},
-            )
-            if not rows:
-                rows = self.execute_cypher(
-                    "MATCH (n:Entity {group_id: $group_id}) WHERE toLower(n.name) CONTAINS toLower($name) "
-                    "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary LIMIT 1",
-                    {"group_id": group_id, "name": candidate},
-                )
-            if rows and (visible_uuids is None or rows[0]["uuid"] in visible_uuids):
-                resolved[rows[0]["uuid"]] = rows[0]
+        for candidate in _extract_candidate_entities(query_text):
+            row = self._match_entity_by_name(candidate, group_id)
+            if row and (visible_uuids is None or row["uuid"] in visible_uuids):
+                resolved[row["uuid"]] = row
             else:
                 # Either nothing matched, or it matched something this caller
                 # can't see -- don't leak existence either way.
                 saw_unresolved = True
+
+        for candidate in _extract_id_candidates(query_text):
+            row = self._match_entity_by_name(candidate, group_id)
+            if row and (visible_uuids is None or row["uuid"] in visible_uuids):
+                resolved[row["uuid"]] = row
 
         return list(resolved.values()), saw_unresolved
 
@@ -261,7 +296,10 @@ class GraphRepository:
                 })
             return facts
 
-        results = await self.graphiti.search(query_text, group_ids=group_ids)
+        # Graphiti's own default (10) is tuned for open-ended browsing, not a
+        # single answer -- trimmed here since every extra fact both adds noise
+        # to the response and lengthens the synthesis call that follows it.
+        results = await self.graphiti.search(query_text, group_ids=group_ids, num_results=5)
         facts = []
         for r in results:
             source_uuid = getattr(r, "source_node_uuid", "")

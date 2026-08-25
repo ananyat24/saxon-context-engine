@@ -3,12 +3,13 @@
 # the HTTP request/response wiring around it.
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from app.config import TenantConfig
 from app.context.orchestrator import ContextOrchestrator
 from app.graph import authorization
 from app.graph.graph_repository import GraphRepository
+from app.graph.spend_limiter import SpendLimitExceeded
 from app.security import require_tenant, resolve_knowledge_base
 
 router = APIRouter()
@@ -42,4 +43,7 @@ async def query_context(req: SearchQueryRequest, request: Request, tenant: Tenan
     # app/graph/tenant_graphiti_pool.py.
     graphiti = await request.app.state.graphiti_pool.get_or_create(tenant)
     orchestrator = ContextOrchestrator(graphiti, neo4j_client=request.app.state.neo4j_client)
-    return await orchestrator.get_context_packet(req.query, group_ids=[group_id], visible_uuids=visible_uuids)
+    try:
+        return await orchestrator.get_context_packet(req.query, group_ids=[group_id], visible_uuids=visible_uuids)
+    except SpendLimitExceeded as e:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))

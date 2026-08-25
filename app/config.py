@@ -79,6 +79,16 @@ class Settings(BaseSettings):
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_user: str = "neo4j"
     neo4j_password: str = "password"
+    # The actual database name inside the DBMS at neo4j_uri -- "neo4j" is the
+    # default on Neo4j Desktop/Community Edition (hence the default here), but
+    # AuraDB free-tier instances name their database after the instance id
+    # instead (e.g. "cc77e01f"), not literally "neo4j". Our own Cypher calls
+    # (app/graph/neo4j_client.py) don't need this -- they omit the database
+    # name and let the driver resolve the server-side default -- but
+    # graphiti_core's own driver defaults to the literal string "neo4j"
+    # unless told otherwise (see app/graph/graphiti_adapter.py), so this has
+    # to be set explicitly for any Aura instance whose db isn't named that.
+    neo4j_database: str = "neo4j"
 
     # Maps API keys to a TenantConfig (their own Gemini key + knowledge bases).
     # Normally populated from config/tenants.json (see TENANT_CONFIG_PATH above),
@@ -100,11 +110,16 @@ class Settings(BaseSettings):
     embedding_model: str = "gemini-embedding-001"
 
     # Which LLM provider build_graphiti() constructs. "gemini" is what every
-    # tenant uses today (see TenantConfig.gemini_api_key); "azure_openai" is an
-    # operator-wide alternative -- one shared enterprise deployment rather than
+    # tenant uses today (see TenantConfig.gemini_api_key); "azure_openai" and
+    # "anthropic" are operator-wide alternatives -- one shared key rather than
     # a key per tenant -- for when Gemini's free-tier rate limit is the
-    # bottleneck rather than per-tenant billing isolation. See
-    # app/graph/graphiti_adapter.py for how the two are wired up.
+    # bottleneck rather than per-tenant billing isolation, or when a
+    # different model's extraction quality is worth the switch. Anthropic
+    # (Claude) has no embeddings API of its own, so in "anthropic" mode
+    # embeddings/reranking still come from Gemini (see
+    # TenantConfig.gemini_api_key) -- only extraction/chat/answer-synthesis
+    # move to Claude. See app/graph/graphiti_adapter.py for how all three are
+    # wired up.
     llm_provider: str = "gemini"
 
     # Azure OpenAI connection details, used only when llm_provider is
@@ -118,6 +133,44 @@ class Settings(BaseSettings):
     # not match the underlying model's name.
     azure_openai_llm_deployment: str = "gpt-4o-mini"
     azure_openai_embedding_deployment: str = "text-embedding-3-small"
+
+    # Local spend caps for Azure OpenAI usage -- see app/graph/spend_limiter.py
+    # for why this exists (we hold an API key, not portal access to set a real
+    # cap on the resource). Two independent budgets: one for data ingestion
+    # runs, one for live/testing queries against the API.
+    azure_openai_ingestion_budget_usd: float = 30.0
+    azure_openai_query_budget_usd: float = 20.0
+    # Price-per-1M-tokens used to *estimate* spend against the budgets above.
+    # Defaults match GPT-4.1 (~$2 in / ~$8 out per 1M tokens) + text-embedding-3-small
+    # ($0.02/1M) as of writing -- if your actual deployments use different
+    # models, update these in .env so the estimate is meaningful. Check the
+    # exact current price on the deployment's page in Azure AI Foundry.
+    azure_openai_input_price_per_1m: float = 2.00
+    azure_openai_output_price_per_1m: float = 8.00
+    azure_openai_embedding_price_per_1m: float = 0.02
+
+    # Anthropic (Claude) connection details, used only when llm_provider is
+    # "anthropic". Operator-wide, like azure_openai_api_key above -- one
+    # shared key, not a key per tenant. Get a key from
+    # https://console.anthropic.com/. The ingestion/query spend budgets above
+    # are shared across whichever provider is active -- they're not
+    # duplicated per-provider, since they represent "how much this app is
+    # allowed to spend," not "how much on this specific provider."
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-haiku-4-5"
+    # If your Claude key was issued through Microsoft Foundry (same place as
+    # an Azure OpenAI resource) rather than directly from
+    # console.anthropic.com, a plain Anthropic client won't authenticate --
+    # set this to the Foundry resource name (the first segment of
+    # https://<resource>.services.ai.azure.com/anthropic/) to use
+    # AsyncAnthropicFoundry instead. Leave blank for a direct Anthropic key.
+    anthropic_foundry_resource: str = ""
+    # Price-per-1M-tokens for estimating spend against the shared budgets
+    # above. Defaults match Claude Haiku 4.5 ($1 in / $5 out per 1M tokens) as
+    # of writing -- update if using a different Claude model. Current pricing:
+    # https://www.anthropic.com/pricing#api
+    anthropic_input_price_per_1m: float = 1.00
+    anthropic_output_price_per_1m: float = 5.00
 
     app_env: str = "development"
     log_level: str = "INFO"

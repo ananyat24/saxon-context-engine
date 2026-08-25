@@ -14,6 +14,7 @@ import logging
 from typing import Any, Optional
 
 from graphiti_core import Graphiti
+from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.cross_encoder.gemini_reranker_client import GeminiRerankerClient
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.embedder.gemini import GeminiEmbedder, GeminiEmbedderConfig
@@ -21,12 +22,90 @@ from graphiti_core.embedder.azure_openai import AzureOpenAIEmbedderClient
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.gemini_client import GeminiClient
 from graphiti_core.llm_client.azure_openai_client import AzureOpenAILLMClient
+from graphiti_core.llm_client.anthropic_client import AnthropicClient
 from openai import AsyncAzureOpenAI
+from anthropic import AsyncAnthropic, AsyncAnthropicFoundry
 
 from app.config import settings
 from app.graph.neo4j_client import Neo4jClient
+from app.graph.spend_limiter import estimate_cost_usd, get_limiter
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_spend_limit_openai(
+    azure_client: AsyncAzureOpenAI, bucket: str, input_price: float, output_price: float, embedding_price: float
+) -> None:
+    """Wraps azure_client's chat/embeddings calls so every request this client
+    makes (via the LLM client, embedder, and reranker below -- they all share
+    this one azure_client instance) is checked against, and counted toward,
+    the local budget for `bucket`. See app/graph/spend_limiter.py."""
+    limiter = get_limiter()
+    original_chat_create = azure_client.chat.completions.create
+    original_chat_parse = azure_client.beta.chat.completions.parse
+    original_embeddings_create = azure_client.embeddings.create
+
+    async def limited_chat_create(*args, **kwargs):
+        limiter.ensure_room(bucket)
+        response = await original_chat_create(*args, **kwargs)
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            limiter.record(bucket, estimate_cost_usd(usage.prompt_tokens, usage.completion_tokens, input_price, output_price))
+        return response
+
+    async def limited_chat_parse(*args, **kwargs):
+        # Azure's structured-output path (JSON-schema-constrained responses,
+        # e.g. graphiti_core's extraction calls and our own answer-synthesis
+        # call in app/context/orchestrator.py) goes through .parse(), not
+        # .create() -- a separate method needing its own wrapper.
+        limiter.ensure_room(bucket)
+        response = await original_chat_parse(*args, **kwargs)
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            limiter.record(bucket, estimate_cost_usd(usage.prompt_tokens, usage.completion_tokens, input_price, output_price))
+        return response
+
+    async def limited_embeddings_create(*args, **kwargs):
+        limiter.ensure_room(bucket)
+        response = await original_embeddings_create(*args, **kwargs)
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            limiter.record(bucket, estimate_cost_usd(usage.prompt_tokens, 0, embedding_price))
+        return response
+
+    azure_client.chat.completions.create = limited_chat_create
+    azure_client.beta.chat.completions.parse = limited_chat_parse
+    azure_client.embeddings.create = limited_embeddings_create
+
+
+def _apply_spend_limit_anthropic(
+    anthropic_client: "AsyncAnthropic | AsyncAnthropicFoundry", bucket: str, input_price: float, output_price: float
+) -> None:
+    """Same idea as _apply_spend_limit_openai above, but for Anthropic's SDK
+    shape: one call (messages.create) instead of three, and usage fields
+    named input_tokens/output_tokens rather than prompt_tokens/completion_tokens."""
+    limiter = get_limiter()
+    original_create = anthropic_client.messages.create
+
+    async def limited_create(*args, **kwargs):
+        limiter.ensure_room(bucket)
+        response = await original_create(*args, **kwargs)
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            limiter.record(bucket, estimate_cost_usd(usage.input_tokens, usage.output_tokens, input_price, output_price))
+        return response
+
+    anthropic_client.messages.create = limited_create
+
+
+def _build_gemini_embedder_and_reranker(api_key: str):
+    """Split out from _build_gemini_clients below so "anthropic" mode can
+    reuse this for embeddings/reranking (Claude has no embeddings API of its
+    own -- see app/config.py's llm_provider docstring) without also getting
+    Gemini's chat/extraction client."""
+    embedder = GeminiEmbedder(config=GeminiEmbedderConfig(api_key=api_key, embedding_model=settings.embedding_model))
+    cross_encoder = GeminiRerankerClient(config=LLMConfig(api_key=api_key))
+    return embedder, cross_encoder
 
 
 def _build_gemini_clients(api_key: str):
@@ -36,18 +115,20 @@ def _build_gemini_clients(api_key: str):
     llm_client = GeminiClient(
         config=LLMConfig(api_key=api_key, model=settings.llm_model, small_model=settings.small_llm_model)
     )
-    embedder = GeminiEmbedder(config=GeminiEmbedderConfig(api_key=api_key, embedding_model=settings.embedding_model))
-    cross_encoder = GeminiRerankerClient(config=LLMConfig(api_key=api_key))
+    embedder, cross_encoder = _build_gemini_embedder_and_reranker(api_key)
     return llm_client, embedder, cross_encoder
 
 
-def _build_azure_openai_clients():
+def _build_azure_openai_clients(bucket: str):
     """Azure OpenAI is an operator-wide resource, not a per-tenant one -- unlike
     Gemini, there's no separate key per client here, every tenant's Graphiti
     client is built from the same enterprise Azure deployment. Reach for this
     when Gemini's free-tier rate limit is the actual bottleneck (see
     scripts/ingest_samples.py's rate-limit backoff) rather than per-tenant
     billing isolation, which Azure OpenAI doesn't provide on its own.
+
+    `bucket` selects which local spend budget (see app/graph/spend_limiter.py)
+    this client's calls count against -- "ingestion" or "query".
     """
     missing = [
         name
@@ -68,6 +149,13 @@ def _build_azure_openai_clients():
         api_key=settings.azure_openai_api_key,
         api_version=settings.azure_openai_api_version,
     )
+    _apply_spend_limit_openai(
+        azure_client,
+        bucket,
+        settings.azure_openai_input_price_per_1m,
+        settings.azure_openai_output_price_per_1m,
+        settings.azure_openai_embedding_price_per_1m,
+    )
     llm_client = AzureOpenAILLMClient(
         azure_client=azure_client,
         config=LLMConfig(model=settings.azure_openai_llm_deployment, small_model=settings.azure_openai_llm_deployment),
@@ -77,21 +165,61 @@ def _build_azure_openai_clients():
     return llm_client, embedder, cross_encoder
 
 
+def _build_anthropic_clients(bucket: str, gemini_api_key: str):
+    """Anthropic is an operator-wide resource, same reasoning as Azure OpenAI
+    above -- one shared Claude key, not a key per tenant.
+
+    Claude has no embeddings API (see app/config.py's llm_provider
+    docstring), so embeddings/reranking still come from Gemini here --
+    `gemini_api_key` is the tenant's own Gemini key (TenantConfig.gemini_api_key,
+    the same field "gemini" mode uses), reused for just that piece.
+    """
+    if not settings.anthropic_api_key:
+        raise RuntimeError("llm_provider is 'anthropic' but anthropic_api_key is not set. See .env.example.")
+
+    # A key issued through Microsoft Foundry (same place as an Azure OpenAI
+    # resource) won't authenticate against the direct Anthropic API -- it
+    # needs AsyncAnthropicFoundry, pointed at the Foundry resource, instead.
+    if settings.anthropic_foundry_resource:
+        anthropic_client = AsyncAnthropicFoundry(
+            resource=settings.anthropic_foundry_resource, api_key=settings.anthropic_api_key
+        )
+    else:
+        anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    _apply_spend_limit_anthropic(
+        anthropic_client, bucket, settings.anthropic_input_price_per_1m, settings.anthropic_output_price_per_1m
+    )
+    llm_client = AnthropicClient(client=anthropic_client, config=LLMConfig(model=settings.anthropic_model))
+    embedder, cross_encoder = _build_gemini_embedder_and_reranker(gemini_api_key)
+    return llm_client, embedder, cross_encoder
+
+
 def build_graphiti(
     neo4j_uri: Optional[str] = None,
     neo4j_user: Optional[str] = None,
     neo4j_password: Optional[str] = None,
     google_api_key: Optional[str] = None,
+    bucket: str = "ingestion",
 ) -> Graphiti:
     """Build a Graphiti client wired up to Neo4j and an LLM provider for entity
     extraction, embeddings, and reranking search results.
 
-    Which provider is controlled by settings.llm_provider ("gemini" or
-    "azure_openai"), not by any argument here -- it's an operator-wide choice,
-    not a per-call one. `google_api_key` is only used in "gemini" mode (and is
-    where each tenant's own key comes in, via TenantGraphitiPool); it's ignored
-    entirely in "azure_openai" mode, since that provider is one shared
-    enterprise resource rather than a key per tenant.
+    Which provider is controlled by settings.llm_provider ("gemini",
+    "azure_openai", or "anthropic"), not by any argument here -- it's an
+    operator-wide choice, not a per-call one. `google_api_key` is used in
+    "gemini" mode (where each tenant's own key comes in, via
+    TenantGraphitiPool) AND in "anthropic" mode (for embeddings/reranking,
+    since Claude has no embeddings API of its own -- see the llm_provider
+    setting's docstring); it's ignored entirely in "azure_openai" mode, since
+    that provider is one shared enterprise resource rather than a key per
+    tenant.
+
+    `bucket` only matters in "azure_openai"/"anthropic" mode -- it's which
+    local spend budget this client's calls count against (see
+    app/graph/spend_limiter.py). Defaults to "ingestion" since every direct
+    caller of this function (scripts/ingest_samples.py, scripts/seed_core_graph.py)
+    is a data-loading script; TenantGraphitiPool passes "query" explicitly for
+    the live API path.
 
     neo4j_uri/user/password fall back to settings regardless of provider --
     pass them explicitly only to point at a different database than .env (e.g.
@@ -102,14 +230,24 @@ def build_graphiti(
     password = neo4j_password or settings.neo4j_password
 
     if settings.llm_provider == "azure_openai":
-        llm_client, embedder, cross_encoder = _build_azure_openai_clients()
+        llm_client, embedder, cross_encoder = _build_azure_openai_clients(bucket)
+    elif settings.llm_provider == "anthropic":
+        api_key = google_api_key or settings.google_api_key
+        llm_client, embedder, cross_encoder = _build_anthropic_clients(bucket, api_key)
     elif settings.llm_provider == "gemini":
         api_key = google_api_key or settings.google_api_key
         llm_client, embedder, cross_encoder = _build_gemini_clients(api_key)
     else:
-        raise ValueError(f"Unknown llm_provider: {settings.llm_provider!r} (expected 'gemini' or 'azure_openai')")
+        raise ValueError(
+            f"Unknown llm_provider: {settings.llm_provider!r} (expected 'gemini', 'azure_openai', or 'anthropic')"
+        )
 
-    return Graphiti(uri, user, password, llm_client=llm_client, embedder=embedder, cross_encoder=cross_encoder)
+    # graphiti_core's own Neo4jDriver defaults to database="neo4j" unless told
+    # otherwise -- explicit here so this works against an Aura instance whose
+    # database is named after the instance id instead (see
+    # settings.neo4j_database).
+    driver = Neo4jDriver(uri, user, password, database=settings.neo4j_database)
+    return Graphiti(graph_driver=driver, llm_client=llm_client, embedder=embedder, cross_encoder=cross_encoder)
 
 
 class GraphitiAdapter:

@@ -186,8 +186,25 @@ document.getElementById("closeKeyBtn").addEventListener("click", closeKeyModal);
 document.getElementById("keyOverlay").addEventListener("click", (e) => {
   if (e.target.id === "keyOverlay") closeKeyModal();
 });
+
+function openHelpModal() {
+  document.getElementById("helpOverlay").hidden = false;
+}
+
+function closeHelpModal() {
+  document.getElementById("helpOverlay").hidden = true;
+}
+
+document.getElementById("helpBtn").addEventListener("click", openHelpModal);
+document.getElementById("closeHelpBtn").addEventListener("click", closeHelpModal);
+document.getElementById("helpOverlay").addEventListener("click", (e) => {
+  if (e.target.id === "helpOverlay") closeHelpModal();
+});
+
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !document.getElementById("keyOverlay").hidden) closeKeyModal();
+  if (e.key !== "Escape") return;
+  if (!document.getElementById("keyOverlay").hidden) closeKeyModal();
+  if (!document.getElementById("helpOverlay").hidden) closeHelpModal();
 });
 
 document.getElementById("saveKeyBtn").addEventListener("click", () => {
@@ -518,7 +535,11 @@ document.getElementById("askBtn").addEventListener("click", async () => {
       ? summary
       : "Nothing on file matches that yet. Try asking a broader question, or add more information first.";
 
-    renderFacts(factsEl, facts);
+    // A single fact IS the answer verbatim in this case (no synthesis step ran
+    // for just one fact -- see orchestrator.py) -- showing it again below as
+    // "supporting evidence" would just repeat the same sentence twice.
+    const isSameAsSingleFact = facts.length === 1 && facts[0].fact === summary;
+    renderFacts(factsEl, isSameAsSingleFact ? [] : facts);
 
     rawEl.textContent = JSON.stringify(data, null, 2);
     rawWrap.hidden = false;

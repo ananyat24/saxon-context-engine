@@ -142,6 +142,23 @@ header {
 }
 .modal-close:hover { color: var(--text-primary); }
 
+.modal-wide {
+  max-width: 640px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.btn-icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 700;
+}
+
 main {
   max-width: 900px;
   margin: 0 auto;
@@ -150,6 +167,16 @@ main {
   flex-direction: column;
   gap: 1.25rem;
 }
+
+.plain-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.plain-list li { margin-bottom: 0.5rem; }
+.plain-list li:last-child { margin-bottom: 0; }
+.plain-list strong { color: var(--text-primary); }
 
 .intro {
   margin: 0;

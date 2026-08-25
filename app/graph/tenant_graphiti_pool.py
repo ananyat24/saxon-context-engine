@@ -44,7 +44,7 @@ class TenantGraphitiPool:
                 return existing
 
             logger.info(f"Building Graphiti client for tenant '{tenant.tenant_id}'")
-            client = build_graphiti(google_api_key=tenant.gemini_api_key)
+            client = build_graphiti(google_api_key=tenant.gemini_api_key, bucket="query")
             self._clients[tenant.tenant_id] = client
             return client
 

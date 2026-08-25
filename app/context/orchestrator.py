@@ -14,12 +14,24 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 from graphiti_core import Graphiti
+from graphiti_core.prompts.models import Message
+from pydantic import BaseModel
 from app.graph.neo4j_client import Neo4jClient
 from app.models.context_packet import ContextPacket
 from app.retrieval.base import TextRetriever
 from app.retrieval.graph_retriever import GraphRetriever
 
 logger = logging.getLogger(__name__)
+
+
+class _SynthesizedAnswer(BaseModel):
+    answer: str
+
+
+# Kept low deliberately -- this is one short sentence, not a report. Also
+# bounds the cost of a call that (unlike extraction) runs on every multi-fact
+# query, not just at ingestion time.
+_SYNTHESIS_MAX_TOKENS = 80
 
 
 def _parse_iso(timestamp) -> Optional[datetime]:
@@ -84,9 +96,55 @@ class ContextOrchestrator:
         extra_retrievers: Optional[List[TextRetriever]] = None,
         neo4j_client: Optional[Neo4jClient] = None,
     ):
+        self.graphiti = graphiti_instance
         self.retrievers: List[TextRetriever] = [GraphRetriever(graphiti_instance, neo4j_client=neo4j_client)]
         if extra_retrievers:
             self.retrievers.extend(extra_retrievers)
+
+    async def _synthesize_answer(self, query: str, current_lines: list[str]) -> str:
+        """Condenses several current facts into one clear sentence answering
+        `query`, via a small, tightly-bounded LLM call -- used only when
+        there's more than one current fact (a single fact is already a clear
+        one-line answer on its own, so that case skips this entirely, at
+        zero extra cost).
+
+        Deliberately does NOT use each entity's Graphiti-generated `summary`
+        for this (see GraphRepository._resolve_named_entities) -- that
+        summary accumulates every fact ever seen with no temporal awareness,
+        which is exactly the stale-answer bug fixed in graph_repository.py.
+        This only ever sees the already-filtered current_lines, so it can't
+        reintroduce a superseded fact as part of the "answer."
+
+        Falls back to a plain joined list on any failure (including the
+        local spend cap being hit) -- a failed synthesis should degrade to
+        the older, plainer behavior, not break the whole query.
+        """
+        try:
+            messages = [
+                Message(
+                    role="system",
+                    content=(
+                        "You answer questions using ONLY the facts given -- never add, infer, "
+                        "or assume anything not explicitly stated. Respond with one clear, "
+                        "concise sentence."
+                    ),
+                ),
+                Message(
+                    role="user",
+                    content=(
+                        f"Question: {query}\n\nFacts:\n"
+                        + "\n".join(f"- {line}" for line in current_lines)
+                    ),
+                ),
+            ]
+            result = await self.graphiti.llm_client.generate_response(
+                messages, response_model=_SynthesizedAnswer, max_tokens=_SYNTHESIS_MAX_TOKENS
+            )
+            answer = result.get("answer", "").strip()
+            return answer or "\n".join(current_lines)
+        except Exception as e:
+            logger.warning(f"Answer synthesis failed, falling back to a plain fact list: {e}")
+            return "\n".join(current_lines)
 
     async def get_context_packet(
         self,
@@ -128,7 +186,14 @@ class ContextOrchestrator:
             if line not in seen:
                 seen.add(line)
                 summary_lines.append(line)
-        summary_text = "\n".join(summary_lines) if summary_lines else "No matching graph context found."
+        if not summary_lines:
+            summary_text = "No matching graph context found."
+        elif len(summary_lines) == 1:
+            # Already a single clear statement -- synthesizing would just cost
+            # a call to say the same thing differently.
+            summary_text = summary_lines[0]
+        else:
+            summary_text = await self._synthesize_answer(query, summary_lines)
 
         return ContextPacket(
             query=query,

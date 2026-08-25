@@ -14,10 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Code and ontology only -- data/, scripts/, tests/, docs/ aren't needed to
-# run the API and would just bloat the image (see .dockerignore).
+# Code, ontology, and frontend/ only -- data/, scripts/, tests/, docs/ aren't
+# needed to run the API and would just bloat the image (see .dockerignore).
+# frontend/ is required, not optional: app/main.py mounts it as static files
+# and serves it at /ui -- without it the app fails to even start.
 COPY app/ ./app/
 COPY ontology/ ./ontology/
+COPY frontend/ ./frontend/
 
 # Config is supplied at deploy time via Container Apps environment variables
 # (per docs/internal/infrastructure-plan.md's "platform env vars" approach),

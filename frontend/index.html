@@ -19,6 +19,7 @@
             <select id="userSelect" class="kb-select" hidden></select>
         </div>
         <div class="header-right">
+            <button id="helpBtn" class="btn btn-key btn-icon" aria-label="How this works">?</button>
             <button id="keyBtn" class="btn btn-key">
                 <span id="keyDot" class="key-dot"></span>
                 <span id="keyBtnLabel">Access key</span>
@@ -43,6 +44,65 @@
                 <button id="saveKeyBtn" class="btn btn-primary">Use key</button>
             </div>
             <div id="authStatus" class="status-line"></div>
+        </div>
+    </div>
+
+    <!-- How-this-works / FAQ popup, opened from the "?" button in the header. -->
+    <div id="helpOverlay" class="overlay" hidden>
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <h2>How this works</h2>
+                <button id="closeHelpBtn" class="modal-close" aria-label="Close">&times;</button>
+            </div>
+            <p class="muted">
+                This tool reads through your company's information and builds a map of the
+                people, companies, and things it finds, how they're connected, and what's
+                currently true about each one. You can ask a question in plain English and
+                get an answer along with the specific facts it came from.
+            </p>
+
+            <details open>
+                <summary>How does this compare to something like Microsoft Fabric?</summary>
+                <p class="muted">
+                    Most data platforms, including Fabric, are built to store and report on
+                    data that already lives in organized tables. Getting an answer usually
+                    means knowing which tables to look in and how they connect to each other.
+                </p>
+                <p class="muted">
+                    This tool takes a different approach. It automatically connects related
+                    information across your different sources into a single picture, so
+                    someone can ask a plain question without needing to know the underlying
+                    structure or write a query. It also keeps track of how information changes
+                    over time instead of only showing the latest version, and limits what each
+                    person sees based on their role, both built directly into how it answers
+                    questions rather than something to set up separately.
+                </p>
+                <p class="muted">
+                    This is meant to work alongside a platform like Fabric, not replace it. If
+                    your data already lives in a Fabric warehouse or lakehouse, this tool can
+                    pull from it as a source, the same way it can pull from a regular database.
+                </p>
+            </details>
+
+            <details>
+                <summary>What's different day to day?</summary>
+                <ul class="plain-list muted">
+                    <li>You can ask a plain question instead of writing a query or building a report.</li>
+                    <li>You get an answer along with the specific facts behind it, so you can check where it came from.</li>
+                    <li>If something changed recently, you're told it changed, rather than just given the newest version with no context.</li>
+                    <li>What you see is limited to your role, so a sales rep sees their own accounts rather than the whole company's.</li>
+                </ul>
+            </details>
+
+            <details>
+                <summary>How do I read what comes back?</summary>
+                <ul class="plain-list muted">
+                    <li><strong>Answer</strong>: a short response to your question.</li>
+                    <li><strong>Where this answer comes from</strong>: the individual facts behind that answer, each marked as current or replaced by something newer.</li>
+                    <li><strong>The graph</strong>: a visual view of what's connected to what. Hovering over something shows more detail.</li>
+                    <li><strong>Technical details</strong>: the raw data behind an answer, for anyone who wants to look closer.</li>
+                </ul>
+            </details>
         </div>
     </div>
 

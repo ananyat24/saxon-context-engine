@@ -16,3 +16,7 @@ config/tenants.json
 
 # Per-machine record of what's already been ingested, not source
 data/processed/ingest_log.json
+
+# Per-machine running total for the local Azure OpenAI spend caps -- see
+# app/graph/spend_limiter.py
+data/processed/azure_openai_spend.json
