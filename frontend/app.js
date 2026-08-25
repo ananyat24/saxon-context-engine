@@ -945,10 +945,13 @@ async function runAskQuery(resultLimit) {
       : "Nothing on file matches that yet. Try asking a broader question, or add more information first.";
 
     // A single fact IS the answer verbatim in this case (no synthesis step ran
-    // for just one fact -- see orchestrator.py) -- showing it again below as
-    // "supporting evidence" would just repeat the same sentence twice.
-    const isSameAsSingleFact = facts.length === 1 && facts[0].fact === summary;
-    renderFacts(factsEl, isSameAsSingleFact ? [] : facts);
+    // for just one fact -- see orchestrator.py), but it's still shown below
+    // too: that's the only place the current/superseded badge appears, and
+    // always showing where an answer came from is the actual point of this
+    // tool -- collapsing it away for the single-fact case would quietly break
+    // that promise exactly when the answer is most directly traceable to one
+    // specific fact.
+    renderFacts(factsEl, facts);
 
     // result_limit_hit means the fallback search returned exactly as many
     // results as it was capped at -- a sign there may be lower-relevance
