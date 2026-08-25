@@ -36,11 +36,20 @@ class SearchQueryRequest(BaseModel):
     # supported together with document_set yet (role-based visibility is
     # scoped to one knowledge base's org chart at a time).
     as_user: Optional[str] = None
+    # How many facts the semantic-search fallback returns at most (default 8 --
+    # see GraphRepository.search_graphiti_facts). A resolved named entity's own
+    # facts are never capped by this. Clamped server-side so a client can't
+    # turn a broad question into an arbitrarily large, arbitrarily expensive
+    # synthesis call -- meant for a client-side "see more results" follow-up
+    # (the initial response's metadata.result_limit_hit says when one's worth
+    # offering), not as a default every request should set.
+    result_limit: Optional[int] = None
 
 
 @router.post("/query")
 async def query_context(req: SearchQueryRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)):
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    num_results = max(1, min(req.result_limit, 20)) if req.result_limit else 8
 
     if req.document_set:
         if req.as_user:
@@ -62,6 +71,8 @@ async def query_context(req: SearchQueryRequest, request: Request, tenant: Tenan
     graphiti = await request.app.state.graphiti_pool.get_or_create(tenant)
     orchestrator = ContextOrchestrator(graphiti, neo4j_client=request.app.state.neo4j_client)
     try:
-        return await orchestrator.get_context_packet(req.query, group_ids=group_ids, visible_uuids=visible_uuids)
+        return await orchestrator.get_context_packet(
+            req.query, group_ids=group_ids, visible_uuids=visible_uuids, num_results=num_results
+        )
     except SpendLimitExceeded as e:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))

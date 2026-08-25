@@ -13,6 +13,10 @@ from typing import Any, Optional, Protocol
 
 class TextRetriever(Protocol):
     async def retrieve(
-        self, query: str, group_ids: Optional[list[str]] = None, visible_uuids: Optional[set[str]] = None
+        self,
+        query: str,
+        group_ids: Optional[list[str]] = None,
+        visible_uuids: Optional[set[str]] = None,
+        num_results: int = 8,
     ) -> list[dict[str, Any]]:
         ...

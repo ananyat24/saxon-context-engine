@@ -109,9 +109,30 @@
     <main>
         <p class="intro">
             This page shows what the system has learned from your company's information.
-            Below, you can see what it looks for, what it's found so far, and you can
-            ask it a question in plain English and see exactly where the answer comes from.
+            Ask it a question in plain English below and see exactly where the answer
+            comes from, or scroll down to see what it looks for and what it's found so far.
         </p>
+
+        <section class="card">
+            <h2>Ask a question</h2>
+            <p class="muted">Type a question the way you'd ask a coworker. The answer comes only
+                from real information the system has on file, and if something has changed
+                recently, it'll tell you that too instead of only giving you the latest answer.</p>
+            <select id="scopeSelect" class="kb-select scope-select" hidden></select>
+            <div id="suggestedQuestions" class="chip-row"></div>
+            <div class="row">
+                <input id="queryInput" type="text" placeholder="e.g. who manages the Contoso account" />
+                <button id="askBtn" class="btn btn-accent">Ask</button>
+            </div>
+            <div id="queryAnswer" class="result-block"></div>
+            <div id="queryFacts" class="fact-list"></div>
+            <button id="seeMoreBtn" class="btn btn-outline" type="button" hidden>See more results</button>
+            <details id="queryRawWrap" class="raw-details" hidden>
+                <summary>Technical details</summary>
+                <pre id="queryRaw" class="result-block"></pre>
+            </details>
+        </section>
+
         <div class="grid">
             <section class="card">
                 <h2>What it looks for</h2>
@@ -145,7 +166,7 @@
         <section id="docSetsCard" class="card" hidden>
             <h2>Document sets</h2>
             <p class="muted">Group your connectors into a named bundle, then use it to control
-                which of them a question below searches across -- instead of picking exactly
+                which of them the question above searches across -- instead of picking exactly
                 one connector every time.</p>
             <table class="doc-sets-table">
                 <thead>
@@ -175,25 +196,6 @@
                     <button id="createDocSetBtn" class="btn btn-accent">Create document set</button>
                 </div>
                 <div id="docSetStatus" class="status-line"></div>
-            </details>
-        </section>
-
-        <section class="card">
-            <h2>Ask a question</h2>
-            <p class="muted">Type a question the way you'd ask a coworker. The answer comes only
-                from real information the system has on file, and if something has changed
-                recently, it'll tell you that too instead of only giving you the latest answer.</p>
-            <select id="scopeSelect" class="kb-select scope-select" hidden></select>
-            <div id="suggestedQuestions" class="chip-row"></div>
-            <div class="row">
-                <input id="queryInput" type="text" placeholder="e.g. who manages the Contoso account" />
-                <button id="askBtn" class="btn btn-accent">Ask</button>
-            </div>
-            <div id="queryAnswer" class="result-block"></div>
-            <div id="queryFacts" class="fact-list"></div>
-            <details id="queryRawWrap" class="raw-details" hidden>
-                <summary>Technical details</summary>
-                <pre id="queryRaw" class="result-block"></pre>
             </details>
         </section>
     </main>

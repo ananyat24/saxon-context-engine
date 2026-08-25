@@ -19,7 +19,13 @@ class GraphRetriever:
         self.repository = GraphRepository(graphiti_instance, neo4j_client=neo4j_client)
 
     async def retrieve(
-        self, query: str, group_ids: Optional[list[str]] = None, visible_uuids: Optional[set[str]] = None
+        self,
+        query: str,
+        group_ids: Optional[list[str]] = None,
+        visible_uuids: Optional[set[str]] = None,
+        num_results: int = 8,
     ) -> list[dict[str, Any]]:
         logger.info(f"Retrieving graph context for query: '{query}'")
-        return await self.repository.search_graphiti_facts(query, group_ids=group_ids, visible_uuids=visible_uuids)
+        return await self.repository.search_graphiti_facts(
+            query, group_ids=group_ids, visible_uuids=visible_uuids, num_results=num_results
+        )

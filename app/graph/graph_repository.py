@@ -211,9 +211,14 @@ class GraphRepository:
         query_text: str,
         group_ids: Optional[list[str]] = None,
         visible_uuids: Optional[set[str]] = None,
+        num_results: int = 8,
     ) -> list[dict[str, Any]]:
         """Query for facts relevant to query_text, including whether each fact is
         still currently valid or has since been superseded/invalidated.
+
+        num_results only bounds the fallback semantic-search branch at the
+        bottom of this method (a named entity resolved via _resolve_named_entities
+        returns all of that entity's own edges regardless -- see below).
 
         `visible_uuids`, if given, drops any fact where *neither* end is
         something this caller directly owns -- role-based visibility for the
@@ -310,9 +315,12 @@ class GraphRepository:
             return facts
 
         # Graphiti's own default (10) is tuned for open-ended browsing, not a
-        # single answer -- trimmed here since every extra fact both adds noise
-        # to the response and lengthens the synthesis call that follows it.
-        results = await self.graphiti.search(query_text, group_ids=group_ids, num_results=5)
+        # single answer -- trimmed by default since every extra fact both adds
+        # noise to the response and lengthens the synthesis call that follows
+        # it. The caller (see app/api/context.py's result_limit) can still ask
+        # for more on a broad question via a "see more results" follow-up,
+        # rather than everyone paying for a bigger default every time.
+        results = await self.graphiti.search(query_text, group_ids=group_ids, num_results=num_results)
         facts = []
         for r in results:
             source_uuid = getattr(r, "source_node_uuid", "")
@@ -327,5 +335,10 @@ class GraphRepository:
                 "invalid_at": getattr(r, "invalid_at", None),
                 "expired_at": getattr(r, "expired_at", None),
                 "is_valid": getattr(r, "expired_at", None) is None and getattr(r, "invalid_at", None) is None,
+                # Distinguishes these from the entity-resolution branches above
+                # (whose facts carry no "kind", or "entity_summary") -- the
+                # orchestrator uses this to tell whether num_results actually
+                # capped anything, since only this branch is capped at all.
+                "kind": "semantic_search",
             })
         return facts

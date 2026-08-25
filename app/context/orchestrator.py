@@ -151,10 +151,13 @@ class ContextOrchestrator:
         query: str,
         group_ids: Optional[List[str]] = None,
         visible_uuids: Optional[set[str]] = None,
+        num_results: int = 8,
     ) -> ContextPacket:
         raw_facts = []
         for retriever in self.retrievers:
-            raw_facts.extend(await retriever.retrieve(query, group_ids=group_ids, visible_uuids=visible_uuids))
+            raw_facts.extend(
+                await retriever.retrieve(query, group_ids=group_ids, visible_uuids=visible_uuids, num_results=num_results)
+            )
 
         # A resolved entity's own summary (see GraphRepository._resolve_named_entity)
         # is already one consolidated, holistic statement about it, generated at
@@ -195,11 +198,19 @@ class ContextOrchestrator:
         else:
             summary_text = await self._synthesize_answer(query, summary_lines)
 
+        # Only the semantic-search fallback (see GraphRepository.search_graphiti_facts)
+        # is ever capped by num_results -- a resolved entity's own facts always
+        # come back in full. Hitting the cap there is the signal a client uses
+        # to offer "see more results" instead of always guessing at one.
+        semantic_result_count = sum(1 for f in raw_facts if f.get("kind") == "semantic_search")
+        result_limit_hit = semantic_result_count >= num_results
+
         return ContextPacket(
             query=query,
             metadata={
                 "group_ids": group_ids,
                 "summary": summary_text,
                 "facts": raw_facts,
+                "result_limit_hit": result_limit_hit,
             },
         )

@@ -86,6 +86,7 @@ document.getElementById("kbSelect").addEventListener("change", async (e) => {
   document.getElementById("queryAnswer").textContent = "";
   document.getElementById("queryFacts").innerHTML = "";
   document.getElementById("queryRawWrap").hidden = true;
+  document.getElementById("seeMoreBtn").hidden = true;
 });
 
 // --- Document sets ----------------------------------------------------------
@@ -331,6 +332,7 @@ document.getElementById("userSelect").addEventListener("change", (e) => {
   document.getElementById("queryAnswer").textContent = "";
   document.getElementById("queryFacts").innerHTML = "";
   document.getElementById("queryRawWrap").hidden = true;
+  document.getElementById("seeMoreBtn").hidden = true;
 });
 
 function updateKeyDot() {
@@ -657,24 +659,34 @@ function escapeXml(s) {
 // shouldn't let the first, slower response overwrite the newer one.
 let askRequestId = 0;
 
-document.getElementById("askBtn").addEventListener("click", async () => {
+// How many results the fallback semantic search asks for -- see
+// app/api/context.py's result_limit. Bumped only by clicking "See more
+// results" (see below), and reset back to the default on every new question,
+// so a broad question doesn't silently stay expensive after the user moves on.
+const DEFAULT_RESULT_LIMIT = 8;
+const EXPANDED_RESULT_LIMIT = 20;
+
+async function runAskQuery(resultLimit) {
   const requestId = ++askRequestId;
   const answerEl = document.getElementById("queryAnswer");
   const factsEl = document.getElementById("queryFacts");
   const rawWrap = document.getElementById("queryRawWrap");
   const rawEl = document.getElementById("queryRaw");
+  const seeMoreBtn = document.getElementById("seeMoreBtn");
   const query = document.getElementById("queryInput").value.trim();
   if (!query) return;
   if (!getApiKey()) {
     answerEl.textContent = 'Click "Access key" in the top right first.';
     factsEl.innerHTML = "";
     rawWrap.hidden = true;
+    seeMoreBtn.hidden = true;
     return;
   }
 
   answerEl.textContent = "Thinking…";
   factsEl.innerHTML = "";
   rawWrap.hidden = true;
+  seeMoreBtn.hidden = true;
   try {
     // A document set scoped to several connectors at once takes priority over
     // the single-connector picker in the header when one's selected -- see
@@ -685,11 +697,12 @@ document.getElementById("askBtn").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(
         docSet
-          ? { query, document_set: docSet }
+          ? { query, document_set: docSet, result_limit: resultLimit }
           : {
               query,
               knowledge_base: getSelectedKnowledgeBase() || undefined,
               as_user: getSelectedUser() || undefined,
+              result_limit: resultLimit,
             }
       ),
     });
@@ -719,12 +732,22 @@ document.getElementById("askBtn").addEventListener("click", async () => {
     const isSameAsSingleFact = facts.length === 1 && facts[0].fact === summary;
     renderFacts(factsEl, isSameAsSingleFact ? [] : facts);
 
+    // result_limit_hit means the fallback search returned exactly as many
+    // results as it was capped at -- a sign there may be lower-relevance
+    // ones beyond it worth surfacing on request, rather than always paying
+    // for a bigger default on every question. Once already showing the
+    // expanded count, there's no further "more" to offer.
+    seeMoreBtn.hidden = !(data.metadata?.result_limit_hit && resultLimit < EXPANDED_RESULT_LIMIT);
+
     rawEl.textContent = JSON.stringify(data, null, 2);
     rawWrap.hidden = false;
   } catch (err) {
     answerEl.textContent = `Error: ${err.message}`;
   }
-});
+}
+
+document.getElementById("askBtn").addEventListener("click", () => runAskQuery(DEFAULT_RESULT_LIMIT));
+document.getElementById("seeMoreBtn").addEventListener("click", () => runAskQuery(EXPANDED_RESULT_LIMIT));
 
 // Every fact carries whether it's still true or was superseded by something
 // newer -- surfacing that plainly is the actual proof this system tracks

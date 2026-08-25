@@ -251,6 +251,13 @@ input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent)
 .btn:hover { filter: brightness(0.94); }
 .btn-primary { background: var(--navy); color: #fff; }
 .btn-accent { background: var(--accent); color: #fff; }
+.btn-outline {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  margin-top: 0.6rem;
+}
+.btn-outline[hidden] { display: none; }
 
 .status-line { margin-top: 0.5rem; font-size: 0.85rem; }
 .status-line.ok { color: var(--status-normal); }
