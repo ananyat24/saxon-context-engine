@@ -163,6 +163,8 @@ Ontology (core + 9 domain packs + customer extension) validated and tested. Neo4
 
 **Exit criteria:** two live source types stay current in the graph without a human clicking "sync," each only re-processing genuinely new/changed data, within the existing per-tenant spend budgets.
 
+**Status:** `database`, `documents`, and `email` connector types exist and work end to end (`app/ingestion/database_source.py`, `document_source.py`, `email_source.py`), each reading a small bundled demo dataset rather than a live source, since real per-client CRM/inbox credentials weren't available yet — see `data/samples/mock_*`. Scheduling (the "not just on manual click" half of this version's goal) isn't built; every sync, including the real `google_drive` connector below, is still a manual "Sync now" click.
+
 ### v1.5 — Unified connector platform for broad source coverage
 
 **Goal:** stop hand-writing a connector per client system — this is the step that makes "any and all data sources" actually tractable and cost-effective rather than an ever-growing bespoke-integration backlog.
@@ -173,6 +175,8 @@ Ontology (core + 9 domain packs + customer extension) validated and tested. Neo4
 - Re-run the v0.5 connector-interface tests against a Nango-backed connector to confirm the abstraction held.
 
 **Exit criteria:** onboarding a new client system that already has a Nango connector is a configuration/mapping change, not new integration code.
+
+**Status — deliberate substitution:** standing up Nango itself (a separate hosted service, plus per-client OAuth app registrations) was judged too much new infrastructure to take on before a single real live connector had been proven end to end. Instead, `google_drive` (`app/ingestion/google_drive_source.py`) was built as one real, direct connector — no mock data, a genuine live external source — authenticating as a Google Cloud **service account** (`GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`, see `.env.example`) rather than per-user OAuth, since a service account needs no interactive consent flow and is what a server-side "Sync now"/future scheduled sync actually needs. It only ever sees folders explicitly shared with its own email address. This satisfies v1.5's underlying goal ("prove a real live source works, cheaply") without its literal Nango deliverable. **Overwrite note:** Nango (or an equivalent unified platform) is still the right answer once *breadth* of sources matters more than proving the pattern once — don't read this substitution as "Nango isn't needed," just "it wasn't the next-cheapest proof." `google_drive`'s own interface (`SourceConnector`) is exactly what a future Nango adapter would also implement, per v0.5's exit criteria, so nothing here needs to be redone to add Nango later.
 
 ### v2 — Continuous, low-latency ingestion
 

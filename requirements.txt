@@ -7,6 +7,12 @@ pytest
 fastapi
 uvicorn
 httpx
+# Just the service-account auth/token piece -- Drive API calls themselves go
+# through httpx (already a dependency) rather than the much heavier
+# google-api-python-client, to keep this connector's footprint small. The
+# [requests] extra is needed by google.auth.transport.requests, which is
+# what actually performs the token refresh call.
+google-auth[requests]
 graphiti-core[anthropic,google-genai]>=0.29.3
 # Pinned below 1.0 -- graphiti_core's bundled AnthropicClient (llm_client/anthropic_client.py)
 # calls messages.create(..., temperature=...) in a shape that breaks under anthropic 1.x's

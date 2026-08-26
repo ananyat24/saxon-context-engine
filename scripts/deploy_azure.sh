@@ -62,6 +62,10 @@ ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-haiku-4-5}"
 # Only needed if the Claude key was issued through Microsoft Foundry rather
 # than directly from console.anthropic.com (see app/config.py):
 ANTHROPIC_FOUNDRY_RESOURCE="${ANTHROPIC_FOUNDRY_RESOURCE:-}"
+# Only needed to enable the "google_drive" source connector type -- the full
+# contents of a Google Cloud service account's JSON key (see app/config.py
+# and .env.example for how to get one). Leave unset to deploy without it.
+GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON:-}"
 
 echo "=== 1. Selecting subscription ==="
 az account set --subscription "$SUBSCRIPTION"
@@ -124,7 +128,8 @@ if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --
       neo4j-password="$NEO4J_PASSWORD" \
       tenant-api-keys="$TENANT_API_KEYS" \
       azure-openai-api-key="$AZURE_OPENAI_API_KEY" \
-      anthropic-api-key="$ANTHROPIC_API_KEY"
+      anthropic-api-key="$ANTHROPIC_API_KEY" \
+      google-drive-service-account-json="$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON"
   # Container Apps only creates a new revision (and thus restarts the
   # container, re-resolving secretref values into fresh env vars) when it
   # detects a template change -- an env var *declaration* changing, or the
@@ -152,7 +157,8 @@ if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --
       AZURE_OPENAI_EMBEDDING_DEPLOYMENT="$AZURE_OPENAI_EMBEDDING_DEPLOYMENT" \
       ANTHROPIC_API_KEY=secretref:anthropic-api-key \
       ANTHROPIC_MODEL="$ANTHROPIC_MODEL" \
-      ANTHROPIC_FOUNDRY_RESOURCE="$ANTHROPIC_FOUNDRY_RESOURCE"
+      ANTHROPIC_FOUNDRY_RESOURCE="$ANTHROPIC_FOUNDRY_RESOURCE" \
+      GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json
 else
   az containerapp create \
     --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
@@ -167,6 +173,7 @@ else
       tenant-api-keys="$TENANT_API_KEYS" \
       azure-openai-api-key="$AZURE_OPENAI_API_KEY" \
       anthropic-api-key="$ANTHROPIC_API_KEY" \
+      google-drive-service-account-json="$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" \
     --env-vars \
       NEO4J_URI="$NEO4J_URI" \
       NEO4J_USER="$NEO4J_USER" \
@@ -181,7 +188,8 @@ else
       AZURE_OPENAI_EMBEDDING_DEPLOYMENT="$AZURE_OPENAI_EMBEDDING_DEPLOYMENT" \
       ANTHROPIC_API_KEY=secretref:anthropic-api-key \
       ANTHROPIC_MODEL="$ANTHROPIC_MODEL" \
-      ANTHROPIC_FOUNDRY_RESOURCE="$ANTHROPIC_FOUNDRY_RESOURCE"
+      ANTHROPIC_FOUNDRY_RESOURCE="$ANTHROPIC_FOUNDRY_RESOURCE" \
+      GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json
 fi
 
 echo "=== Done ==="

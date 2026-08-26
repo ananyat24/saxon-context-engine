@@ -338,6 +338,7 @@ function formatSyncStatus(c) {
 
 const CONNECTOR_TYPE_LABELS = {
   web: "Web page",
+  google_drive: "Google Drive",
   database: "Database / CRM",
   documents: "Documents",
   email: "Email inbox",
@@ -475,12 +476,20 @@ async function loadConnectors() {
   }
 }
 
-// Only "web" needs a URL from the user -- the demo data types (database/
-// documents/email) read a fixed bundled sample server-side, so hide the URL
-// field for those rather than asking for an input that's ignored.
+// Types that need a tenant-supplied address -- kept in sync with
+// app/api/connectors.py's own _TYPES_REQUIRING_URL. The demo data types
+// (database/documents/email) read a fixed bundled sample server-side, so
+// their URL field stays hidden rather than asking for an input that's ignored.
+const CONNECTOR_TYPES_REQUIRING_URL = new Set(["web", "google_drive"]);
+const CONNECTOR_URL_PLACEHOLDERS = {
+  web: "https://example.com/page-to-pull-in",
+  google_drive: "Drive folder link or id (share the folder with the service account first)",
+};
+
 function updateConnectorUrlVisibility() {
   const type = document.getElementById("connectorType").value;
-  document.getElementById("connectorUrlRow").hidden = type !== "web";
+  document.getElementById("connectorUrlRow").hidden = !CONNECTOR_TYPES_REQUIRING_URL.has(type);
+  document.getElementById("connectorUrl").placeholder = CONNECTOR_URL_PLACEHOLDERS[type] || "";
 }
 document.getElementById("connectorType").addEventListener("change", updateConnectorUrlVisibility);
 updateConnectorUrlVisibility();
@@ -489,11 +498,12 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
   const statusEl = document.getElementById("connectorStatus");
   const name = document.getElementById("connectorName").value.trim();
   const type = document.getElementById("connectorType").value;
+  const needsUrl = CONNECTOR_TYPES_REQUIRING_URL.has(type);
   const url = document.getElementById("connectorUrl").value.trim();
   const groupId = document.getElementById("connectorKbSelect").value;
 
-  if (!name || (type === "web" && !url)) {
-    statusEl.textContent = type === "web" ? "Give the connector a name and a URL." : "Give the connector a name.";
+  if (!name || (needsUrl && !url)) {
+    statusEl.textContent = needsUrl ? "Give the connector a name and a URL." : "Give the connector a name.";
     statusEl.className = "status-line bad";
     return;
   }
@@ -504,7 +514,7 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
     const res = await fetch(`${API}/connectors`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ name, type, group_id: groupId, url: type === "web" ? url : undefined }),
+      body: JSON.stringify({ name, type, group_id: groupId, url: needsUrl ? url : undefined }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

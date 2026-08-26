@@ -172,6 +172,22 @@ class Settings(BaseSettings):
     anthropic_input_price_per_1m: float = 1.00
     anthropic_output_price_per_1m: float = 5.00
 
+    # Service account credentials for the "google_drive" connector type (see
+    # app/ingestion/google_drive_source.py) -- the full JSON key file's
+    # contents, as one string. Operator-wide, like the LLM provider keys
+    # above: one credential the backend holds, not something a tenant
+    # supplies themselves. A service account (rather than per-user OAuth) is
+    # used deliberately -- it authenticates without any interactive consent
+    # flow, which is what a server-side "Sync now"/scheduled sync needs, and
+    # it only ever sees folders someone has explicitly shared with its own
+    # email address, nothing else in anyone's Drive. Leave blank to disable
+    # the connector type (create_connector rejects it with a clear error
+    # instead of failing confusingly at sync time). Get one from Google Cloud
+    # Console: enable the Drive API, create a service account, create a JSON
+    # key for it, then share the target Drive folder with that service
+    # account's email (found in the key JSON's "client_email" field).
+    google_drive_service_account_json: str = ""
+
     app_env: str = "development"
     log_level: str = "INFO"
 
