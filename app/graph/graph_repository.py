@@ -5,11 +5,40 @@
 import asyncio
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any, Optional
 from graphiti_core import Graphiti
 from app.graph.neo4j_client import Neo4jClient
 
 logger = logging.getLogger(__name__)
+
+
+def _not_yet_invalidated(invalid_at) -> bool:
+    """True if `invalid_at` is None or still in the future.
+
+    invalid_at isn't only set when Graphiti detects a real contradiction
+    (always a past timestamp by construction) -- extraction can also set it
+    directly from a future business date in the source text (e.g. a CRM row's
+    "renewal date" column, read as this edge's own validity bound). Treating
+    any invalid_at as already-invalid conflated those two cases and made an
+    account's still-current facts vanish from results the moment their
+    renewal date was extracted, well before that date actually arrived.
+    Falls back to "invalidated" (the original, conservative behavior) if the
+    value can't be parsed, rather than risk surfacing a genuinely-superseded
+    fact as current.
+    """
+    if invalid_at is None:
+        return True
+    if isinstance(invalid_at, str):
+        try:
+            invalid_at = datetime.fromisoformat(invalid_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if not isinstance(invalid_at, datetime):
+        return False
+    if invalid_at.tzinfo is None:
+        invalid_at = invalid_at.replace(tzinfo=timezone.utc)
+    return invalid_at > datetime.now(timezone.utc)
 
 # Graphiti's search ranks edges by RRF-fused vector/text similarity with no
 # relevance threshold -- it always returns its top-N, even when nothing in the
@@ -194,7 +223,7 @@ class GraphRepository:
                 "valid_at": self._to_native(row["valid_at"]),
                 "invalid_at": invalid_at,
                 "expired_at": expired_at,
-                "is_valid": expired_at is None and invalid_at is None,
+                "is_valid": expired_at is None and _not_yet_invalidated(invalid_at),
             })
         return facts
 
@@ -348,7 +377,7 @@ class GraphRepository:
                 "valid_at": getattr(r, "valid_at", None),
                 "invalid_at": getattr(r, "invalid_at", None),
                 "expired_at": getattr(r, "expired_at", None),
-                "is_valid": getattr(r, "expired_at", None) is None and getattr(r, "invalid_at", None) is None,
+                "is_valid": getattr(r, "expired_at", None) is None and _not_yet_invalidated(getattr(r, "invalid_at", None)),
                 # Distinguishes these from the entity-resolution branches above
                 # (whose facts carry no "kind", or "entity_summary") -- the
                 # orchestrator uses this to tell whether num_results actually
