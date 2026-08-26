@@ -4,12 +4,18 @@
 # run free and fast, same spirit as test_connectors.py's web connector tests.
 import asyncio
 import json
+from io import BytesIO
 
 import httpx
 import pytest
 
 from app.ingestion.connector_base import ConnectorFetchError
-from app.ingestion.google_drive_source import GoogleDriveConnector, _extract_folder_id
+from app.ingestion.google_drive_source import (
+    GoogleDriveConnector,
+    _extract_docx_text,
+    _extract_folder_id,
+    _extract_pdf_text,
+)
 
 _FAKE_SERVICE_ACCOUNT_JSON = json.dumps(
     {
@@ -190,10 +196,171 @@ def test_fetch_raises_when_no_supported_files(monkeypatch):
             return False
 
         async def get(self, url, headers=None, params=None):
-            return _FakeResponse(200, json_data={"files": [{"id": "x", "name": "a.pdf", "mimeType": "application/pdf"}]})
+            return _FakeResponse(200, json_data={"files": [{"id": "x", "name": "a.png", "mimeType": "image/png"}]})
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeClient())
 
     connector = GoogleDriveConnector("1AbC-defGHI_23")
     with pytest.raises(ConnectorFetchError, match="No supported files"):
         asyncio.run(connector.fetch())
+
+
+def test_extract_pdf_text_returns_empty_for_a_blank_page():
+    # A page with no text layer (e.g. a scanned/image-only PDF) should
+    # produce "" rather than raise -- the caller treats that as "skip this
+    # file", not an error.
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    buf = BytesIO()
+    writer.write(buf)
+
+    assert _extract_pdf_text(buf.getvalue()) == ""
+
+
+def test_extract_docx_text_extracts_real_paragraphs():
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("First paragraph.")
+    doc.add_paragraph("Second paragraph.")
+    buf = BytesIO()
+    doc.save(buf)
+
+    text = _extract_docx_text(buf.getvalue())
+    assert "First paragraph." in text
+    assert "Second paragraph." in text
+
+
+def test_fetch_reads_pdf_and_docx_via_the_binary_parsers(monkeypatch):
+    _patch_auth(monkeypatch)
+
+    files = [
+        {"id": "pdf1", "name": "report.pdf", "mimeType": "application/pdf"},
+        {
+            "id": "docx1",
+            "name": "memo.docx",
+            "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
+    ]
+
+    class _FakeBinaryResponse:
+        def __init__(self, content: bytes):
+            self.status_code = 200
+            self.content = content
+
+        def raise_for_status(self):
+            pass
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/files"):
+                return _FakeResponse(200, json_data={"files": files})
+            if url.endswith("/pdf1"):
+                return _FakeBinaryResponse(b"fake-pdf-bytes")
+            if url.endswith("/docx1"):
+                return _FakeBinaryResponse(b"fake-docx-bytes")
+            raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeClient())
+    monkeypatch.setattr(
+        "app.ingestion.google_drive_source._BINARY_PARSERS",
+        {
+            "application/pdf": lambda data: f"parsed:{data.decode()}",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": lambda data: f"parsed:{data.decode()}",
+        },
+    )
+
+    connector = GoogleDriveConnector("1AbC-defGHI_23")
+    records = asyncio.run(connector.fetch())
+
+    assert len(records) == 2
+    bodies = {r.body for r in records}
+    assert "parsed:fake-pdf-bytes" in bodies
+    assert "parsed:fake-docx-bytes" in bodies
+
+
+def test_fetch_skips_a_file_whose_parser_raises(monkeypatch):
+    _patch_auth(monkeypatch)
+
+    files = [{"id": "bad1", "name": "corrupt.pdf", "mimeType": "application/pdf"}]
+
+    class _FakeBinaryResponse:
+        status_code = 200
+        content = b"not a real pdf"
+
+        def raise_for_status(self):
+            pass
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/files"):
+                return _FakeResponse(200, json_data={"files": files})
+            return _FakeBinaryResponse()
+
+    def _raising_parser(data: bytes) -> str:
+        raise ValueError("corrupt PDF")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeClient())
+    monkeypatch.setattr(
+        "app.ingestion.google_drive_source._BINARY_PARSERS", {"application/pdf": _raising_parser}
+    )
+
+    connector = GoogleDriveConnector("1AbC-defGHI_23")
+    with pytest.raises(ConnectorFetchError, match="No supported files"):
+        asyncio.run(connector.fetch())
+
+
+def test_fetch_skips_a_binary_file_over_the_size_cap(monkeypatch):
+    _patch_auth(monkeypatch)
+
+    files = [{"id": "big1", "name": "huge.pdf", "mimeType": "application/pdf"}]
+
+    class _FakeBinaryResponse:
+        status_code = 200
+        content = b"x" * (16 * 1024 * 1024)  # over _MAX_BINARY_BYTES (15MB)
+
+        def raise_for_status(self):
+            pass
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/files"):
+                return _FakeResponse(200, json_data={"files": files})
+            return _FakeBinaryResponse()
+
+    called = False
+
+    def _tracking_parser(data: bytes) -> str:
+        nonlocal called
+        called = True
+        return "should not run"
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeClient())
+    monkeypatch.setattr(
+        "app.ingestion.google_drive_source._BINARY_PARSERS", {"application/pdf": _tracking_parser}
+    )
+
+    connector = GoogleDriveConnector("1AbC-defGHI_23")
+    with pytest.raises(ConnectorFetchError, match="No supported files"):
+        asyncio.run(connector.fetch())
+    assert called is False

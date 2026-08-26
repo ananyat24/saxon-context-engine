@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api import api_router
 from app.graph import authorization, connectors, document_sets
+from app.graph.connector_scheduler import start_connector_scheduler
 from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
@@ -38,9 +39,15 @@ async def lifespan(app: FastAPI):
     authorization.ensure_authorization_indexes(repo=repo)
     document_sets.ensure_document_set_indexes(repo=repo)
     connectors.ensure_connector_indexes(repo=repo)
+    # Periodically syncs every tenant's connectors in the background -- see
+    # app/graph/connector_scheduler.py. Returns None (and starts nothing) if
+    # disabled via settings.connector_sync_enabled.
+    app.state.connector_scheduler = start_connector_scheduler(app.state.neo4j_client)
     try:
         yield
     finally:
+        if app.state.connector_scheduler is not None:
+            app.state.connector_scheduler.shutdown(wait=False)
         await app.state.graphiti_pool.close_all()
         app.state.neo4j_client.close()
 

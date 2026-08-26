@@ -13,6 +13,14 @@ httpx
 # [requests] extra is needed by google.auth.transport.requests, which is
 # what actually performs the token refresh call.
 google-auth[requests]
+# Text extraction for the Google Drive connector's PDF/Word support --
+# pypdf/python-docx read whatever text layer the file already has (a
+# scanned/image-only PDF has none, and is silently skipped rather than OCR'd
+# -- OCR is real, separate scope, not something to fold in here).
+pypdf
+python-docx
+# Runs periodic connector syncs in-process -- see app/graph/connector_scheduler.py.
+apscheduler
 graphiti-core[anthropic,google-genai]>=0.29.3
 # Pinned below 1.0 -- graphiti_core's bundled AnthropicClient (llm_client/anthropic_client.py)
 # calls messages.create(..., temperature=...) in a shape that breaks under anthropic 1.x's

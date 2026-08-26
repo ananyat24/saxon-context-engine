@@ -188,6 +188,17 @@ class Settings(BaseSettings):
     # account's email (found in the key JSON's "client_email" field).
     google_drive_service_account_json: str = ""
 
+    # Background connector syncing (see app/graph/connector_scheduler.py) --
+    # every tenant's connectors get synced automatically on this interval,
+    # not just when someone clicks "Sync now". 15 minutes is a reasonable
+    # demo/pilot default: frequent enough that content feels current, spaced
+    # out enough that a live source's own rate limits and this app's own
+    # per-tenant spend budgets (app/graph/spend_limiter.py) aren't at risk
+    # from polling alone. Set connector_sync_enabled=False to turn it off
+    # entirely (e.g. local dev against a database you don't want auto-synced).
+    connector_sync_enabled: bool = True
+    connector_sync_interval_minutes: int = 15
+
     app_env: str = "development"
     log_level: str = "INFO"
 

@@ -13,7 +13,8 @@
 import asyncio
 import json
 import re
-from typing import Optional
+from io import BytesIO
+from typing import Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -43,13 +44,43 @@ _GOOGLE_NATIVE_EXPORT_MIME_TYPES = {
     "application/vnd.google-apps.spreadsheet": "text/csv",
     "application/vnd.google-apps.presentation": "text/plain",
 }
-# Mime types for regular (non-Google-native) files this connector knows how
-# to turn into text -- anything else (images, PDFs, Word docs, ...) is
-# silently skipped rather than guessed at. Real PDF/DOCX text extraction is
-# a separate piece of work (needs an actual parsing library, e.g. Docling
-# per CLAUDE.md's roadmap, and still can't help with a scanned/image-only
-# PDF), not something to bolt on here.
+# Mime types for regular (non-Google-native) files this connector reads as
+# plain text directly, with no parsing step.
 _SUPPORTED_FILE_MIME_TYPES = {"text/plain", "text/markdown", "text/csv"}
+
+_PDF_MIME = "application/pdf"
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+# Legacy binary .doc (application/msword) is a much harder format to parse
+# reliably and deliberately isn't supported -- same "don't guess" spirit as
+# everything else this connector skips.
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(BytesIO(data))
+    pages = [page.extract_text() or "" for page in reader.pages]
+    return "\n\n".join(p.strip() for p in pages if p.strip())
+
+
+def _extract_docx_text(data: bytes) -> str:
+    from docx import Document
+
+    doc = Document(BytesIO(data))
+    return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+
+# Files needing a local parsing step (not just a plain-text download or a
+# Drive export) to get their text out. A scanned/image-only PDF has no text
+# layer for pypdf to find -- extract_pdf_text then returns "", and the file
+# is skipped below like any other empty result, not treated as an error.
+_BINARY_PARSERS: dict[str, Callable[[bytes], str]] = {
+    _PDF_MIME: _extract_pdf_text,
+    _DOCX_MIME: _extract_docx_text,
+}
+# Keeps parsing cost/time bounded regardless of how large a shared file is --
+# same reasoning as _MAX_FILES/_MAX_TEXT_CHARS above.
+_MAX_BINARY_BYTES = 15 * 1024 * 1024
 
 # A real Drive file/folder id is a specific base64url-ish alphabet -- this
 # also doubles as a defensive check before the id is interpolated into a
@@ -113,7 +144,8 @@ class GoogleDriveConnector(SourceConnector):
         if not records:
             raise ConnectorFetchError(
                 "No supported files found in that Drive folder -- only plain text, Markdown, "
-                "CSV files, and Google Docs/Sheets/Slides are read today."
+                "CSV, PDF, and Word (.docx) files, and Google Docs/Sheets/Slides, are read today "
+                "(and a scanned/image-only PDF has no extractable text)."
             )
         return records
 
@@ -154,6 +186,7 @@ class GoogleDriveConnector(SourceConnector):
             return None  # not recursing into subfolders in this MVP
 
         export_mime = _GOOGLE_NATIVE_EXPORT_MIME_TYPES.get(mime)
+        parser = _BINARY_PARSERS.get(mime)
         try:
             if export_mime:
                 resp = await client.get(
@@ -161,20 +194,38 @@ class GoogleDriveConnector(SourceConnector):
                     headers=headers,
                     params={"mimeType": export_mime},
                 )
+                resp.raise_for_status()
+                text = resp.text.strip()
             elif mime in _SUPPORTED_FILE_MIME_TYPES:
                 resp = await client.get(
                     f"https://www.googleapis.com/drive/v3/files/{file_id}",
                     headers=headers,
                     params={"alt": "media"},
                 )
+                resp.raise_for_status()
+                text = resp.text.strip()
+            elif parser:
+                resp = await client.get(
+                    f"https://www.googleapis.com/drive/v3/files/{file_id}",
+                    headers=headers,
+                    params={"alt": "media"},
+                )
+                resp.raise_for_status()
+                if len(resp.content) > _MAX_BINARY_BYTES:
+                    return None
+                # CPU-bound parsing -- off the event loop so one large file
+                # doesn't stall every other request this process is serving.
+                text = (await asyncio.to_thread(parser, resp.content)).strip()
             else:
                 return None  # unsupported type -- skip rather than guess
-            resp.raise_for_status()
         except httpx.HTTPError:
             # One unreadable file shouldn't fail the whole folder's sync.
             return None
+        except Exception:
+            # A corrupt/encrypted/malformed file, or a parsing library error
+            # -- same "skip this one file" treatment, not a whole-sync failure.
+            return None
 
-        text = resp.text.strip()
         if not text:
             return None
         if len(text) > _MAX_TEXT_CHARS:
