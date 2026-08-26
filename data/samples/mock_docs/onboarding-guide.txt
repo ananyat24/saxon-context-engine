@@ -1,0 +1,14 @@
+Customer Onboarding Guide (Internal, Demo Content)
+
+New accounts are assigned an owner from the customer success team within
+two business days of the contract being signed. The owner is responsible
+for a kickoff call, a 30-day check-in, and a 90-day account review.
+
+Riverton Robotics was onboarded by Dana Kim in January and is currently in
+its 90-day review window. Blue Harbor Logistics was onboarded by Marcus Lee
+and requested a dedicated integration engineer due to the size of their
+shipment data feed.
+
+Accounts marked "At Risk" in the CRM should be escalated to the account
+owner's manager if there has been no successful contact within 14 days.
+Fenwick & Cole Legal was marked At Risk after two missed check-in calls.

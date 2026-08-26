@@ -189,15 +189,25 @@
                     <input id="connectorName" type="text" placeholder="e.g. Company blog" />
                 </div>
                 <div class="row">
+                    <select id="connectorType" class="kb-select connector-kb-select">
+                        <option value="web">Web page</option>
+                        <option value="database">Database / CRM (demo data)</option>
+                        <option value="documents">Documents (demo data)</option>
+                        <option value="email">Email inbox (demo data)</option>
+                    </select>
+                </div>
+                <div class="row" id="connectorUrlRow">
                     <input id="connectorUrl" type="text" placeholder="https://example.com/page-to-pull-in" />
                 </div>
                 <div class="row">
                     <select id="connectorKbSelect" class="kb-select connector-kb-select"></select>
                 </div>
                 <p class="muted" style="font-size:0.8rem">
-                    Only a single web page today (fetched once per "Sync now" click, not on a
-                    schedule) -- SharePoint, Google Drive, and other source types are planned
-                    to slot into this same list next.
+                    "Web page" fetches a real URL. The other types pull in a small bundled demo
+                    dataset (a mock CRM, document store, and inbox) so you can see how a
+                    structured-source, document, and email connector each show up in the graph --
+                    a real SharePoint/Drive/CRM connection is planned to slot into this same list
+                    next. Each is fetched once per "Sync now" click, not on a schedule yet.
                 </p>
                 <div class="row">
                     <button id="createConnectorBtn" class="btn btn-accent">Add connector</button>

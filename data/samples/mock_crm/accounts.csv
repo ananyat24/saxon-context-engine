@@ -1,0 +1,7 @@
+AccountID,CompanyName,Owner,Status,Industry,RenewalDate
+ACC-1001,Riverton Robotics,Dana Kim,Active,Manufacturing,2027-03-15
+ACC-1002,Blue Harbor Logistics,Marcus Lee,Active,Supply Chain,2026-11-01
+ACC-1003,Fenwick & Cole Legal,Sarah Chen,At Risk,Legal Services,2026-09-30
+ACC-1004,Northgate Pharma,Dana Kim,Active,Pharmaceuticals,2027-01-20
+ACC-1005,Prairie State Bank,Marcus Lee,Churned,Finance,2026-06-01
+ACC-1006,Solstice Retail Group,Sarah Chen,Active,Retail,2027-05-10

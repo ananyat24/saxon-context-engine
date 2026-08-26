@@ -9,6 +9,9 @@ import asyncio
 import pytest
 
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector
+from app.ingestion.database_source import DatabaseConnector
+from app.ingestion.document_source import DocumentConnector
+from app.ingestion.email_source import EmailConnector
 from app.ingestion.file_source import SourceRecord
 from app.ingestion.web_source import WebConnector, WebFetchError, content_hash, fetch_web_record
 
@@ -125,3 +128,55 @@ def test_fetch_web_record_rejects_non_text_content(monkeypatch):
 
     with pytest.raises(WebFetchError):
         asyncio.run(fetch_web_record("https://example.com/file.pdf"))
+
+
+# --- Demo connector types (database/documents/email) -------------------------
+# These read bundled mock data under data/samples/mock_*/ rather than a live
+# source (see each module's docstring for why) -- these tests confirm the
+# bundled data actually round-trips into valid SourceRecords via the same
+# interface WebConnector implements, using real repo-bundled files rather
+# than mocks, since reading them is free (no network, no LLM call).
+
+
+def test_database_connector_reads_mock_accounts():
+    connector = DatabaseConnector()
+    records = asyncio.run(connector.fetch())
+
+    assert len(records) == 6
+    riverton = next(r for r in records if "Riverton Robotics" in r.body)
+    assert "ACC-1001" in riverton.body
+    assert connector.content_hash(records) == connector.content_hash(records)
+
+
+def test_database_connector_hash_changes_with_content():
+    connector = DatabaseConnector()
+    records = asyncio.run(connector.fetch())
+    mutated = records[:-1]
+
+    assert connector.content_hash(records) != connector.content_hash(mutated)
+
+
+def test_document_connector_reads_mock_docs():
+    connector = DocumentConnector()
+    records = asyncio.run(connector.fetch())
+
+    names = {r.name for r in records}
+    assert "onboarding-guide" in names
+    assert "security-policy" in names
+    onboarding = next(r for r in records if r.name == "onboarding-guide")
+    assert "Riverton Robotics" in onboarding.body
+
+
+def test_email_connector_parses_headers_and_body():
+    connector = EmailConnector()
+    records = asyncio.run(connector.fetch())
+
+    assert len(records) == 3
+    escalation = next(r for r in records if "Fenwick" in r.body)
+    assert "sarah.chen@saxon.ai" in escalation.body
+    assert "Subject:" in escalation.body
+    assert "missed two check-in calls" in escalation.body
+
+
+def test_email_connector_source_description():
+    assert "mock" in EmailConnector().source_description().lower()

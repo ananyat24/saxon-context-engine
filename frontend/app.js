@@ -331,6 +331,13 @@ function formatSyncStatus(c) {
   return `<span class="badge ${cls}"${title}>${escapeXml(label)}</span>`;
 }
 
+const CONNECTOR_TYPE_LABELS = {
+  web: "Web page",
+  database: "Database / CRM",
+  documents: "Documents",
+  email: "Email inbox",
+};
+
 function renderConnectorsTable() {
   const body = document.getElementById("connectorsBody");
   const empty = document.getElementById("connectorsEmpty");
@@ -344,9 +351,13 @@ function renderConnectorsTable() {
   body.innerHTML = connectorDirectory
     .map((c) => {
       const lastSynced = c.last_synced_at ? new Date(c.last_synced_at).toLocaleString() : "—";
+      const typeLabel = CONNECTOR_TYPE_LABELS[c.type] || c.type;
       return `<tr data-id="${escapeXml(c.id)}">
         <td>${escapeXml(c.name)}</td>
-        <td><span class="muted" style="font-size:0.8rem">${escapeXml(c.url)}</span></td>
+        <td>
+          <span class="badge badge-muted">${escapeXml(typeLabel)}</span><br />
+          <span class="muted" style="font-size:0.8rem">${escapeXml(c.url)}</span>
+        </td>
         <td>${escapeXml(kbLabel(c.group_id))}</td>
         <td>${formatSyncStatus(c)}</td>
         <td><span class="muted" style="font-size:0.8rem">${escapeXml(lastSynced)}</span></td>
@@ -393,14 +404,25 @@ async function loadConnectors() {
   }
 }
 
+// Only "web" needs a URL from the user -- the demo data types (database/
+// documents/email) read a fixed bundled sample server-side, so hide the URL
+// field for those rather than asking for an input that's ignored.
+function updateConnectorUrlVisibility() {
+  const type = document.getElementById("connectorType").value;
+  document.getElementById("connectorUrlRow").hidden = type !== "web";
+}
+document.getElementById("connectorType").addEventListener("change", updateConnectorUrlVisibility);
+updateConnectorUrlVisibility();
+
 document.getElementById("createConnectorBtn").addEventListener("click", async () => {
   const statusEl = document.getElementById("connectorStatus");
   const name = document.getElementById("connectorName").value.trim();
+  const type = document.getElementById("connectorType").value;
   const url = document.getElementById("connectorUrl").value.trim();
   const groupId = document.getElementById("connectorKbSelect").value;
 
-  if (!name || !url) {
-    statusEl.textContent = "Give the connector a name and a URL.";
+  if (!name || (type === "web" && !url)) {
+    statusEl.textContent = type === "web" ? "Give the connector a name and a URL." : "Give the connector a name.";
     statusEl.className = "status-line bad";
     return;
   }
@@ -411,7 +433,7 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
     const res = await fetch(`${API}/connectors`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ name, type: "web", group_id: groupId, url }),
+      body: JSON.stringify({ name, type, group_id: groupId, url: type === "web" ? url : undefined }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

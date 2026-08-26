@@ -1,6 +1,8 @@
-# Connectors: a configured link to an external data source (a web page today;
-# SharePoint/Google Drive/etc. are meant to slot in later as new `type`
-# values without changing this storage layer or the API shape). Each
+# Connectors: a configured link to an external data source (a web page, plus
+# demo/mock-data structured "database", "documents", and "email" types --
+# see app/api/connectors.py's _CONNECTOR_FACTORIES; a real SharePoint/Google
+# Drive/CRM API is meant to slot in later as new `type` values without
+# changing this storage layer or the API shape). Each
 # connector feeds one of the tenant's existing knowledge bases -- syncing it
 # fetches the source's content and runs it through the same
 # IngestionPipeline every other source in this codebase already uses (see

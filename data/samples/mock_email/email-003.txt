@@ -1,0 +1,13 @@
+From: marcus.lee@saxon.ai
+To: sarah.chen@saxon.ai
+Subject: Blue Harbor Logistics integration engineer
+Date: 2026-07-28
+
+Sarah,
+
+Blue Harbor Logistics has been assigned a dedicated integration engineer
+to handle their shipment data feed -- their volume is much higher than a
+typical account. They're still marked Active and haven't raised any
+other concerns.
+
+Marcus

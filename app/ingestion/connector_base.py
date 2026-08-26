@@ -9,6 +9,7 @@
 # and producing a fingerprint of that content, so app/api/connectors.py's
 # sync flow, and the content-hash dedup-before-extraction guard, work
 # identically regardless of source type.
+import hashlib
 from abc import ABC, abstractmethod
 
 from app.ingestion.file_source import SourceRecord
@@ -38,3 +39,15 @@ class SourceConnector(ABC):
     def source_description(self) -> str:
         """A short human-readable description of where this connector reads
         from, e.g. for error messages and logging."""
+
+
+def hash_records(records: list[SourceRecord]) -> str:
+    """Shared content_hash() implementation for a connector that fetches
+    several records at once (database rows, a folder of documents/emails):
+    a fingerprint of every record's body, in order, so any addition, removal,
+    or edit among them changes the hash -- not just an edit to one record
+    that happens to be first."""
+    if not records:
+        return ""
+    joined = "\x1e".join(r.body for r in records)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()

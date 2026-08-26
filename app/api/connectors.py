@@ -1,7 +1,7 @@
 # Connectors: configure a link to an external data source, then sync it to
 # pull its content into one of the tenant's own knowledge bases -- see
-# app/graph/connectors.py for the storage layer and app/ingestion/web_source.py
-# for the one connector type implemented so far ("web").
+# app/graph/connectors.py for the storage layer and _CONNECTOR_FACTORIES
+# below for the connector types implemented so far.
 #
 # Deliberately synchronous-within-the-request for this MVP: a sync is a
 # single explicit "Sync now" click, not a background job or a schedule (see
@@ -11,7 +11,7 @@
 # poll, and it's simple to extend once a connector type needs more than one
 # fetch per sync.
 import logging
-from typing import Callable
+from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -22,6 +22,9 @@ from app.graph.graph_repository import GraphRepository
 from app.graph.graphiti_adapter import build_graphiti
 from app.graph.spend_limiter import SpendLimitExceeded
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector
+from app.ingestion.database_source import DatabaseConnector
+from app.ingestion.document_source import DocumentConnector
+from app.ingestion.email_source import EmailConnector
 from app.ingestion.pipeline import IngestionPipeline
 from app.ingestion.web_source import WebConnector
 from app.ontology.bootstrap import build_scoped_registry
@@ -33,13 +36,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # The one place a connector `type` maps to its SourceConnector implementation.
-# Adding a new type (SharePoint, Google Drive, ...) is: implement
-# SourceConnector (see app/ingestion/connector_base.py) and add one entry
-# here -- no changes needed to the sync route below, IngestionPipeline, or
-# ontology handling.
+# Adding a new type (a real SharePoint/Drive/CRM API, once credentials
+# exist) is: implement SourceConnector (see app/ingestion/connector_base.py)
+# and add one entry here -- no changes needed to the sync route below,
+# IngestionPipeline, or ontology handling. "database"/"documents"/"email"
+# read bundled mock data today rather than a live source (see each module's
+# docstring) -- they exist to prove the connector types most clients
+# actually have (a CRM/DB, a document store, an inbox) work end to end.
 _CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
     "web": lambda connector: WebConnector(connector["url"]),
+    "database": lambda connector: DatabaseConnector(),
+    "documents": lambda connector: DocumentConnector(),
+    "email": lambda connector: EmailConnector(),
 }
+
+# Only "web" reads from a tenant-supplied address -- the others read a fixed
+# bundled sample (see _CONNECTOR_FACTORIES above), so there's no url to
+# collect for them and nothing for a tenant-supplied value to control.
+_TYPES_REQUIRING_URL = {"web"}
 
 
 class CreateConnectorRequest(BaseModel):
@@ -49,7 +63,7 @@ class CreateConnectorRequest(BaseModel):
     # one the tenant already has (see app/security.py's resolve_knowledge_base
     # for the same boundary applied elsewhere), not an arbitrary new value.
     group_id: str
-    url: str = Field(min_length=1, max_length=2000)
+    url: Optional[str] = Field(default=None, max_length=2000)
 
 
 def _serialize(c: dict) -> dict:
@@ -83,9 +97,21 @@ def create_connector(req: CreateConnectorRequest, request: Request, tenant: Tena
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unknown knowledge base '{req.group_id}' for this tenant.",
         )
+
+    if req.type in _TYPES_REQUIRING_URL:
+        url = (req.url or "").strip()
+        if not url:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This connector type needs a URL.")
+    else:
+        # Ignore any submitted url for a bundled-mock-data type -- store the
+        # connector's own fixed description instead, both so the table shows
+        # something meaningful and so a tenant-supplied value never has any
+        # path to influence what gets read from disk.
+        url = _CONNECTOR_FACTORIES[req.type]({}).source_description()
+
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
     created = connectors.create_connector(
-        tenant.tenant_id, req.name.strip(), req.type, req.group_id, req.url.strip(), repo=repo
+        tenant.tenant_id, req.name.strip(), req.type, req.group_id, url, repo=repo
     )
     return _serialize(created)
 

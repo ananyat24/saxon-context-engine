@@ -1,0 +1,10 @@
+Data Handling Policy Summary (Internal, Demo Content)
+
+All customer account data is scoped to the owning tenant and is never
+shared across tenants. Account owners may only view accounts assigned to
+them or accounts belonging to their direct reports.
+
+Northgate Pharma is subject to additional handling requirements due to
+its industry, and all account notes must be reviewed by the compliance
+team before being shared externally. Solstice Retail Group has no special
+handling requirements beyond the standard policy.
