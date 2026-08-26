@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 
 import httpx
 
+from app.ingestion.connector_base import ConnectorFetchError, SourceConnector
 from app.ingestion.file_source import SourceRecord
 
 # Fetching an arbitrary external URL on a user's behalf needs a hard timeout
@@ -57,7 +58,7 @@ class _TextExtractor(HTMLParser):
         return re.sub(r"\n{3,}", "\n\n", "\n".join(self._chunks))
 
 
-class WebFetchError(Exception):
+class WebFetchError(ConnectorFetchError):
     """A URL couldn't be fetched, or didn't look like real page content."""
 
 
@@ -104,3 +105,23 @@ def content_hash(record: SourceRecord) -> str:
     (and re-paying for extraction on) a sync that found no real change since
     last time -- see app/graph/connectors.py."""
     return hashlib.sha256(record.body.encode("utf-8")).hexdigest()
+
+
+class WebConnector(SourceConnector):
+    """The SourceConnector implementation for a single web page -- thin
+    wrapper around fetch_web_record()/content_hash() above, so both the
+    plain functions (used directly by earlier code/tests) and the generic
+    connector interface (used by app/api/connectors.py's dispatch table)
+    stay available without duplicating logic."""
+
+    def __init__(self, url: str):
+        self.url = url
+
+    async def fetch(self) -> list[SourceRecord]:
+        return [await fetch_web_record(self.url)]
+
+    def content_hash(self, records: list[SourceRecord]) -> str:
+        return content_hash(records[0]) if records else ""
+
+    def source_description(self) -> str:
+        return f"Web page ({self.url})"

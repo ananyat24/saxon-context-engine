@@ -11,6 +11,7 @@
 # poll, and it's simple to extend once a connector type needs more than one
 # fetch per sync.
 import logging
+from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -20,8 +21,9 @@ from app.graph import connectors
 from app.graph.graph_repository import GraphRepository
 from app.graph.graphiti_adapter import build_graphiti
 from app.graph.spend_limiter import SpendLimitExceeded
+from app.ingestion.connector_base import ConnectorFetchError, SourceConnector
 from app.ingestion.pipeline import IngestionPipeline
-from app.ingestion.web_source import WebFetchError, content_hash, fetch_web_record
+from app.ingestion.web_source import WebConnector
 from app.ontology.bootstrap import build_scoped_registry
 from app.ontology.graphiti_types import build_graphiti_schema
 from app.security import require_tenant
@@ -30,10 +32,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# The only connector type implemented today. A dict (not a bare set) because
-# each future type will also need its own fetch function wired in below --
-# this is the one place that mapping happens.
-_SUPPORTED_TYPES = {"web"}
+# The one place a connector `type` maps to its SourceConnector implementation.
+# Adding a new type (SharePoint, Google Drive, ...) is: implement
+# SourceConnector (see app/ingestion/connector_base.py) and add one entry
+# here -- no changes needed to the sync route below, IngestionPipeline, or
+# ontology handling.
+_CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
+    "web": lambda connector: WebConnector(connector["url"]),
+}
 
 
 class CreateConnectorRequest(BaseModel):
@@ -67,10 +73,10 @@ def list_connectors(request: Request, tenant: TenantConfig = Depends(require_ten
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_connector(req: CreateConnectorRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)):
-    if req.type not in _SUPPORTED_TYPES:
+    if req.type not in _CONNECTOR_FACTORIES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported connector type '{req.type}'. Supported: {', '.join(sorted(_SUPPORTED_TYPES))}.",
+            detail=f"Unsupported connector type '{req.type}'. Supported: {', '.join(sorted(_CONNECTOR_FACTORIES))}.",
         )
     if req.group_id not in tenant.knowledge_base_ids():
         raise HTTPException(
@@ -99,15 +105,17 @@ async def sync_connector(connector_id: str, request: Request, tenant: TenantConf
     if connector is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
 
-    # Only "web" exists today; this is where a future type's own fetch
-    # function gets dispatched to.
+    # _CONNECTOR_FACTORIES is the one dispatch point -- every type from here
+    # down is handled generically via the SourceConnector interface.
+    factory = _CONNECTOR_FACTORIES[connector["type"]]
+    source = factory(connector)
     try:
-        record = await fetch_web_record(connector["url"])
-    except WebFetchError as e:
+        records = await source.fetch()
+    except ConnectorFetchError as e:
         connectors.record_sync_result(tenant.tenant_id, connector_id, status="error", last_error=str(e), repo=repo)
         return {"synced": False, "skipped_unchanged": False, "error": str(e)}
 
-    new_hash = content_hash(record)
+    new_hash = source.content_hash(records)
     if new_hash == connector.get("content_hash"):
         # Fetched fine, but it's word-for-word what the last successful sync
         # already ingested -- re-running extraction on identical text would
@@ -131,12 +139,13 @@ async def sync_connector(connector_id: str, request: Request, tenant: TenantConf
         scoped = build_scoped_registry([])
         entity_types, edge_types, edge_type_map = build_graphiti_schema(scoped)
         pipeline = IngestionPipeline(graphiti, entity_types=entity_types, edge_types=edge_types, edge_type_map=edge_type_map)
-        await pipeline.ingest_episode(
-            name=record.name,
-            body=record.body,
-            source_description=record.source_description,
-            group_id=connector["group_id"],
-        )
+        for record in records:
+            await pipeline.ingest_episode(
+                name=record.name,
+                body=record.body,
+                source_description=record.source_description,
+                group_id=connector["group_id"],
+            )
     except SpendLimitExceeded as e:
         connectors.record_sync_result(tenant.tenant_id, connector_id, status="error", last_error=str(e), repo=repo)
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
