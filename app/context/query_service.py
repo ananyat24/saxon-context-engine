@@ -10,15 +10,22 @@ from typing import Optional
 
 from fastapi import HTTPException, status
 
-from app.config import TenantConfig
+from app.config import TenantConfig, settings
 from app.context.orchestrator import ContextOrchestrator
 from app.context.response_cache import get_response_cache
 from app.graph import authorization, document_sets
 from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
-from app.graph.spend_limiter import SpendLimitExceeded
+from app.graph.spend_limiter import SpendLimitExceeded, get_limiter
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
+from app.models.context_packet import ContextPacket
 from app.security import resolve_knowledge_base
+
+# Only anthropic/azure_openai calls are ever recorded against the spend
+# limiter (see app/graph/graphiti_adapter.py) -- a Gemini-provider tenant's
+# queries genuinely aren't cost-tracked yet, so cost_usd is reported as None
+# for them rather than a misleading 0.0 that would read as "this was free."
+_COST_TRACKED_PROVIDERS = {"anthropic", "azure_openai"}
 
 
 async def execute_context_query(
@@ -31,7 +38,7 @@ async def execute_context_query(
     document_set: Optional[str] = None,
     as_user: Optional[str] = None,
     result_limit: Optional[int] = None,
-) -> dict:
+) -> ContextPacket:
     """Raises HTTPException (400 unknown scope, 402 spend limit exceeded) --
     both callers are expected to either let it propagate (FastAPI turns it
     into the matching HTTP response on its own) or catch and translate it."""
@@ -56,15 +63,25 @@ async def execute_context_query(
     cache_key = cache.make_key(tenant.tenant_id, group_ids, as_user, query, num_results)
     cached = cache.get(cache_key)
     if cached is not None:
-        return cached
+        # A copy, not a mutation of the cached ContextPacket itself -- other
+        # callers may be holding/about to hit the same cache entry, and they
+        # each need their own accurate cache_hit value, not whatever the last
+        # caller happened to set it to.
+        return cached.model_copy(update={"metadata": {**cached.metadata, "cache_hit": True}})
 
     graphiti = await graphiti_pool.get_or_create(tenant)
     orchestrator = ContextOrchestrator(graphiti, neo4j_client=neo4j_client)
+    limiter = get_limiter()
+    spent_before = limiter.spent("query")
     try:
         packet = await orchestrator.get_context_packet(
             query, group_ids=group_ids, visible_uuids=visible_uuids, num_results=num_results
         )
     except SpendLimitExceeded as e:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
+    packet.metadata["cache_hit"] = False
+    packet.metadata["cost_usd"] = (
+        round(limiter.spent("query") - spent_before, 6) if settings.llm_provider in _COST_TRACKED_PROVIDERS else None
+    )
     cache.set(cache_key, packet)
     return packet

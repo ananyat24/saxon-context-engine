@@ -218,6 +218,20 @@ class ContextOrchestrator:
         semantic_result_count = sum(1 for f in raw_facts if f.get("kind") == "semantic_search")
         result_limit_hit = semantic_result_count >= num_results
 
+        # Which path actually answered this query -- observability for the
+        # cost story: "entity_resolution" means GraphRepository.search_graphiti_facts
+        # resolved a named entity directly and never paid for Graphiti's hybrid
+        # search at all (see that method's docstring); "semantic_search" means
+        # it fell back to that paid call; "none" means nothing matched either
+        # way. A query can only ever be one of these -- GraphRepository returns
+        # from whichever branch applies and never mixes facts from both.
+        if not raw_facts:
+            retrieval_path = "none"
+        elif semantic_result_count > 0:
+            retrieval_path = "semantic_search"
+        else:
+            retrieval_path = "entity_resolution"
+
         return ContextPacket(
             query=query,
             metadata={
@@ -225,5 +239,6 @@ class ContextOrchestrator:
                 "summary": summary_text,
                 "facts": raw_facts,
                 "result_limit_hit": result_limit_hit,
+                "retrieval_path": retrieval_path,
             },
         )

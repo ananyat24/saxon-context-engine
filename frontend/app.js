@@ -1052,6 +1052,7 @@ async function runAskQuery(resultLimit) {
   const rawWrap = document.getElementById("queryRawWrap");
   const rawEl = document.getElementById("queryRaw");
   const seeMoreBtn = document.getElementById("seeMoreBtn");
+  const statsEl = document.getElementById("queryStats");
   const query = document.getElementById("queryInput").value.trim();
   if (!query) return;
   if (!getApiKey()) {
@@ -1059,6 +1060,7 @@ async function runAskQuery(resultLimit) {
     factsEl.innerHTML = "";
     rawWrap.hidden = true;
     seeMoreBtn.hidden = true;
+    statsEl.hidden = true;
     return;
   }
 
@@ -1066,6 +1068,7 @@ async function runAskQuery(resultLimit) {
   factsEl.innerHTML = "";
   rawWrap.hidden = true;
   seeMoreBtn.hidden = true;
+  statsEl.hidden = true;
   try {
     // A document set scoped to several connectors at once takes priority over
     // the single-connector picker in the header when one's selected -- see
@@ -1113,6 +1116,7 @@ async function runAskQuery(resultLimit) {
     // that promise exactly when the answer is most directly traceable to one
     // specific fact.
     renderFacts(factsEl, facts);
+    renderQueryStats(statsEl, data.metadata);
 
     // result_limit_hit means the fallback search returned exactly as many
     // results as it was capped at -- a sign there may be lower-relevance
@@ -1167,6 +1171,38 @@ function renderFacts(container, facts) {
     .join("");
   container.innerHTML =
     `<p class="fact-list-label">Where this answer comes from:</p><ul class="fact-bullets">${items}</ul>` + note;
+}
+
+const RETRIEVAL_PATH_LABELS = {
+  entity_resolution: "matched directly to a known entity",
+  semantic_search: "found via broader search",
+  none: "no match found",
+};
+
+// Small, quiet observability line (v4): how this specific answer was
+// produced -- see app/context/orchestrator.py's retrieval_path and
+// app/context/query_service.py's cache_hit/cost_usd. Not meant to be the
+// focus of the page, just visible proof of the token/cost-efficiency story
+// (skip semantic search when a named entity already answers it, skip the
+// whole retrieval+synthesis call on a cache hit) for anyone who wants it.
+function renderQueryStats(el, metadata) {
+  if (!metadata) {
+    el.hidden = true;
+    return;
+  }
+  const parts = [];
+  const pathLabel = RETRIEVAL_PATH_LABELS[metadata.retrieval_path];
+  if (pathLabel) parts.push(pathLabel);
+  if (metadata.cache_hit) parts.push("served from cache (no new retrieval or LLM call)");
+  if (typeof metadata.cost_usd === "number") {
+    parts.push(metadata.cost_usd > 0 ? `~$${metadata.cost_usd.toFixed(4)} estimated` : "no LLM cost incurred");
+  }
+  if (!parts.length) {
+    el.hidden = true;
+    return;
+  }
+  el.textContent = parts.join(" · ");
+  el.hidden = false;
 }
 
 document.getElementById("queryInput").addEventListener("keydown", (e) => {

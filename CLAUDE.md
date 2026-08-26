@@ -245,6 +245,8 @@ Ontology (core + 9 domain packs + customer extension) validated and tested. Neo4
 
 **Exit criteria:** a new enterprise client can be onboarded, isolated, billed, and monitored without operator intervention beyond initial setup.
 
+**Status — observability bullet only, MVP-scoped:** the "which retriever ran and why, and per-query cost" half of this bullet is done; per-connector sync health was already done earlier (see v1's status note on `_connector_health()`), and the admin-plane/billing/per-tenant-database bullets remain not started. `ContextOrchestrator.get_context_packet()` (`app/context/orchestrator.py`) now classifies every answer's `metadata.retrieval_path` as `"entity_resolution"` (resolved a named entity directly, never called Graphiti's paid hybrid search), `"semantic_search"` (fell back to it), or `"none"` (nothing matched) -- this *is* the already-existing planner decision from v3's status note, just finally surfaced instead of only ever happening invisibly. `app/context/query_service.py` adds `metadata.cache_hit` (true/false) and `metadata.cost_usd` -- a per-query cost estimate from diffing `SpendLimiter.spent("query")` before/after the orchestrator call, `null` (not a misleading `0.0`) for Gemini-provider tenants since only the Anthropic/Azure OpenAI paths are wired to the spend limiter at all (see `app/graph/graphiti_adapter.py`). The frontend shows this as one small muted line under the answer (e.g. "matched directly to a known entity · served from cache"), visible to both the demo end-user and anyone inspecting the API response directly -- not a separate operator-only dashboard, since there's no admin plane yet for a separate surface to live in.
+
 ---
 
 ### A note on sequencing
