@@ -124,6 +124,16 @@ echo "=== 7. Creating (or updating) the Container App ==="
 # This is the "read from environment variable, not Key Vault, for now" setup
 # -- one step more secure than a bare env var, with Key Vault itself still an
 # option to layer in later without changing how the app reads its config.
+# The MCP server (app/mcp/server.py, v3.5) 421s any request whose Host header
+# isn't in MCP_ALLOWED_HOSTS -- so this deployment's own hostname has to be in
+# that list, not just localhost. An existing app already has a stable FQDN to
+# read here; a brand-new app doesn't get one until after `containerapp create`
+# below, so that branch patches this env var in as a follow-up step once the
+# FQDN is known.
+EXISTING_FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+  --query properties.configuration.ingress.fqdn --output tsv 2>/dev/null || echo "")
+MCP_ALLOWED_HOSTS="localhost:8000,127.0.0.1:8000${EXISTING_FQDN:+,$EXISTING_FQDN}"
+
 if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
   echo "App exists, updating image, secrets, and env vars..."
   # `containerapp update` has no --secrets flag (that's create-only) -- secrets
@@ -168,7 +178,8 @@ if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --
       GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json \
       SHAREPOINT_TENANT_ID="$SHAREPOINT_TENANT_ID" \
       SHAREPOINT_CLIENT_ID="$SHAREPOINT_CLIENT_ID" \
-      SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret
+      SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret \
+      MCP_ALLOWED_HOSTS="$MCP_ALLOWED_HOSTS"
 else
   az containerapp create \
     --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
@@ -203,7 +214,14 @@ else
       GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json \
       SHAREPOINT_TENANT_ID="$SHAREPOINT_TENANT_ID" \
       SHAREPOINT_CLIENT_ID="$SHAREPOINT_CLIENT_ID" \
-      SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret
+      SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret \
+      MCP_ALLOWED_HOSTS="$MCP_ALLOWED_HOSTS"
+  # MCP_ALLOWED_HOSTS above only has localhost -- this app's real FQDN wasn't
+  # assigned until the create call just above. Patch it in now that it's known.
+  NEW_FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+    --query properties.configuration.ingress.fqdn --output tsv)
+  az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
+    --set-env-vars MCP_ALLOWED_HOSTS="localhost:8000,127.0.0.1:8000,$NEW_FQDN"
 fi
 
 echo "=== Done ==="

@@ -7,7 +7,9 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from mcp.server.transport_security import TransportSecuritySettings
 from app.api import api_router
+from app.config import settings
 from app.graph import authorization, connectors, document_sets
 from app.graph.connector_scheduler import start_connector_scheduler
 from app.graph.graph_repository import GraphRepository
@@ -20,7 +22,18 @@ from app.mcp import server as mcp_server_module
 # directly onto this app's router below rather than via app.mount("/mcp", ...),
 # which would register the route at "/mcp/mcp" (double prefix) or otherwise
 # 307-redirect POST /mcp -> /mcp/, which not every MCP client follows.
-mcp_asgi_app = mcp_server_module.mcp_server.streamable_http_app(streamable_http_path="/mcp")
+# transport_security allow-lists this deployment's own hostname (see
+# settings.mcp_allowed_hosts) -- the SDK's DNS-rebinding protection 421s any
+# request whose Host header isn't explicitly listed, before auth even runs.
+# allowed_origins is deliberately left empty: MCP clients (Claude Desktop/
+# Code, server-side agents) call this directly, not from a browser, so they
+# send no Origin header at all -- the SDK already treats an absent Origin as
+# passing. Populating this with bare host:port strings wouldn't match a real
+# "scheme://host" Origin value anyway.
+mcp_asgi_app = mcp_server_module.mcp_server.streamable_http_app(
+    streamable_http_path="/mcp",
+    transport_security=TransportSecuritySettings(allowed_hosts=settings.mcp_allowed_hosts_list()),
+)
 
 
 @asynccontextmanager

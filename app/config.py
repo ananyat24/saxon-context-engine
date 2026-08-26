@@ -231,8 +231,20 @@ class Settings(BaseSettings):
     # to disable caching entirely.
     response_cache_ttl_seconds: float = 300.0
 
+    # DNS-rebinding protection for the MCP server (see app/mcp/server.py,
+    # v3.5): the MCP SDK rejects a request whose Host header isn't in this
+    # list with a 421, regardless of API key -- so this has to name every
+    # hostname (with port, for local dev) this deployment is actually
+    # reachable at, or every real MCP client gets locked out before auth
+    # even runs. Comma-separated; defaults cover local dev only.
+    # scripts/deploy_azure.sh sets this to the deployment's real hostname.
+    mcp_allowed_hosts: str = "localhost:8000,127.0.0.1:8000"
+
     app_env: str = "development"
     log_level: str = "INFO"
+
+    def mcp_allowed_hosts_list(self) -> list[str]:
+        return [h.strip() for h in self.mcp_allowed_hosts.split(",") if h.strip()]
 
     def model_post_init(self, __context) -> None:
         # config/tenants.json, if present, is the source of truth over the
