@@ -110,6 +110,8 @@ def test_fetch_reads_supported_files_and_skips_the_rest(monkeypatch):
 
     files = [
         {"id": "doc1", "name": "Notes", "mimeType": "application/vnd.google-apps.document"},
+        {"id": "sheet1", "name": "Budget", "mimeType": "application/vnd.google-apps.spreadsheet"},
+        {"id": "slides1", "name": "Pitch", "mimeType": "application/vnd.google-apps.presentation"},
         {"id": "txt1", "name": "readme.txt", "mimeType": "text/plain"},
         {"id": "img1", "name": "photo.png", "mimeType": "image/png"},
         {"id": "sub1", "name": "Subfolder", "mimeType": "application/vnd.google-apps.folder"},
@@ -128,6 +130,12 @@ def test_fetch_reads_supported_files_and_skips_the_rest(monkeypatch):
             if url.endswith("/doc1/export"):
                 assert params["mimeType"] == "text/plain"
                 return _FakeResponse(200, text="Doc content here.")
+            if url.endswith("/sheet1/export"):
+                assert params["mimeType"] == "text/csv"
+                return _FakeResponse(200, text="col1,col2\n1,2")
+            if url.endswith("/slides1/export"):
+                assert params["mimeType"] == "text/plain"
+                return _FakeResponse(200, text="Slide content here.")
             if url.endswith("/txt1"):
                 assert params["alt"] == "media"
                 return _FakeResponse(200, text="Plain text content.")
@@ -138,12 +146,16 @@ def test_fetch_reads_supported_files_and_skips_the_rest(monkeypatch):
     connector = GoogleDriveConnector("1AbC-defGHI_23")
     records = asyncio.run(connector.fetch())
 
-    assert len(records) == 2
+    assert len(records) == 4
     bodies = {r.body for r in records}
     assert "Doc content here." in bodies
+    assert "col1,col2\n1,2" in bodies
+    assert "Slide content here." in bodies
     assert "Plain text content." in bodies
     names = {r.source_description for r in records}
     assert "Google Drive (Notes)" in names
+    assert "Google Drive (Budget)" in names
+    assert "Google Drive (Pitch)" in names
     assert "Google Drive (readme.txt)" in names
 
 

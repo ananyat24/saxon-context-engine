@@ -31,12 +31,24 @@ _DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 _MAX_FILES = 20
 _MAX_TEXT_CHARS = 20_000
 
-_GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
 _GOOGLE_FOLDER_MIME = "application/vnd.google-apps.folder"
-# Mime types this connector actually knows how to turn into text -- anything
-# else (images, PDFs, spreadsheets, slides, ...) is silently skipped rather
-# than guessed at. Broader format support is a real, separate piece of work
-# (e.g. Docling, per CLAUDE.md's roadmap), not something to bolt on here.
+# Google's own native formats (Docs/Sheets/Slides) aren't stored as plain
+# files -- they have to be *exported* as one, via a separate Drive API call
+# from a regular file download (see _fetch_file_as_record). This maps each
+# native type to the export format that gets the most useful plain text out
+# of it: Sheets as CSV (keeps row/column structure legible), Slides and Docs
+# as plain text.
+_GOOGLE_NATIVE_EXPORT_MIME_TYPES = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
+# Mime types for regular (non-Google-native) files this connector knows how
+# to turn into text -- anything else (images, PDFs, Word docs, ...) is
+# silently skipped rather than guessed at. Real PDF/DOCX text extraction is
+# a separate piece of work (needs an actual parsing library, e.g. Docling
+# per CLAUDE.md's roadmap, and still can't help with a scanned/image-only
+# PDF), not something to bolt on here.
 _SUPPORTED_FILE_MIME_TYPES = {"text/plain", "text/markdown", "text/csv"}
 
 # A real Drive file/folder id is a specific base64url-ish alphabet -- this
@@ -101,7 +113,7 @@ class GoogleDriveConnector(SourceConnector):
         if not records:
             raise ConnectorFetchError(
                 "No supported files found in that Drive folder -- only plain text, Markdown, "
-                "CSV files, and Google Docs are read today."
+                "CSV files, and Google Docs/Sheets/Slides are read today."
             )
         return records
 
@@ -141,12 +153,13 @@ class GoogleDriveConnector(SourceConnector):
         if not file_id or mime == _GOOGLE_FOLDER_MIME:
             return None  # not recursing into subfolders in this MVP
 
+        export_mime = _GOOGLE_NATIVE_EXPORT_MIME_TYPES.get(mime)
         try:
-            if mime == _GOOGLE_DOC_MIME:
+            if export_mime:
                 resp = await client.get(
                     f"https://www.googleapis.com/drive/v3/files/{file_id}/export",
                     headers=headers,
-                    params={"mimeType": "text/plain"},
+                    params={"mimeType": export_mime},
                 )
             elif mime in _SUPPORTED_FILE_MIME_TYPES:
                 resp = await client.get(
