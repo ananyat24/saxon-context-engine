@@ -137,7 +137,7 @@ function renderDocSetsTable() {
       const connectorLabels = ds.connectors.map((c) => escapeXml(c.label)).join(", ");
       const publicBadge = ds.is_public
         ? `<span class="badge badge-ok">Public</span>`
-        : `<span class="badge badge-muted">Private</span>`;
+        : `<span class="badge badge-neutral">Private</span>`;
       return `<tr data-id="${escapeXml(ds.id)}">
         <td>${escapeXml(ds.name)}</td>
         <td>${connectorLabels}</td>
@@ -330,7 +330,7 @@ function formatSyncStatus(c) {
   // again in a long time, which is exactly the case worth flagging: the
   // background scheduler may have stopped running for it.
   if (c.status === "queued") {
-    return `<span class="badge badge-muted" title="Accepted and waiting for a worker to pick it up -- see app/graph/ingestion_queue.py.">Queued…</span>`;
+    return `<span class="badge badge-neutral" title="Accepted and waiting for a worker to pick it up -- see app/graph/ingestion_queue.py.">Queued…</span>`;
   }
   if (c.health === "stale") {
     return `<span class="badge badge-warn" title="Hasn't synced successfully in a while -- check that background syncing is still running for this connector.">Stale</span>`;
@@ -342,7 +342,7 @@ function formatSyncStatus(c) {
     error: "Error",
   };
   const label = labels[c.status] || c.status;
-  const cls = c.status === "error" ? "badge-bad" : c.status === "never_synced" ? "badge-muted" : "badge-ok";
+  const cls = c.status === "error" ? "badge-bad" : c.status === "never_synced" ? "badge-neutral" : "badge-ok";
   const title = c.status === "error" && c.last_error ? ` title="${escapeXml(c.last_error)}"` : "";
   return `<span class="badge ${cls}"${title}>${escapeXml(label)}</span>`;
 }
@@ -387,7 +387,7 @@ function renderConnectorsTable() {
       return `<tr data-id="${escapeXml(c.id)}">
         <td><button type="button" class="connector-name-link" data-preview-id="${escapeXml(c.id)}">${escapeXml(c.name)}</button></td>
         <td>
-          <span class="badge badge-muted">${escapeXml(typeLabel)}</span><br />
+          <span class="badge badge-neutral">${escapeXml(typeLabel)}</span><br />
           <span class="muted" style="font-size:0.8rem">${escapeXml(c.url)}</span>
         </td>
         <td>${escapeXml(kbLabel(c.group_id))}</td>
@@ -1227,6 +1227,24 @@ document.getElementById("queryInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("askBtn").click();
 });
 
+// --- Connect an AI agent (MCP) -----------------------------------------------
+// Purely local: the endpoint is always this same origin's /mcp (see
+// app/mcp/server.py) and the header is whatever access key is already saved
+// here -- no separate fetch needed, unlike the sections above.
+function renderMcpCard() {
+  const card = document.getElementById("mcpCard");
+  const key = getApiKey();
+  if (!key) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  document.getElementById("mcpConfig").textContent =
+    `Endpoint:  ${location.origin}/mcp\n` +
+    `Header:    X-API-Key: ${key}\n\n` +
+    `Streamable HTTP transport -- add this URL and header in your MCP client's server settings.`;
+}
+
 // --- Init -------------------------------------------------------------------
 async function loadTenantData() {
   loadOntology();
@@ -1234,6 +1252,7 @@ async function loadTenantData() {
   await loadUsers();
   await loadConnectors();
   await loadDocumentSets();
+  renderMcpCard();
   loadGraph();
 }
 

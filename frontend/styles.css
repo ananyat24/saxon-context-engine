@@ -70,7 +70,13 @@ header {
 .badge-ok { background: var(--status-normal); color: #fff; }
 .badge-bad { background: var(--status-critical); color: #fff; }
 .badge-warn { background: var(--status-warning); color: #fff; }
+/* Translucent-white fill only reads correctly over the dark header this was
+   designed for (see the "checking..." health badge) -- the same fill over a
+   light card/table background (connector type tags, "Never synced"/"Queued"
+   status, "Private" doc-set tag) washes out to barely-visible, so those use
+   this solid light-surface variant instead. */
 .badge-muted { background: rgba(255,255,255,0.15); color: #cdd6e2; }
+.badge-neutral { background: var(--surface-sunken); color: var(--text-muted); }
 
 .kb-select {
   background: rgba(255,255,255,0.1);

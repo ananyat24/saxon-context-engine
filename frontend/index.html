@@ -98,10 +98,22 @@
                 <summary>How do I read what comes back?</summary>
                 <ul class="plain-list muted">
                     <li><strong>Answer</strong>: a short response to your question.</li>
-                    <li><strong>Where this answer comes from</strong>: the individual facts behind that answer, each marked as current or replaced by something newer.</li>
+                    <li><strong>The small line under the answer</strong>: how it was produced -- whether it matched a known entity directly or fell back to a broader search, whether it was served from a recent cache instead of asking again, and roughly what it cost, when that's tracked.</li>
+                    <li><strong>Where this answer comes from</strong>: the individual facts behind that answer, each marked as current or replaced by something newer, and (when you're searching across more than one source) which one it came from.</li>
                     <li><strong>The graph</strong>: a visual view of what's connected to what. Hovering over something shows more detail.</li>
                     <li><strong>Technical details</strong>: the raw data behind an answer, for anyone who wants to look closer.</li>
                 </ul>
+            </details>
+
+            <details>
+                <summary>Can I connect this to Claude or another AI tool?</summary>
+                <p class="muted">
+                    Yes. Scroll to the "Connect an AI agent" section below the source connectors
+                    for the endpoint and access key to paste into an MCP-capable agent (Claude
+                    Desktop, Claude Code, GitHub Copilot, or a custom agent). It answers using
+                    the exact same access rules as this page -- your own company's data, nothing
+                    from any other client.
+                </p>
             </details>
         </div>
     </div>
@@ -229,7 +241,9 @@
                     dataset (a mock CRM, document store, and inbox) so you can see how a
                     structured-source, document, and email connector each show up in the graph.
                     Every connector also re-syncs automatically in the background, not just on a
-                    "Sync now" click.
+                    "Sync now" click -- and "Sync now" itself queues the pull instead of making
+                    you wait for it, so the status column shows "Queued…" for a moment, then
+                    updates once it's actually landed.
                 </p>
                 <div class="row">
                     <button id="createConnectorBtn" class="btn btn-accent">Add connector</button>
@@ -273,6 +287,21 @@
                 </div>
                 <div id="docSetStatus" class="status-line"></div>
             </details>
+        </section>
+
+        <section id="mcpCard" class="card" hidden>
+            <h2>Connect an AI agent</h2>
+            <p class="muted">Point Claude Desktop, Claude Code, or any other MCP-capable agent at
+                this same knowledge graph, so it can ask questions directly instead of only
+                through this page. It gets the same access this page has -- scoped to your
+                company's own data, nothing else -- through the
+                <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">Model
+                Context Protocol</a> (MCP).</p>
+            <pre id="mcpConfig" class="result-block"></pre>
+            <p class="muted" style="font-size:0.8rem">Two tools are available: <code>query_context_graph</code>
+                (ask a question, get a sourced answer -- the same thing "Ask a question" above
+                does) and <code>list_available_sources</code> (see which knowledge bases and
+                document sets are available to query).</p>
         </section>
     </main>
 
