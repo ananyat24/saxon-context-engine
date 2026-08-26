@@ -134,19 +134,52 @@ EXISTING_FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOU
   --query properties.configuration.ingress.fqdn --output tsv 2>/dev/null || echo "")
 MCP_ALLOWED_HOSTS="localhost:8000,127.0.0.1:8000${EXISTING_FQDN:+,$EXISTING_FQDN}"
 
+# google-drive-service-account-json and sharepoint-client-secret are the two
+# genuinely optional secrets (see their "leave unset to deploy without it"
+# comments above) -- Azure rejects `containerapp secret set`/`create --secrets`
+# outright if any name=value pair in the call has an empty value ("value or
+# keyVaultUrl and identity should be provided"), so an unset optional
+# credential has to be omitted from the call entirely, not passed as "". The
+# matching env-var entry (its secretref) is omitted alongside it below, since
+# referencing a secret that was never created would fail the same way.
+SECRET_ARGS=(
+  neo4j-password="$NEO4J_PASSWORD"
+  tenant-api-keys="$TENANT_API_KEYS"
+  azure-openai-api-key="$AZURE_OPENAI_API_KEY"
+  anthropic-api-key="$ANTHROPIC_API_KEY"
+)
+[ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && SECRET_ARGS+=(google-drive-service-account-json="$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
+[ -n "$SHAREPOINT_CLIENT_SECRET" ] && SECRET_ARGS+=(sharepoint-client-secret="$SHAREPOINT_CLIENT_SECRET")
+
+ENV_ARGS=(
+  NEO4J_URI="$NEO4J_URI"
+  NEO4J_USER="$NEO4J_USER"
+  NEO4J_DATABASE="$NEO4J_DATABASE"
+  NEO4J_PASSWORD=secretref:neo4j-password
+  TENANT_API_KEYS=secretref:tenant-api-keys
+  LLM_PROVIDER="$LLM_PROVIDER"
+  AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT"
+  AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key
+  AZURE_OPENAI_API_VERSION="$AZURE_OPENAI_API_VERSION"
+  AZURE_OPENAI_LLM_DEPLOYMENT="$AZURE_OPENAI_LLM_DEPLOYMENT"
+  AZURE_OPENAI_EMBEDDING_DEPLOYMENT="$AZURE_OPENAI_EMBEDDING_DEPLOYMENT"
+  ANTHROPIC_API_KEY=secretref:anthropic-api-key
+  ANTHROPIC_MODEL="$ANTHROPIC_MODEL"
+  ANTHROPIC_FOUNDRY_RESOURCE="$ANTHROPIC_FOUNDRY_RESOURCE"
+  SHAREPOINT_TENANT_ID="$SHAREPOINT_TENANT_ID"
+  SHAREPOINT_CLIENT_ID="$SHAREPOINT_CLIENT_ID"
+  MCP_ALLOWED_HOSTS="$MCP_ALLOWED_HOSTS"
+)
+[ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && ENV_ARGS+=(GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json)
+[ -n "$SHAREPOINT_CLIENT_SECRET" ] && ENV_ARGS+=(SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret)
+
 if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
   echo "App exists, updating image, secrets, and env vars..."
   # `containerapp update` has no --secrets flag (that's create-only) -- secrets
   # on an existing app are set separately, then referenced the same way.
   az containerapp secret set \
     --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
-    --secrets \
-      neo4j-password="$NEO4J_PASSWORD" \
-      tenant-api-keys="$TENANT_API_KEYS" \
-      azure-openai-api-key="$AZURE_OPENAI_API_KEY" \
-      anthropic-api-key="$ANTHROPIC_API_KEY" \
-      google-drive-service-account-json="$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" \
-      sharepoint-client-secret="$SHAREPOINT_CLIENT_SECRET"
+    --secrets "${SECRET_ARGS[@]}"
   # Container Apps only creates a new revision (and thus restarts the
   # container, re-resolving secretref values into fresh env vars) when it
   # detects a template change -- an env var *declaration* changing, or the
@@ -160,26 +193,7 @@ if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --
     --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
     --image "$ACR_SERVER/$IMAGE_NAME:latest" \
     --revision-suffix "deploy$(date +%Y%m%d%H%M%S)" \
-    --set-env-vars \
-      NEO4J_URI="$NEO4J_URI" \
-      NEO4J_USER="$NEO4J_USER" \
-      NEO4J_DATABASE="$NEO4J_DATABASE" \
-      NEO4J_PASSWORD=secretref:neo4j-password \
-      TENANT_API_KEYS=secretref:tenant-api-keys \
-      LLM_PROVIDER="$LLM_PROVIDER" \
-      AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
-      AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key \
-      AZURE_OPENAI_API_VERSION="$AZURE_OPENAI_API_VERSION" \
-      AZURE_OPENAI_LLM_DEPLOYMENT="$AZURE_OPENAI_LLM_DEPLOYMENT" \
-      AZURE_OPENAI_EMBEDDING_DEPLOYMENT="$AZURE_OPENAI_EMBEDDING_DEPLOYMENT" \
-      ANTHROPIC_API_KEY=secretref:anthropic-api-key \
-      ANTHROPIC_MODEL="$ANTHROPIC_MODEL" \
-      ANTHROPIC_FOUNDRY_RESOURCE="$ANTHROPIC_FOUNDRY_RESOURCE" \
-      GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json \
-      SHAREPOINT_TENANT_ID="$SHAREPOINT_TENANT_ID" \
-      SHAREPOINT_CLIENT_ID="$SHAREPOINT_CLIENT_ID" \
-      SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret \
-      MCP_ALLOWED_HOSTS="$MCP_ALLOWED_HOSTS"
+    --set-env-vars "${ENV_ARGS[@]}"
 else
   az containerapp create \
     --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
@@ -189,33 +203,8 @@ else
     --target-port 8000 \
     --ingress external \
     --min-replicas 0 --max-replicas 3 \
-    --secrets \
-      neo4j-password="$NEO4J_PASSWORD" \
-      tenant-api-keys="$TENANT_API_KEYS" \
-      azure-openai-api-key="$AZURE_OPENAI_API_KEY" \
-      anthropic-api-key="$ANTHROPIC_API_KEY" \
-      google-drive-service-account-json="$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" \
-      sharepoint-client-secret="$SHAREPOINT_CLIENT_SECRET" \
-    --env-vars \
-      NEO4J_URI="$NEO4J_URI" \
-      NEO4J_USER="$NEO4J_USER" \
-      NEO4J_DATABASE="$NEO4J_DATABASE" \
-      NEO4J_PASSWORD=secretref:neo4j-password \
-      TENANT_API_KEYS=secretref:tenant-api-keys \
-      LLM_PROVIDER="$LLM_PROVIDER" \
-      AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
-      AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key \
-      AZURE_OPENAI_API_VERSION="$AZURE_OPENAI_API_VERSION" \
-      AZURE_OPENAI_LLM_DEPLOYMENT="$AZURE_OPENAI_LLM_DEPLOYMENT" \
-      AZURE_OPENAI_EMBEDDING_DEPLOYMENT="$AZURE_OPENAI_EMBEDDING_DEPLOYMENT" \
-      ANTHROPIC_API_KEY=secretref:anthropic-api-key \
-      ANTHROPIC_MODEL="$ANTHROPIC_MODEL" \
-      ANTHROPIC_FOUNDRY_RESOURCE="$ANTHROPIC_FOUNDRY_RESOURCE" \
-      GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json \
-      SHAREPOINT_TENANT_ID="$SHAREPOINT_TENANT_ID" \
-      SHAREPOINT_CLIENT_ID="$SHAREPOINT_CLIENT_ID" \
-      SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret \
-      MCP_ALLOWED_HOSTS="$MCP_ALLOWED_HOSTS"
+    --secrets "${SECRET_ARGS[@]}" \
+    --env-vars "${ENV_ARGS[@]}"
   # MCP_ALLOWED_HOSTS above only has localhost -- this app's real FQDN wasn't
   # assigned until the create call just above. Patch it in now that it's known.
   NEW_FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
