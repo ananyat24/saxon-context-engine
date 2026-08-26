@@ -208,7 +208,7 @@ def run_timings(repo: GraphRepository, n_entities: int, root_user: str, leaf_use
             repo._resolve_named_entities(f"What do we know about Synthetic Store {a}?", [GROUP_ID], root_visible)
         )
         if resolved:
-            repo._entity_own_facts(resolved[0]["uuid"], root_visible)
+            repo._entity_own_facts(resolved[0][0]["uuid"], root_visible)
 
 
 def main() -> None:

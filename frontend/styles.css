@@ -339,6 +339,14 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
 }
 .fact-bullets li.fact-superseded { opacity: 0.65; }
 .fact-text { color: var(--text-primary); }
+.fact-source {
+  display: inline-block;
+  white-space: nowrap;
+  margin-left: 0.4rem;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--text-muted);
+}
 .fact-badge {
   display: inline-block;
   white-space: nowrap;

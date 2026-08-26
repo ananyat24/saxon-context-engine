@@ -117,25 +117,52 @@ class GraphRepository:
             if client is not self._owned_client:
                 client.close()
 
-    def _match_entity_by_name(self, name: str, group_ids: list[str]) -> Optional[dict[str, Any]]:
-        """One round trip instead of two: tries an exact match and a substring
-        match in a single query (ORDER BY prefers the exact match when both
-        would hit), rather than a separate follow-up query only issued when the
-        first came back empty. Matches across every connector in group_ids --
-        a multi-connector document set (see app/graph/document_sets.py) needs
-        entity resolution to work across all of them, not just the first."""
-        rows = self.execute_cypher(
-            "MATCH (n:Entity) WHERE n.group_id IN $group_ids "
-            "AND (toLower(n.name) = toLower($name) OR toLower(n.name) CONTAINS toLower($name)) "
-            "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary "
-            "ORDER BY CASE WHEN toLower(n.name) = toLower($name) THEN 0 ELSE 1 END LIMIT 1",
+    def _match_entities_by_name(self, name: str, group_ids: list[str]) -> list[dict[str, Any]]:
+        """Matches `name` against real node names across every connector in
+        group_ids -- a multi-connector document set (see
+        app/graph/document_sets.py) needs entity resolution to work across
+        all of them, not just the first.
+
+        Returns *every* exact (case-insensitive) name match, not just one --
+        this is the deterministic reconciliation step that lets "Fenwick &
+        Cole Legal" mentioned in a CRM record and, separately, in an email
+        resolve to the same real-world entity at query time, instead of only
+        whichever one of its several per-connector nodes happened to be
+        picked first (see _resolve_named_entities/search_graphiti_facts,
+        which pool every returned row's own facts together as one entity).
+
+        Deliberately exact-match only for this multi-row reconciliation:
+        falling back to the looser CONTAINS match here too would risk
+        merging two genuinely different entities that just share a word,
+        undoing the padded-results fix search_graphiti_facts already has. A
+        query naming a *partial* name isn't claiming "these are the same
+        entity", so when nothing matches exactly, this falls back to the
+        single best CONTAINS match instead (existing loose-match behavior,
+        still capped at one).
+
+        This is deliberately simple, deterministic reconciliation --
+        normalized name equality -- rather than matching on a real shared
+        key (an email address, an external system id, ...) across sources;
+        see CLAUDE.md's v2.5. The known tradeoff: two different real-world
+        entities that happen to share an exact name would incorrectly
+        merge. Worth revisiting once a stronger signal exists in the data.
+        """
+        exact_rows = self.execute_cypher(
+            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) = toLower($name) "
+            "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id",
             {"group_ids": group_ids, "name": name},
         )
-        return rows[0] if rows else None
+        if exact_rows:
+            return exact_rows
+        return self.execute_cypher(
+            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS toLower($name) "
+            "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id LIMIT 1",
+            {"group_ids": group_ids, "name": name},
+        )
 
     async def _resolve_named_entities(
         self, query_text: str, group_ids: list[str], visible_uuids: Optional[set[str]]
-    ) -> tuple[list[dict[str, Any]], bool]:
+    ) -> tuple[list[list[dict[str, Any]]], bool]:
         """Looks for specifically-named entities in the query and matches each
         against real node names in this knowledge base, so a query like "What's
         changed about Rhodes Furniture?" or "What's the status of order 10248?"
@@ -155,28 +182,37 @@ class GraphRepository:
         "How is X connected to Y?") no longer pays for two round trips back to
         back.
 
-        Returns (resolved_rows, saw_unresolved_candidate) -- resolved_rows is
-        deduped by uuid (so "Contoso Store Washington DC" and, say, an overlapping
-        shorter candidate matching the same node don't count twice), and
-        saw_unresolved_candidate is True if some proper-noun-shaped phrase in the
-        query didn't match anything visible, which the caller uses to say "not
-        found" rather than silently falling back to an ungrounded search.
+        Returns (resolved_groups, saw_unresolved_candidate). resolved_groups is
+        a list of "same real-world entity" row-groups, one per distinct matched
+        candidate (deduped by exact uuid-set, so an overlapping shorter/longer
+        candidate matching the same node(s) doesn't produce a second group) --
+        each group is one or more rows sharing that name across different
+        connectors (see _match_entities_by_name), meant to be pooled together
+        by the caller, not treated as separate entities. saw_unresolved_candidate
+        is True if some proper-noun-shaped phrase in the query didn't match
+        anything visible, which the caller uses to say "not found" rather than
+        silently falling back to an ungrounded search.
         """
         proper_nouns = _extract_candidate_entities(query_text)
         all_candidates = proper_nouns + _extract_id_candidates(query_text)
         if not all_candidates:
             return [], False
 
-        rows = await asyncio.gather(
-            *(asyncio.to_thread(self._match_entity_by_name, c, group_ids) for c in all_candidates)
+        rows_per_candidate = await asyncio.gather(
+            *(asyncio.to_thread(self._match_entities_by_name, c, group_ids) for c in all_candidates)
         )
 
-        resolved: dict[str, dict[str, Any]] = {}
+        groups: list[list[dict[str, Any]]] = []
+        seen_uuid_sets: set[frozenset] = set()
         saw_unresolved = False
         proper_noun_set = set(proper_nouns)
-        for candidate, row in zip(all_candidates, rows):
-            if row and (visible_uuids is None or row["uuid"] in visible_uuids):
-                resolved[row["uuid"]] = row
+        for candidate, rows in zip(all_candidates, rows_per_candidate):
+            visible_rows = [r for r in rows if visible_uuids is None or r["uuid"] in visible_uuids]
+            if visible_rows:
+                key = frozenset(r["uuid"] for r in visible_rows)
+                if key not in seen_uuid_sets:
+                    seen_uuid_sets.add(key)
+                    groups.append(visible_rows)
             elif candidate in proper_noun_set:
                 # Either nothing matched, or it matched something this caller
                 # can't see -- don't leak existence either way. An id-phrase
@@ -184,7 +220,7 @@ class GraphRepository:
                 # counts here.
                 saw_unresolved = True
 
-        return list(resolved.values()), saw_unresolved
+        return groups, saw_unresolved
 
     @staticmethod
     def _to_native(value):
@@ -202,7 +238,7 @@ class GraphRepository:
         rows = self.execute_cypher(
             "MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-(m) "
             "RETURN r.fact AS fact, r.valid_at AS valid_at, r.invalid_at AS invalid_at, "
-            "r.expired_at AS expired_at, startNode(r).uuid AS source_node_uuid, "
+            "r.expired_at AS expired_at, r.group_id AS group_id, startNode(r).uuid AS source_node_uuid, "
             "endNode(r).uuid AS target_node_uuid",
             {"uuid": uuid},
         )
@@ -223,6 +259,12 @@ class GraphRepository:
                 "valid_at": self._to_native(row["valid_at"]),
                 "invalid_at": invalid_at,
                 "expired_at": expired_at,
+                # Which connector/knowledge base this fact actually came
+                # from -- lets the UI show "from X" per fact rather than
+                # just the flat text (see frontend/app.js's renderFacts).
+                # Real provenance, not a guess: this is the same group_id
+                # every other part of this app already scopes queries by.
+                "group_id": row["group_id"],
                 "is_valid": expired_at is None and _not_yet_invalidated(invalid_at),
             })
         return facts
@@ -289,11 +331,11 @@ class GraphRepository:
             logger.warning("Graphiti instance not set in GraphRepository.")
             return []
 
-        resolved_entities, saw_unresolved = (
+        resolved_groups, saw_unresolved = (
             await self._resolve_named_entities(query_text, group_ids, visible_uuids) if group_ids else ([], False)
         )
 
-        if saw_unresolved and not resolved_entities:
+        if saw_unresolved and not resolved_groups:
             return [{
                 "fact": "No entity matching that name was found in this knowledge base.",
                 "source_node_uuid": "",
@@ -304,8 +346,14 @@ class GraphRepository:
                 "is_valid": True,
             }]
 
-        if len(resolved_entities) >= 2:
-            a, b = resolved_entities[0], resolved_entities[1]
+        if len(resolved_groups) >= 2:
+            # Two (or more) DIFFERENTLY-named entities resolved -- a
+            # "how is X connected to Y" query. Each group may itself hold
+            # several reconciled rows (see _match_entities_by_name); any one
+            # row is a valid endpoint for the path lookup, since they're all
+            # the same real-world thing.
+            a_group, b_group = resolved_groups[0], resolved_groups[1]
+            a, b = a_group[0], b_group[0]
             path_facts = self._relationship_path_facts(a["uuid"], b["uuid"], visible_uuids)
             if path_facts:
                 return [{
@@ -327,34 +375,41 @@ class GraphRepository:
                 "is_valid": True,
             }]
 
-        if len(resolved_entities) == 1:
-            # A single named entity resolved -- use its own edges directly
-            # (precise by construction). Also skips a paid search call we'd
-            # otherwise throw away.
-            resolved = resolved_entities[0]
-            facts = self._entity_own_facts(resolved["uuid"], visible_uuids)
-            if not facts and resolved.get("summary"):
-                # Only fall back to the entity's own `summary` property when it
-                # has no edges at all (e.g. an entity extracted with rich
-                # attributes but no relationships -- see the "Contoso Store
-                # Washington DC" case this was built for). When edges DO exist,
-                # summary must NOT be used: Graphiti's node summary is a running
-                # accumulation of every fact ever seen about the entity, with no
-                # temporal awareness -- for "Contoso Ltd", it still lists "Sarah
-                # Chen manages the account" verbatim even after Marcus Lee took
-                # over. Showing that as a lead line reintroduces exactly the
-                # inaccurate, already-superseded info the orchestrator's
-                # transition/is_valid handling exists to filter out.
-                facts.insert(0, {
-                    "fact": resolved["summary"],
-                    "source_node_uuid": resolved["uuid"],
-                    "target_node_uuid": resolved["uuid"],
-                    "valid_at": None,
-                    "invalid_at": None,
-                    "expired_at": None,
-                    "is_valid": True,
-                    "kind": "entity_summary",
-                })
+        if len(resolved_groups) == 1:
+            # One named entity resolved -- possibly to several rows if it's
+            # the same name across more than one connector (see
+            # _match_entities_by_name's reconciliation). Pool every row's
+            # own edges directly (precise by construction). Also skips a
+            # paid search call we'd otherwise throw away.
+            facts: list[dict[str, Any]] = []
+            for resolved in resolved_groups[0]:
+                own_facts = self._entity_own_facts(resolved["uuid"], visible_uuids)
+                if not own_facts and resolved.get("summary"):
+                    # Only fall back to this row's own `summary` property
+                    # when it has no edges at all (e.g. an entity extracted
+                    # with rich attributes but no relationships -- see the
+                    # "Contoso Store Washington DC" case this was built
+                    # for). When edges DO exist, summary must NOT be used:
+                    # Graphiti's node summary is a running accumulation of
+                    # every fact ever seen about the entity, with no
+                    # temporal awareness -- for "Contoso Ltd", it still
+                    # lists "Sarah Chen manages the account" verbatim even
+                    # after Marcus Lee took over. Showing that as a lead
+                    # line reintroduces exactly the inaccurate,
+                    # already-superseded info the orchestrator's
+                    # transition/is_valid handling exists to filter out.
+                    own_facts = [{
+                        "fact": resolved["summary"],
+                        "source_node_uuid": resolved["uuid"],
+                        "target_node_uuid": resolved["uuid"],
+                        "valid_at": None,
+                        "invalid_at": None,
+                        "expired_at": None,
+                        "group_id": resolved.get("group_id"),
+                        "is_valid": True,
+                        "kind": "entity_summary",
+                    }]
+                facts.extend(own_facts)
             return facts
 
         # Graphiti's own default (10) is tuned for open-ended browsing, not a
@@ -377,6 +432,7 @@ class GraphRepository:
                 "valid_at": getattr(r, "valid_at", None),
                 "invalid_at": getattr(r, "invalid_at", None),
                 "expired_at": getattr(r, "expired_at", None),
+                "group_id": getattr(r, "group_id", None),
                 "is_valid": getattr(r, "expired_at", None) is None and _not_yet_invalidated(getattr(r, "invalid_at", None)),
                 # Distinguishes these from the entity-resolution branches above
                 # (whose facts carry no "kind", or "entity_summary") -- the

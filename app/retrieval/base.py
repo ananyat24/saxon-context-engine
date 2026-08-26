@@ -1,13 +1,15 @@
 # Common shape every *text-query* retriever implements, so ContextOrchestrator
 # can call a list of them without knowing which specific kind each one is.
 #
-# GraphRetriever implements this today. SemanticRetriever (vector search over
-# documents) is the next one expected to -- its query/group_ids signature already
-# matches. This exists now, ahead of semantic search actually being built, so
-# that plugging it in later is "add one line to a list" in ContextOrchestrator
-# rather than a restructure. LiveDataRetriever deliberately does NOT implement
-# this: it looks up one specific entity_id, not a free-text query, so forcing it
-# into this shape would distort its interface rather than simplify anything.
+# GraphRetriever is the only implementation today, and semantic search isn't
+# a separate retriever waiting to be added here -- Graphiti's own hybrid
+# search (semantic + BM25 + graph traversal) already runs as a fallback
+# inside GraphRepository.search_graphiti_facts(), which GraphRetriever wraps
+# (see app/context/orchestrator.py's module docstring for why). This
+# interface stays in place for a genuinely different future retrieval
+# source -- e.g. a live external API lookup that shouldn't live in the graph
+# at all -- so plugging that in is "add one line to a list" in
+# ContextOrchestrator rather than a restructure.
 from typing import Any, Optional, Protocol
 
 

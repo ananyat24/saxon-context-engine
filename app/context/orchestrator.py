@@ -1,10 +1,23 @@
 # The main coordination point for answering a query: runs every configured
 # retriever, pools what they find, and packages it into a ContextPacket.
 #
-# Only GraphRetriever is wired in today. It takes a list of retrievers (see
-# app/retrieval/base.py's TextRetriever interface) specifically so that adding
-# semantic search later is a one-line change here -- append a SemanticRetriever
-# to the list -- rather than a restructure of this class.
+# Only GraphRetriever is wired in -- and that's deliberate, not a placeholder
+# waiting on a separate semantic-search retriever. Graphiti already ships
+# hybrid search (semantic + BM25 + graph traversal); GraphRepository.
+# search_graphiti_facts() calls it directly as its own fallback branch, only
+# after trying to resolve the query to a specific named entity first (see
+# that method's docstring). That resolve-first-fall-back-to-search-second
+# decision *is* this system's query planner -- it already skips the paid
+# hybrid-search call whenever a named entity answers the question directly,
+# which is the actual cost-saving goal a separate ContextPlanner class would
+# have existed to achieve. A standalone vector-index-backed SemanticRetriever
+# was scaffolded early on and later removed once it became clear Graphiti's
+# own hybrid search covers this without a second index to maintain.
+#
+# This retriever list still exists (rather than calling GraphRetriever
+# directly) so a genuinely different retrieval source -- live external data
+# that shouldn't live in the graph at all, e.g. -- can be appended here
+# later without restructuring this class.
 #
 # Note: this fills in ContextPacket.metadata with a plain-text summary and the
 # raw per-fact records (including temporal validity), but not the packet's

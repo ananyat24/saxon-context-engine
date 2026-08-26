@@ -1128,7 +1128,17 @@ function renderFacts(container, facts) {
       const badge = current
         ? `<span class="fact-badge fact-badge-current">current</span>`
         : `<span class="fact-badge fact-badge-superseded">superseded*</span>`;
-      return `<li class="${current ? "" : "fact-superseded"}">${escapeXml(f.fact || "")}${badge}</li>`;
+      // Real provenance, not a guess -- group_id is the same field every
+      // query in this app is already scoped by (see graph_repository.py's
+      // _entity_own_facts/search_graphiti_facts). Only shown when it maps
+      // to a knowledge base this tenant can see, and only when a document
+      // set (multiple possible sources) is actually the scope in play --
+      // pointless noise on a single-connector query where it's always the
+      // same source.
+      const kbLabel = f.group_id ? knowledgeBaseDirectory.find((kb) => kb.id === f.group_id)?.label : null;
+      const sourceTag =
+        kbLabel && getSelectedDocumentSet() ? `<span class="fact-source">from ${escapeXml(kbLabel)}</span>` : "";
+      return `<li class="${current ? "" : "fact-superseded"}">${escapeXml(f.fact || "")}${sourceTag}${badge}</li>`;
     })
     .join("");
   container.innerHTML =

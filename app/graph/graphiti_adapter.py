@@ -22,11 +22,11 @@ from graphiti_core.embedder.azure_openai import AzureOpenAIEmbedderClient
 from graphiti_core.llm_client.config import LLMConfig
 from graphiti_core.llm_client.gemini_client import GeminiClient
 from graphiti_core.llm_client.azure_openai_client import AzureOpenAILLMClient
-from graphiti_core.llm_client.anthropic_client import AnthropicClient
 from openai import AsyncAzureOpenAI
 from anthropic import AsyncAnthropic, AsyncAnthropicFoundry
 
 from app.config import settings
+from app.graph.caching_anthropic_client import CachingAnthropicClient
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.spend_limiter import estimate_cost_usd, get_limiter
 
@@ -92,7 +92,19 @@ def _apply_spend_limit_anthropic(
         response = await original_create(*args, **kwargs)
         usage = getattr(response, "usage", None)
         if usage is not None:
-            limiter.record(bucket, estimate_cost_usd(usage.input_tokens, usage.output_tokens, input_price, output_price))
+            cost = estimate_cost_usd(usage.input_tokens, usage.output_tokens, input_price, output_price)
+            # Prompt caching (see app/graph/caching_anthropic_client.py) bills
+            # a cache write/read as separate token counts the plain
+            # input_tokens figure above doesn't include at all -- ignoring
+            # them here would silently under-count real spend the moment
+            # caching is active, exactly the kind of gap the spend limiter
+            # exists to not have. Per Anthropic's published pricing, a cache
+            # write costs ~1.25x a normal input token, a cache read ~0.1x.
+            cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cost += cache_creation_tokens / 1_000_000 * input_price * 1.25
+            cost += cache_read_tokens / 1_000_000 * input_price * 0.1
+            limiter.record(bucket, cost)
         return response
 
     anthropic_client.messages.create = limited_create
@@ -189,7 +201,10 @@ def _build_anthropic_clients(bucket: str, gemini_api_key: str):
     _apply_spend_limit_anthropic(
         anthropic_client, bucket, settings.anthropic_input_price_per_1m, settings.anthropic_output_price_per_1m
     )
-    llm_client = AnthropicClient(client=anthropic_client, config=LLMConfig(model=settings.anthropic_model))
+    # CachingAnthropicClient, not the bare AnthropicClient graphiti_core
+    # ships -- see app/graph/caching_anthropic_client.py for why turning on
+    # Anthropic prompt caching needs a subclass rather than a config flag.
+    llm_client = CachingAnthropicClient(client=anthropic_client, config=LLMConfig(model=settings.anthropic_model))
     embedder, cross_encoder = _build_gemini_embedder_and_reranker(gemini_api_key)
     return llm_client, embedder, cross_encoder
 
