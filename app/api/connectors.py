@@ -23,33 +23,46 @@ from app.ingestion.database_source import DatabaseConnector
 from app.ingestion.document_source import DocumentConnector
 from app.ingestion.email_source import EmailConnector
 from app.ingestion.google_drive_source import GoogleDriveConnector
+from app.ingestion.sharepoint_source import SharePointConnector
 from app.ingestion.web_source import WebConnector
 from app.security import require_tenant
 
 router = APIRouter()
 
 # The one place a connector `type` maps to its SourceConnector implementation.
-# Adding a new type (a real SharePoint/CRM API, once credentials exist) is:
+# Adding a new type (another real live source, once credentials exist) is:
 # implement SourceConnector (see app/ingestion/connector_base.py) and add one
 # entry here -- no changes needed to the sync route below, IngestionPipeline,
 # or ontology handling. "database"/"documents"/"email" read bundled mock
 # data rather than a live source (see each module's docstring) -- they exist
 # to prove the connector types most clients actually have (a CRM/DB, a
-# document store, an inbox) work end to end. "google_drive" is the first
-# real live source connector -- see app/ingestion/google_drive_source.py.
+# document store, an inbox) work end to end. "google_drive" and "sharepoint"
+# are the real live source connectors.
 _CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
     "web": lambda connector: WebConnector(connector["url"]),
     "database": lambda connector: DatabaseConnector(),
     "documents": lambda connector: DocumentConnector(),
     "email": lambda connector: EmailConnector(),
     "google_drive": lambda connector: GoogleDriveConnector(connector["url"]),
+    "sharepoint": lambda connector: SharePointConnector(connector["url"]),
 }
 
-# Which types read from a tenant-supplied address (a URL, or here a Drive
-# folder link/id) vs. a fixed bundled sample with nothing to collect (see
-# _CONNECTOR_FACTORIES above) or an operator-wide credential with no
-# per-connector address at all.
-_TYPES_REQUIRING_URL = {"web", "google_drive"}
+# Which types read from a tenant-supplied address (a URL/site link) vs. a
+# fixed bundled sample with nothing to collect (see _CONNECTOR_FACTORIES
+# above) or an operator-wide credential with no per-connector address at all.
+_TYPES_REQUIRING_URL = {"web", "google_drive", "sharepoint"}
+
+# Real live connector types need an operator-wide credential configured
+# before a tenant can even create one -- checked here so that's a clear 400
+# at creation time, not a confusing failure the first time someone clicks
+# "Sync now". Each check function takes no arguments and returns whether
+# that type's required setting(s) are present.
+_OPERATOR_CONFIG_CHECKS: dict[str, Callable[[], bool]] = {
+    "google_drive": lambda: bool(settings.google_drive_service_account_json),
+    "sharepoint": lambda: bool(
+        settings.sharepoint_tenant_id and settings.sharepoint_client_id and settings.sharepoint_client_secret
+    ),
+}
 
 
 class CreateConnectorRequest(BaseModel):
@@ -94,22 +107,21 @@ def create_connector(req: CreateConnectorRequest, request: Request, tenant: Tena
             detail=f"Unknown knowledge base '{req.group_id}' for this tenant.",
         )
 
-    if req.type == "google_drive" and not settings.google_drive_service_account_json:
+    config_check = _OPERATOR_CONFIG_CHECKS.get(req.type)
+    if config_check is not None and not config_check():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Google Drive isn't configured on this server yet -- ask your operator to set it up.",
+            detail=f"'{req.type}' isn't configured on this server yet -- ask your operator to set it up.",
         )
 
     if req.type in _TYPES_REQUIRING_URL:
         url = (req.url or "").strip()
         if not url:
-            detail = "Paste a Drive folder link or id." if req.type == "google_drive" else "This connector type needs a URL."
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
-        if req.type == "google_drive":
-            try:
-                GoogleDriveConnector(url)  # validates the folder id/link shape up front
-            except ConnectorFetchError as e:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This connector type needs a URL.")
+        try:
+            _CONNECTOR_FACTORIES[req.type]({"url": url})  # validates the URL/id shape up front
+        except ConnectorFetchError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     else:
         # Ignore any submitted url for a bundled-mock-data type -- store the
         # connector's own fixed description instead, both so the table shows

@@ -10,12 +10,7 @@ import httpx
 import pytest
 
 from app.ingestion.connector_base import ConnectorFetchError
-from app.ingestion.google_drive_source import (
-    GoogleDriveConnector,
-    _extract_docx_text,
-    _extract_folder_id,
-    _extract_pdf_text,
-)
+from app.ingestion.google_drive_source import GoogleDriveConnector, _extract_folder_id
 
 _FAKE_SERVICE_ACCOUNT_JSON = json.dumps(
     {
@@ -203,34 +198,6 @@ def test_fetch_raises_when_no_supported_files(monkeypatch):
     connector = GoogleDriveConnector("1AbC-defGHI_23")
     with pytest.raises(ConnectorFetchError, match="No supported files"):
         asyncio.run(connector.fetch())
-
-
-def test_extract_pdf_text_returns_empty_for_a_blank_page():
-    # A page with no text layer (e.g. a scanned/image-only PDF) should
-    # produce "" rather than raise -- the caller treats that as "skip this
-    # file", not an error.
-    from pypdf import PdfWriter
-
-    writer = PdfWriter()
-    writer.add_blank_page(width=200, height=200)
-    buf = BytesIO()
-    writer.write(buf)
-
-    assert _extract_pdf_text(buf.getvalue()) == ""
-
-
-def test_extract_docx_text_extracts_real_paragraphs():
-    from docx import Document
-
-    doc = Document()
-    doc.add_paragraph("First paragraph.")
-    doc.add_paragraph("Second paragraph.")
-    buf = BytesIO()
-    doc.save(buf)
-
-    text = _extract_docx_text(buf.getvalue())
-    assert "First paragraph." in text
-    assert "Second paragraph." in text
 
 
 def test_fetch_reads_pdf_and_docx_via_the_binary_parsers(monkeypatch):

@@ -188,6 +188,27 @@ class Settings(BaseSettings):
     # account's email (found in the key JSON's "client_email" field).
     google_drive_service_account_json: str = ""
 
+    # Azure AD (Entra ID) app registration credentials for the "sharepoint"
+    # connector type (see app/ingestion/sharepoint_source.py), used for the
+    # OAuth2 client credentials flow against Microsoft Graph. Operator-wide,
+    # same reasoning as the Google Drive service account above -- one
+    # credential the backend holds, authenticating without any interactive
+    # user login, which is what a server-side "Sync now"/scheduled sync
+    # needs. All three must be set together or the connector type is
+    # disabled (create_connector rejects it with a clear error). Unlike
+    # Drive's per-folder sharing model, this app registration's Microsoft
+    # Graph *application* permission (Sites.Read.All, admin-consented) is
+    # the whole access boundary -- there's no separate per-site invite step,
+    # so whoever grants that permission is granting read access to every
+    # SharePoint site in the tenant, not just the one a connector happens to
+    # point at. Get these from Azure Portal -> Microsoft Entra ID -> App
+    # registrations -> New registration, then Certificates & secrets -> New
+    # client secret, then API permissions -> Add a permission -> Microsoft
+    # Graph -> Application permissions -> Sites.Read.All -> Grant admin consent.
+    sharepoint_tenant_id: str = ""
+    sharepoint_client_id: str = ""
+    sharepoint_client_secret: str = ""
+
     # Background connector syncing (see app/graph/connector_scheduler.py) --
     # every tenant's connectors get synced automatically on this interval,
     # not just when someone clicks "Sync now". 15 minutes is a reasonable

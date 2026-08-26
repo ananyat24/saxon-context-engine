@@ -339,6 +339,7 @@ function formatSyncStatus(c) {
 const CONNECTOR_TYPE_LABELS = {
   web: "Web page",
   google_drive: "Google Drive",
+  sharepoint: "SharePoint",
   database: "Database / CRM",
   documents: "Documents",
   email: "Email inbox",
@@ -480,10 +481,11 @@ async function loadConnectors() {
 // app/api/connectors.py's own _TYPES_REQUIRING_URL. The demo data types
 // (database/documents/email) read a fixed bundled sample server-side, so
 // their URL field stays hidden rather than asking for an input that's ignored.
-const CONNECTOR_TYPES_REQUIRING_URL = new Set(["web", "google_drive"]);
+const CONNECTOR_TYPES_REQUIRING_URL = new Set(["web", "google_drive", "sharepoint"]);
 const CONNECTOR_URL_PLACEHOLDERS = {
   web: "https://example.com/page-to-pull-in",
   google_drive: "Drive folder link or id (share the folder with the service account first)",
+  sharepoint: "https://yourtenant.sharepoint.com/sites/YourSite",
 };
 
 function updateConnectorUrlVisibility() {

@@ -13,8 +13,7 @@
 import asyncio
 import json
 import re
-from io import BytesIO
-from typing import Callable, Optional
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -23,6 +22,11 @@ from google.oauth2 import service_account
 
 from app.config import settings
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector, hash_records
+from app.ingestion.document_text_extraction import (
+    BINARY_TEXT_PARSERS as _BINARY_PARSERS,
+    MAX_BINARY_BYTES as _MAX_BINARY_BYTES,
+    PLAIN_TEXT_MIME_TYPES as _SUPPORTED_FILE_MIME_TYPES,
+)
 from app.ingestion.file_source import SourceRecord
 
 _DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
@@ -44,43 +48,10 @@ _GOOGLE_NATIVE_EXPORT_MIME_TYPES = {
     "application/vnd.google-apps.spreadsheet": "text/csv",
     "application/vnd.google-apps.presentation": "text/plain",
 }
-# Mime types for regular (non-Google-native) files this connector reads as
-# plain text directly, with no parsing step.
-_SUPPORTED_FILE_MIME_TYPES = {"text/plain", "text/markdown", "text/csv"}
-
-_PDF_MIME = "application/pdf"
-_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-# Legacy binary .doc (application/msword) is a much harder format to parse
-# reliably and deliberately isn't supported -- same "don't guess" spirit as
-# everything else this connector skips.
-
-
-def _extract_pdf_text(data: bytes) -> str:
-    from pypdf import PdfReader
-
-    reader = PdfReader(BytesIO(data))
-    pages = [page.extract_text() or "" for page in reader.pages]
-    return "\n\n".join(p.strip() for p in pages if p.strip())
-
-
-def _extract_docx_text(data: bytes) -> str:
-    from docx import Document
-
-    doc = Document(BytesIO(data))
-    return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-
-
-# Files needing a local parsing step (not just a plain-text download or a
-# Drive export) to get their text out. A scanned/image-only PDF has no text
-# layer for pypdf to find -- extract_pdf_text then returns "", and the file
-# is skipped below like any other empty result, not treated as an error.
-_BINARY_PARSERS: dict[str, Callable[[bytes], str]] = {
-    _PDF_MIME: _extract_pdf_text,
-    _DOCX_MIME: _extract_docx_text,
-}
-# Keeps parsing cost/time bounded regardless of how large a shared file is --
-# same reasoning as _MAX_FILES/_MAX_TEXT_CHARS above.
-_MAX_BINARY_BYTES = 15 * 1024 * 1024
+# Plain-text mime types and PDF/DOCX parsing (_SUPPORTED_FILE_MIME_TYPES,
+# _BINARY_PARSERS, _MAX_BINARY_BYTES) come from
+# app/ingestion/document_text_extraction.py -- shared with the SharePoint
+# connector rather than duplicated here.
 
 # A real Drive file/folder id is a specific base64url-ish alphabet -- this
 # also doubles as a defensive check before the id is interpolated into a
