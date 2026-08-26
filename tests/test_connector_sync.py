@@ -153,3 +153,44 @@ def test_successful_sync_ingests_every_record_and_records_the_new_hash(monkeypat
     assert statuses == ["synced"]
     assert len(ingested) == 2
     assert {call["group_id"] for call in ingested} == {"kb1"}
+
+
+def test_successful_sync_invalidates_the_response_cache_for_its_group(monkeypatch):
+    _no_op_record_sync_result(monkeypatch)
+
+    async def collecting(**kwargs):
+        pass
+
+    _patch_ingestion(monkeypatch, collecting)
+
+    invalidated = []
+    monkeypatch.setattr(
+        "app.ingestion.connector_sync.get_response_cache",
+        lambda: type("_Fake", (), {"invalidate_group": staticmethod(lambda t, g: invalidated.append((t, g)))})(),
+    )
+
+    tenant = _tenant()
+    connector = {"id": "c1", "group_id": "kb1", "content_hash": None}
+    records = [SourceRecord(name="a", body="x", source_description="d")]
+
+    asyncio.run(run_connector_sync(tenant, connector, lambda c: _StaticConnector(records, hash_value="new-hash"), repo=None))
+
+    assert invalidated == [("t1", "kb1")]
+
+
+def test_unchanged_sync_does_not_touch_the_response_cache(monkeypatch):
+    _no_op_record_sync_result(monkeypatch)
+
+    invalidated = []
+    monkeypatch.setattr(
+        "app.ingestion.connector_sync.get_response_cache",
+        lambda: type("_Fake", (), {"invalidate_group": staticmethod(lambda t, g: invalidated.append((t, g)))})(),
+    )
+
+    tenant = _tenant()
+    connector = {"id": "c1", "group_id": "kb1", "content_hash": "same-hash"}
+    records = [SourceRecord(name="a", body="x", source_description="d")]
+
+    asyncio.run(run_connector_sync(tenant, connector, lambda c: _StaticConnector(records), repo=None))
+
+    assert invalidated == []

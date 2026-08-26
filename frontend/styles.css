@@ -15,6 +15,7 @@
   --navy-hover: #24406b;
   --status-normal: #3f8067;
   --status-critical: #b3463b;
+  --status-warning: #b8862f;
 }
 
 * { box-sizing: border-box; }
@@ -68,6 +69,7 @@ header {
 }
 .badge-ok { background: var(--status-normal); color: #fff; }
 .badge-bad { background: var(--status-critical); color: #fff; }
+.badge-warn { background: var(--status-warning); color: #fff; }
 .badge-muted { background: rgba(255,255,255,0.15); color: #cdd6e2; }
 
 .kb-select {

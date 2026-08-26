@@ -324,6 +324,14 @@ function renderConnectorKbSelect() {
 }
 
 function formatSyncStatus(c) {
+  // "stale" (see app/api/connectors.py's _connector_health) takes priority
+  // over the raw status -- a connector can be "synced" from its own last
+  // attempt's point of view and still be stale if nothing's synced it
+  // again in a long time, which is exactly the case worth flagging: the
+  // background scheduler may have stopped running for it.
+  if (c.health === "stale") {
+    return `<span class="badge badge-warn" title="Hasn't synced successfully in a while -- check that background syncing is still running for this connector.">Stale</span>`;
+  }
   const labels = {
     never_synced: "Never synced",
     synced: "Synced",
@@ -345,9 +353,23 @@ const CONNECTOR_TYPE_LABELS = {
   email: "Email inbox",
 };
 
+function renderConnectorsHealthSummary() {
+  const summaryEl = document.getElementById("connectorsHealthSummary");
+  if (connectorDirectory.length === 0) {
+    summaryEl.textContent = "";
+    return;
+  }
+  const needsAttention = connectorDirectory.filter((c) => c.health === "error" || c.health === "stale").length;
+  summaryEl.textContent =
+    needsAttention === 0
+      ? `All ${connectorDirectory.length} connector${connectorDirectory.length === 1 ? "" : "s"} syncing normally.`
+      : `${needsAttention} of ${connectorDirectory.length} connector${connectorDirectory.length === 1 ? "" : "s"} need${needsAttention === 1 ? "s" : ""} attention.`;
+}
+
 function renderConnectorsTable() {
   const body = document.getElementById("connectorsBody");
   const empty = document.getElementById("connectorsEmpty");
+  renderConnectorsHealthSummary();
   if (connectorDirectory.length === 0) {
     body.innerHTML = "";
     empty.style.display = "block";

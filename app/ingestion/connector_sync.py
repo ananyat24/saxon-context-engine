@@ -8,6 +8,7 @@ import logging
 from typing import Callable, TypedDict
 
 from app.config import TenantConfig
+from app.context.response_cache import get_response_cache
 from app.graph import connectors
 from app.graph.graph_repository import GraphRepository
 from app.graph.graphiti_adapter import build_graphiti
@@ -94,4 +95,8 @@ async def run_connector_sync(
         await graphiti.close()
 
     connectors.record_sync_result(tenant.tenant_id, connector_id, status="synced", content_hash=new_hash, repo=repo)
+    # New data just landed for this group -- don't leave a stale "no
+    # information found" (or an outdated answer) sitting in the response
+    # cache for however long its TTL has left. See app/context/response_cache.py.
+    get_response_cache().invalidate_group(tenant.tenant_id, connector["group_id"])
     return {"synced": True, "skipped_unchanged": False, "error": None, "spend_limit_exceeded": False}

@@ -9,6 +9,7 @@
 # thin HTTP wrapper around that (look up the connector, call it, translate
 # the result into an HTTP response), not a second implementation of the
 # fetch -> dedup-check -> ingest sequence.
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -75,6 +76,31 @@ class CreateConnectorRequest(BaseModel):
     url: Optional[str] = Field(default=None, max_length=2000)
 
 
+# A connector past this many sync intervals since its last success is
+# flagged "stale" rather than "ok" -- generous enough to absorb a transient
+# failure or two without crying wolf, but still catches "the background
+# scheduler stopped running for this connector" (see
+# app/graph/connector_scheduler.py), which nothing else surfaces.
+_STALE_AFTER_INTERVAL_MULTIPLE = 3
+
+
+def _connector_health(c: dict) -> str:
+    """"error" | "never_synced" | "stale" | "ok" -- a coarse freshness
+    signal computed server-side so the staleness threshold lives in one
+    place rather than being duplicated in the frontend."""
+    if c["status"] == "error":
+        return "error"
+    if not c["last_synced_at"]:
+        return "never_synced"
+    last_synced_at = c["last_synced_at"]
+    if isinstance(last_synced_at, str):
+        last_synced_at = datetime.fromisoformat(last_synced_at.replace("Z", "+00:00"))
+    max_age = timedelta(minutes=settings.connector_sync_interval_minutes * _STALE_AFTER_INTERVAL_MULTIPLE)
+    if datetime.now(timezone.utc) - last_synced_at > max_age:
+        return "stale"
+    return "ok"
+
+
 def _serialize(c: dict) -> dict:
     return {
         "id": c["id"],
@@ -85,6 +111,7 @@ def _serialize(c: dict) -> dict:
         "status": c["status"],
         "last_synced_at": c["last_synced_at"],
         "last_error": c["last_error"],
+        "health": _connector_health(c),
     }
 
 

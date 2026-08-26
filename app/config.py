@@ -220,6 +220,17 @@ class Settings(BaseSettings):
     connector_sync_enabled: bool = True
     connector_sync_interval_minutes: int = 15
 
+    # In-process query response cache (see app/context/response_cache.py) --
+    # avoids re-running retrieval + synthesis for a repeat/near-repeat
+    # question within this window. Kept shorter than
+    # connector_sync_interval_minutes above so a cached answer never
+    # meaningfully outlives what a background sync would have refreshed by
+    # anyway; also explicitly invalidated per-group the moment a connector
+    # sync actually changes that group's data, so this isn't the only thing
+    # standing between a fresh ingest and a stale-looking answer. Set to 0
+    # to disable caching entirely.
+    response_cache_ttl_seconds: float = 300.0
+
     app_env: str = "development"
     log_level: str = "INFO"
 

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from app.config import TenantConfig
 from app.context.orchestrator import ContextOrchestrator
+from app.context.response_cache import get_response_cache
 from app.graph import authorization, document_sets
 from app.graph.graph_repository import GraphRepository
 from app.graph.spend_limiter import SpendLimitExceeded
@@ -65,14 +66,28 @@ async def query_context(req: SearchQueryRequest, request: Request, tenant: Tenan
         user_id = authorization.resolve_as_user(group_id, req.as_user, repo=repo)
         visible_uuids = authorization.get_visible_entity_uuids(group_id, user_id, repo=repo) if user_id is not None else None
 
+    # A repeat (or near-repeat) question against the same scope within the
+    # cache's TTL skips retrieval + synthesis entirely -- see
+    # app/context/response_cache.py. Keyed on as_user (not the resolved
+    # visible_uuids set) since the same as_user always resolves to the same
+    # visibility given unchanged data, and that data changing is exactly
+    # what invalidate_group() below reacts to.
+    cache = get_response_cache()
+    cache_key = cache.make_key(tenant.tenant_id, group_ids, req.as_user, req.query, num_results)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     # Each tenant gets their own cached Graphiti client, built with their own
     # Gemini key on first use and reused after that -- see
     # app/graph/tenant_graphiti_pool.py.
     graphiti = await request.app.state.graphiti_pool.get_or_create(tenant)
     orchestrator = ContextOrchestrator(graphiti, neo4j_client=request.app.state.neo4j_client)
     try:
-        return await orchestrator.get_context_packet(
+        packet = await orchestrator.get_context_packet(
             req.query, group_ids=group_ids, visible_uuids=visible_uuids, num_results=num_results
         )
     except SpendLimitExceeded as e:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
+    cache.set(cache_key, packet)
+    return packet
