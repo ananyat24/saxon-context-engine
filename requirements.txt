@@ -21,6 +21,11 @@ pypdf
 python-docx
 # Runs periodic connector syncs in-process -- see app/graph/connector_scheduler.py.
 apscheduler
+# Official MCP Python SDK -- app/mcp/server.py exposes the context graph as
+# MCP tools, mounted into this same FastAPI app/process. Pinned to the 2.x
+# line (FastMCP was renamed to MCPServer in 2.0 -- see
+# mcp.server.mcpserver.MCPServer, not mcp.server.fastmcp).
+mcp>=2.0.0
 graphiti-core[anthropic,google-genai]>=0.29.3
 # Pinned below 1.0 -- graphiti_core's bundled AnthropicClient (llm_client/anthropic_client.py)
 # calls messages.create(..., temperature=...) in a shape that breaks under anthropic 1.x's

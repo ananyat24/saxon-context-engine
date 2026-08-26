@@ -1,17 +1,14 @@
 # POST /api/v1/context/query -- the main "ask a question, get assembled context back"
-# endpoint. Delegates all the actual work to ContextOrchestrator; this file is just
-# the HTTP request/response wiring around it.
+# endpoint. Delegates all the actual work to execute_context_query
+# (app/context/query_service.py, shared with the MCP server in app/mcp/server.py);
+# this file is just the HTTP request/response wiring around it.
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from app.config import TenantConfig
-from app.context.orchestrator import ContextOrchestrator
-from app.context.response_cache import get_response_cache
-from app.graph import authorization, document_sets
-from app.graph.graph_repository import GraphRepository
-from app.graph.spend_limiter import SpendLimitExceeded
-from app.security import require_tenant, resolve_knowledge_base
+from app.context.query_service import execute_context_query
+from app.security import require_tenant
 
 router = APIRouter()
 
@@ -49,45 +46,13 @@ class SearchQueryRequest(BaseModel):
 
 @router.post("/query")
 async def query_context(req: SearchQueryRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)):
-    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
-    num_results = max(1, min(req.result_limit, 20)) if req.result_limit else 8
-
-    if req.document_set:
-        if req.as_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="as_user isn't supported together with document_set yet -- use knowledge_base instead.",
-            )
-        group_ids = document_sets.resolve_document_set(tenant.tenant_id, req.document_set, repo=repo)
-        visible_uuids = None
-    else:
-        group_id = resolve_knowledge_base(tenant, req.knowledge_base)
-        group_ids = [group_id]
-        user_id = authorization.resolve_as_user(group_id, req.as_user, repo=repo)
-        visible_uuids = authorization.get_visible_entity_uuids(group_id, user_id, repo=repo) if user_id is not None else None
-
-    # A repeat (or near-repeat) question against the same scope within the
-    # cache's TTL skips retrieval + synthesis entirely -- see
-    # app/context/response_cache.py. Keyed on as_user (not the resolved
-    # visible_uuids set) since the same as_user always resolves to the same
-    # visibility given unchanged data, and that data changing is exactly
-    # what invalidate_group() below reacts to.
-    cache = get_response_cache()
-    cache_key = cache.make_key(tenant.tenant_id, group_ids, req.as_user, req.query, num_results)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    # Each tenant gets their own cached Graphiti client, built with their own
-    # Gemini key on first use and reused after that -- see
-    # app/graph/tenant_graphiti_pool.py.
-    graphiti = await request.app.state.graphiti_pool.get_or_create(tenant)
-    orchestrator = ContextOrchestrator(graphiti, neo4j_client=request.app.state.neo4j_client)
-    try:
-        packet = await orchestrator.get_context_packet(
-            req.query, group_ids=group_ids, visible_uuids=visible_uuids, num_results=num_results
-        )
-    except SpendLimitExceeded as e:
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
-    cache.set(cache_key, packet)
-    return packet
+    return await execute_context_query(
+        tenant=tenant,
+        query=req.query,
+        neo4j_client=request.app.state.neo4j_client,
+        graphiti_pool=request.app.state.graphiti_pool,
+        knowledge_base=req.knowledge_base,
+        document_set=req.document_set,
+        as_user=req.as_user,
+        result_limit=req.result_limit,
+    )

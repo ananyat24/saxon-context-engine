@@ -2,7 +2,7 @@
 # server when launched with e.g. `uvicorn app.main:app --reload`. The actual route
 # definitions live under app/api/ and are wired in via api_router -- this file just
 # creates the app and mounts them.
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +13,14 @@ from app.graph.connector_scheduler import start_connector_scheduler
 from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
+from app.mcp import server as mcp_server_module
+
+# The MCP server's ASGI app (app/mcp/server.py) is built once at import time.
+# Its own route is registered at exactly "/mcp"; its routes are appended
+# directly onto this app's router below rather than via app.mount("/mcp", ...),
+# which would register the route at "/mcp/mcp" (double prefix) or otherwise
+# 307-redirect POST /mcp -> /mcp/, which not every MCP client follows.
+mcp_asgi_app = mcp_server_module.mcp_server.streamable_http_app(streamable_http_path="/mcp")
 
 
 @asynccontextmanager
@@ -43,13 +51,23 @@ async def lifespan(app: FastAPI):
     # app/graph/connector_scheduler.py. Returns None (and starts nothing) if
     # disabled via settings.connector_sync_enabled.
     app.state.connector_scheduler = start_connector_scheduler(app.state.neo4j_client)
-    try:
-        yield
-    finally:
-        if app.state.connector_scheduler is not None:
-            app.state.connector_scheduler.shutdown(wait=False)
-        await app.state.graphiti_pool.close_all()
-        app.state.neo4j_client.close()
+    # The MCP server (app/mcp/server.py) is mounted as its own Starlette
+    # sub-app below, so it doesn't share this FastAPI app's `state` --
+    # configure() hands its tools the same neo4j_client/graphiti_pool
+    # directly instead. Its session manager also needs its own async
+    # context entered for the life of the process (the streamable-http
+    # transport's stateful session bookkeeping depends on it), hence the
+    # AsyncExitStack rather than just a second `yield`.
+    mcp_server_module.configure(app.state.neo4j_client, app.state.graphiti_pool)
+    async with AsyncExitStack() as stack:
+        await stack.enter_async_context(mcp_server_module.mcp_server.session_manager.run())
+        try:
+            yield
+        finally:
+            if app.state.connector_scheduler is not None:
+                app.state.connector_scheduler.shutdown(wait=False)
+            await app.state.graphiti_pool.close_all()
+            app.state.neo4j_client.close()
 
 
 # Title/description here are what a client sees in the Swagger UI at /docs --
@@ -67,6 +85,10 @@ app = FastAPI(
 # check in app/api/health.py ends up at /api/v1/health.
 app.include_router(api_router, prefix="/api/v1")
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
+# MCP (v3.5): any MCP-capable agent (Claude Desktop/Code, Copilot...) can
+# point at https://<this-deployment>/mcp with the tenant's own X-API-Key
+# header and query their consolidated graph -- see app/mcp/server.py.
+app.router.routes.extend(mcp_asgi_app.routes)
 
 @app.get("/ui", response_class=FileResponse)
 def ui():
