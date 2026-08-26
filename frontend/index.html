@@ -106,6 +106,20 @@
         </div>
     </div>
 
+    <!-- Source connector data preview: opened by clicking a connector's name in
+         the "Source connectors" table, shows what's actually been pulled into
+         the graph from that connector's knowledge base. -->
+    <div id="connectorPreviewOverlay" class="overlay" hidden>
+        <div class="modal modal-wide">
+            <div class="modal-header">
+                <h2 id="connectorPreviewTitle">Connector data</h2>
+                <button id="closeConnectorPreviewBtn" class="modal-close" aria-label="Close">&times;</button>
+            </div>
+            <p id="connectorPreviewSubtitle" class="muted"></p>
+            <div id="connectorPreviewBody"></div>
+        </div>
+    </div>
+
     <main>
         <p class="intro">
             This page shows what the system has learned from your company's information.

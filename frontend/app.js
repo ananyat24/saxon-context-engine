@@ -206,8 +206,13 @@ async function loadDocumentSets() {
   }
 }
 
-document.getElementById("scopeSelect").addEventListener("change", (e) => {
+document.getElementById("scopeSelect").addEventListener("change", async (e) => {
   selectedDocumentSet = e.target.value;
+  // Re-fetches the header knowledge base's own nodes too (loadGraph), since
+  // refreshSuggestedQuestionsForScope needs a fallback list when the scope
+  // switches back to "this connector only" -- simplest way to keep that
+  // fallback correct without caching header nodes separately.
+  await loadGraph();
 });
 
 function resetDocSetForm() {
@@ -353,7 +358,7 @@ function renderConnectorsTable() {
       const lastSynced = c.last_synced_at ? new Date(c.last_synced_at).toLocaleString() : "—";
       const typeLabel = CONNECTOR_TYPE_LABELS[c.type] || c.type;
       return `<tr data-id="${escapeXml(c.id)}">
-        <td>${escapeXml(c.name)}</td>
+        <td><button type="button" class="connector-name-link" data-preview-id="${escapeXml(c.id)}">${escapeXml(c.name)}</button></td>
         <td>
           <span class="badge badge-muted">${escapeXml(typeLabel)}</span><br />
           <span class="muted" style="font-size:0.8rem">${escapeXml(c.url)}</span>
@@ -368,6 +373,9 @@ function renderConnectorsTable() {
       </tr>`;
     })
     .join("");
+  body.querySelectorAll("[data-preview-id]").forEach((btn) => {
+    btn.addEventListener("click", () => openConnectorPreview(btn.dataset.previewId));
+  });
   body.querySelectorAll("[data-sync-id]").forEach((btn) => {
     btn.addEventListener("click", () => syncConnector(btn.dataset.syncId));
   });
@@ -381,6 +389,69 @@ function renderConnectorsTable() {
     });
   });
 }
+
+// Fetches nodes/relationships for one specific knowledge base (group_id),
+// independent of whatever the header's kbSelect is currently set to -- used
+// by the connector data preview and the doc-set-aware suggested questions
+// below, both of which need a specific scope rather than "whatever's
+// selected right now".
+async function fetchGraphSliceFor(groupId, { nodesLimit = 30, relsLimit = 40 } = {}) {
+  try {
+    const qs = (extra) => `?knowledge_base=${encodeURIComponent(groupId)}${extra}`;
+    const [nodesRes, relsRes] = await Promise.all([
+      fetch(`${API}/graph/nodes${qs(`&limit=${nodesLimit}`)}`, { headers: authHeaders() }),
+      fetch(`${API}/graph/relationships${qs(`&limit=${relsLimit}`)}`, { headers: authHeaders() }),
+    ]);
+    return {
+      nodes: nodesRes.ok ? await nodesRes.json() : [],
+      rels: relsRes.ok ? await relsRes.json() : [],
+    };
+  } catch (err) {
+    return { nodes: [], rels: [] };
+  }
+}
+
+async function openConnectorPreview(connectorId) {
+  const connector = connectorDirectory.find((c) => c.id === connectorId);
+  if (!connector) return;
+  const overlay = document.getElementById("connectorPreviewOverlay");
+  const title = document.getElementById("connectorPreviewTitle");
+  const subtitle = document.getElementById("connectorPreviewSubtitle");
+  const bodyEl = document.getElementById("connectorPreviewBody");
+
+  title.textContent = connector.name;
+  subtitle.textContent = "Loading what's been pulled into the graph from this connector…";
+  bodyEl.innerHTML = "";
+  overlay.hidden = false;
+
+  const { nodes, rels } = await fetchGraphSliceFor(connector.group_id);
+
+  if (connector.status === "never_synced") {
+    subtitle.textContent = "This connector hasn't been synced yet, so there's nothing to show here.";
+    return;
+  }
+  subtitle.textContent = `${nodes.length} thing${nodes.length === 1 ? "" : "s"} and ${rels.length} fact${rels.length === 1 ? "" : "s"} found from this source so far.`;
+
+  const entitiesHtml = nodes.length
+    ? `<ul class="preview-list">${nodes.map((n) => `<li>${escapeXml(n.name)}</li>`).join("")}</ul>`
+    : `<p class="preview-empty">Nothing found yet.</p>`;
+  const factsHtml = rels.length
+    ? `<ul class="preview-list">${rels.map((r) => `<li>${escapeXml(r.fact || `${r.source} → ${r.type} → ${r.target}`)}</li>`).join("")}</ul>`
+    : `<p class="preview-empty">Nothing found yet.</p>`;
+
+  bodyEl.innerHTML = `
+    <div class="preview-section"><h3>Entities</h3>${entitiesHtml}</div>
+    <div class="preview-section"><h3>Facts</h3>${factsHtml}</div>
+  `;
+}
+
+function closeConnectorPreview() {
+  document.getElementById("connectorPreviewOverlay").hidden = true;
+}
+document.getElementById("closeConnectorPreviewBtn").addEventListener("click", closeConnectorPreview);
+document.getElementById("connectorPreviewOverlay").addEventListener("click", (e) => {
+  if (e.target.id === "connectorPreviewOverlay") closeConnectorPreview();
+});
 
 async function loadConnectors() {
   const card = document.getElementById("connectorsCard");
@@ -617,6 +688,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!document.getElementById("keyOverlay").hidden) closeKeyModal();
   if (!document.getElementById("helpOverlay").hidden) closeHelpModal();
+  if (!document.getElementById("connectorPreviewOverlay").hidden) closeConnectorPreview();
 });
 
 document.getElementById("saveKeyBtn").addEventListener("click", () => {
@@ -741,12 +813,12 @@ async function loadGraph() {
       // assigned to them yet should read as "this person can't see anything
       // here," not as a broken page.
       insightEl.textContent = getSelectedUser() ? describeGraph(summary, nodes) : "";
-      document.getElementById("suggestedQuestions").innerHTML = "";
+      await refreshSuggestedQuestionsForScope([]);
     } else {
       emptyEl.style.display = "none";
       renderGraph(svg, nodes, rels);
       insightEl.textContent = describeGraph(summary, nodes);
-      renderSuggestedQuestions(nodes);
+      await refreshSuggestedQuestionsForScope(nodes);
     }
   } catch (err) {
     summaryEl.textContent = "Could not load graph.";
@@ -773,6 +845,39 @@ function describeGraph(summary, nodes) {
   }
   return `So far it has found ${base}. This is a small starting set, and it'll grow as more ` +
     `information is added.`;
+}
+
+// Picks which set of nodes the suggested questions should be built from:
+// when a document set is scoping the Ask panel (see getSelectedDocumentSet),
+// suggestions should reflect everything in THAT bundle, not just whichever
+// single connector happens to be selected in the header -- otherwise a
+// question chip could reference something outside the dataset actually
+// being searched. `headerNodes` (already fetched by loadGraph for the
+// header's own knowledge base) is reused when no document set is active, to
+// avoid a second fetch for the common case.
+async function refreshSuggestedQuestionsForScope(headerNodes) {
+  if (!getApiKey()) {
+    document.getElementById("suggestedQuestions").innerHTML = "";
+    return;
+  }
+  const docSetId = getSelectedDocumentSet();
+  const ds = docSetId ? documentSetDirectory.find((d) => d.id === docSetId) : null;
+  if (!ds) {
+    renderSuggestedQuestions(headerNodes);
+    return;
+  }
+  const slices = await Promise.all(ds.connectors.map((c) => fetchGraphSliceFor(c.id, { nodesLimit: 15, relsLimit: 1 })));
+  const seen = new Set();
+  const nodes = [];
+  slices.forEach((slice) =>
+    slice.nodes.forEach((n) => {
+      if (n.name && !seen.has(n.name)) {
+        seen.add(n.name);
+        nodes.push(n);
+      }
+    })
+  );
+  renderSuggestedQuestions(nodes);
 }
 
 // Turns real node names from this tenant's own graph into example questions,
@@ -1007,18 +1112,17 @@ function renderFacts(container, facts) {
   const note = hasSuperseded
     ? `<p class="fact-note">* "Superseded" means this used to be true, but something more recent has replaced it. It's kept here so nothing gets lost.</p>`
     : "";
-  container.innerHTML = `<p class="fact-list-label">Where this answer comes from:</p>` + sorted
+  const items = sorted
     .map((f) => {
       const current = f.is_valid !== false;
       const badge = current
         ? `<span class="fact-badge fact-badge-current">current</span>`
         : `<span class="fact-badge fact-badge-superseded">superseded*</span>`;
-      return `<div class="fact-card ${current ? "" : "fact-card-superseded"}">
-        <span class="fact-text">${escapeXml(f.fact || "")}</span>
-        ${badge}
-      </div>`;
+      return `<li class="${current ? "" : "fact-superseded"}">${escapeXml(f.fact || "")}${badge}</li>`;
     })
-    .join("") + note;
+    .join("");
+  container.innerHTML =
+    `<p class="fact-list-label">Where this answer comes from:</p><ul class="fact-bullets">${items}</ul>` + note;
 }
 
 document.getElementById("queryInput").addEventListener("keydown", (e) => {
