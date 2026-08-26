@@ -6,7 +6,15 @@ __pycache__/
 *.pyo
 .git/
 .gitignore
-data/
+# Excluded individually (not a blanket data/) because the mock demo
+# datasets under data/samples/mock_* ARE needed at runtime -- see
+# app/ingestion/database_source.py, document_source.py, email_source.py.
+data/raw/
+data/processed/
+data/samples/northwind/
+data/samples/contoso_dw/
+data/samples/legal_cuad/
+data/samples/manufacturing_ai4i2020/
 scripts/
 tests/
 docs/

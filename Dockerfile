@@ -22,6 +22,13 @@ COPY app/ ./app/
 COPY ontology/ ./ontology/
 COPY frontend/ ./frontend/
 
+# Only the small bundled demo datasets (see .dockerignore) -- the "database"/
+# "documents"/"email" connector types read these at runtime (see
+# app/ingestion/database_source.py and friends). The rest of data/ (raw
+# exports, larger sample datasets used only by scripts/ingest_samples.py) is
+# excluded on purpose to keep the image lean.
+COPY data/samples/ ./data/samples/
+
 # Config is supplied at deploy time via Container Apps environment variables
 # (per docs/internal/infrastructure-plan.md's "platform env vars" approach),
 # not baked into the image -- no .env or config/tenants.json is copied in.
