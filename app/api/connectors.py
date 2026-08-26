@@ -85,11 +85,17 @@ _STALE_AFTER_INTERVAL_MULTIPLE = 3
 
 
 def _connector_health(c: dict) -> str:
-    """"error" | "never_synced" | "stale" | "ok" -- a coarse freshness
-    signal computed server-side so the staleness threshold lives in one
-    place rather than being duplicated in the frontend."""
+    """"error" | "never_synced" | "queued" | "stale" | "ok" -- a coarse
+    freshness signal computed server-side so the staleness threshold lives
+    in one place rather than being duplicated in the frontend."""
     if c["status"] == "error":
         return "error"
+    if c["status"] == "queued":
+        # A sync was just accepted onto the ingestion queue (see
+        # app/graph/ingestion_queue.py) and hasn't run yet -- not stale
+        # (it's about to get fresher, not gone quiet), not "ok" either
+        # (nothing new has actually landed since it was triggered).
+        return "queued"
     if not c["last_synced_at"]:
         return "never_synced"
     last_synced_at = c["last_synced_at"]
@@ -171,8 +177,23 @@ def delete_connector(connector_id: str, request: Request, tenant: TenantConfig =
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
 
 
-@router.post("/{connector_id}/sync")
+@router.post("/{connector_id}/sync", status_code=status.HTTP_202_ACCEPTED)
 async def sync_connector(connector_id: str, request: Request, tenant: TenantConfig = Depends(require_tenant)):
+    """Accepts the sync onto the in-process ingestion queue (see
+    app/graph/ingestion_queue.py) and returns immediately -- the actual
+    fetch + extraction runs in the background, not in this request. A
+    large Drive/SharePoint folder can mean many extraction calls; blocking
+    this HTTP request on all of them (the old behavior) meant a slow sync
+    was also a slow, easy-to-time-out API call for no real benefit.
+
+    This means a failure (including a spend-cap hit) can no longer be
+    reported in this response the way it used to be -- there's nothing left
+    to report it to once the job runs after the response is already sent.
+    Poll GET /connectors and check status/last_error instead; that's the
+    same place a scheduled sync's outcome has always had to be checked
+    (see app/graph/connector_scheduler.py), so this just makes the manual
+    and scheduled paths consistent instead of the manual one being special.
+    """
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
     connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
     if connector is None:
@@ -181,7 +202,14 @@ async def sync_connector(connector_id: str, request: Request, tenant: TenantConf
     # _CONNECTOR_FACTORIES is the one dispatch point -- every type from here
     # down is handled generically via the SourceConnector interface.
     factory = _CONNECTOR_FACTORIES[connector["type"]]
-    result = await run_connector_sync(tenant, connector, factory, repo=repo)
-    if result["spend_limit_exceeded"]:
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=result["error"])
-    return {"synced": result["synced"], "skipped_unchanged": result["skipped_unchanged"], "error": result["error"]}
+    connectors.mark_sync_queued(tenant.tenant_id, connector_id, repo=repo)
+
+    async def _job() -> None:
+        # A fresh GraphRepository, not the request-scoped `repo` above --
+        # this closure outlives the request it was created in (that's the
+        # whole point), so it needs its own; the Neo4jClient itself is a
+        # driver-level connection pool, safe to share across both.
+        await run_connector_sync(tenant, connector, factory, repo=GraphRepository(neo4j_client=request.app.state.neo4j_client))
+
+    await request.app.state.ingestion_queue.enqueue(_job)
+    return {"queued": True}

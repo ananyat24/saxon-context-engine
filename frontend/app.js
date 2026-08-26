@@ -329,6 +329,9 @@ function formatSyncStatus(c) {
   // attempt's point of view and still be stale if nothing's synced it
   // again in a long time, which is exactly the case worth flagging: the
   // background scheduler may have stopped running for it.
+  if (c.status === "queued") {
+    return `<span class="badge badge-muted" title="Accepted and waiting for a worker to pick it up -- see app/graph/ingestion_queue.py.">Queued…</span>`;
+  }
   if (c.health === "stale") {
     return `<span class="badge badge-warn" title="Hasn't synced successfully in a while -- check that background syncing is still running for this connector.">Stale</span>`;
   }
@@ -557,29 +560,44 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
   }
 });
 
+// Sync now just accepts the job onto the background ingestion queue and
+// returns immediately (see app/graph/ingestion_queue.py) -- it no longer
+// waits for fetch+extraction to finish, so there's no longer a synchronous
+// result to read from the response itself. This best-effort poll is purely
+// a UI convenience so a person watching the table sees it land instead of
+// having to manually refresh; it's not how the app tracks the real
+// outcome -- the connector's own status (visible to any client, any time,
+// via GET /connectors) is that source of truth regardless of whether
+// anyone's still watching this poll.
+const SYNC_POLL_INTERVAL_MS = 2000;
+const SYNC_POLL_MAX_ATTEMPTS = 15; // ~30s -- covers a typical demo-sized sync
+
 async function syncConnector(id) {
   const row = document.querySelector(`#connectorsBody tr[data-id="${CSS.escape(id)}"]`);
   const btn = row?.querySelector("[data-sync-id]");
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "Syncing…";
+    btn.textContent = "Queuing…";
   }
   try {
-    const res = await fetch(`${API}/connectors/${encodeURIComponent(id)}/sync`, {
+    await fetch(`${API}/connectors/${encodeURIComponent(id)}/sync`, {
       method: "POST",
       headers: authHeaders(),
     });
-    // A 402 (spend cap hit) or any other non-2xx still means the connector's
-    // own status was recorded server-side (see app/api/connectors.py) --
-    // reloading the list picks that up either way, so there's no separate
-    // error branch needed here beyond letting the reload happen.
-    await res.json().catch(() => ({}));
   } catch (err) {
-    // Network failure before a response came back at all -- the connector's
-    // last known status just stays what it was; reload still runs below so
-    // the row doesn't stay stuck on "Syncing...".
+    // Network failure before a response came back at all -- the reload
+    // below still runs so the row doesn't stay stuck on "Queuing...".
   }
   await loadConnectors();
+  pollUntilSyncSettles(id);
+}
+
+async function pollUntilSyncSettles(id, attempt = 0) {
+  const current = connectorDirectory.find((c) => c.id === id);
+  if (!current || current.status !== "queued" || attempt >= SYNC_POLL_MAX_ATTEMPTS) return;
+  await new Promise((resolve) => setTimeout(resolve, SYNC_POLL_INTERVAL_MS));
+  await loadConnectors();
+  pollUntilSyncSettles(id, attempt + 1);
 }
 
 async function deleteConnector(id) {

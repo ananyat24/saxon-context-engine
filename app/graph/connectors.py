@@ -111,6 +111,22 @@ def delete_connector(tenant_id: str, connector_id: str, repo: Optional[GraphRepo
     return bool(rows) and rows[0]["deleted"] > 0
 
 
+def mark_sync_queued(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> None:
+    """Called the moment a sync is accepted onto the ingestion queue (see
+    app/graph/ingestion_queue.py), before the queued job actually runs --
+    so a client polling GET /connectors sees "queued" immediately instead
+    of the stale status from whatever the connector's last sync attempt
+    was, for however long it takes a worker to pick the job up. Doesn't
+    touch last_synced_at/last_error -- those still describe the last
+    *completed* attempt until this one finishes and record_sync_result()
+    below overwrites them."""
+    repo = repo or GraphRepository()
+    repo.execute_cypher(
+        "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) SET c.status = 'queued'",
+        {"id": connector_id, "tenant_id": tenant_id},
+    )
+
+
 def record_sync_result(
     tenant_id: str,
     connector_id: str,
@@ -120,9 +136,10 @@ def record_sync_result(
     content_hash: Optional[str] = None,
     repo: Optional[GraphRepository] = None,
 ) -> None:
-    """Called once a sync attempt finishes, success or not. `status` is one
-    of "synced" (new content ingested), "unchanged" (fetched fine, but
-    matched content_hash from last time so nothing was re-ingested -- see
+    """Called once a sync attempt finishes, success or not -- overwrites
+    whatever mark_sync_queued() above set. `status` is one of "synced" (new
+    content ingested), "unchanged" (fetched fine, but matched content_hash
+    from last time so nothing was re-ingested -- see
     app/ingestion/web_source.py's content_hash), or "error". content_hash is
     only updated on an actual "synced" outcome, so an "error" or "unchanged"
     run doesn't clobber the fingerprint a real sync last recorded."""

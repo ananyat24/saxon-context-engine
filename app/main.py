@@ -13,6 +13,7 @@ from app.config import settings
 from app.graph import authorization, connectors, document_sets
 from app.graph.connector_scheduler import start_connector_scheduler
 from app.graph.graph_repository import GraphRepository
+from app.graph.ingestion_queue import IngestionQueue
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
 from app.mcp import server as mcp_server_module
@@ -64,6 +65,11 @@ async def lifespan(app: FastAPI):
     # app/graph/connector_scheduler.py. Returns None (and starts nothing) if
     # disabled via settings.connector_sync_enabled.
     app.state.connector_scheduler = start_connector_scheduler(app.state.neo4j_client)
+    # Backs the manual "Sync now" route (app/api/connectors.py) -- accepts a
+    # sync job and returns immediately instead of blocking the HTTP request
+    # on fetch+extraction. See app/graph/ingestion_queue.py.
+    app.state.ingestion_queue = IngestionQueue()
+    app.state.ingestion_queue.start()
     # The MCP server (app/mcp/server.py) is mounted as its own Starlette
     # sub-app below, so it doesn't share this FastAPI app's `state` --
     # configure() hands its tools the same neo4j_client/graphiti_pool
@@ -79,6 +85,7 @@ async def lifespan(app: FastAPI):
         finally:
             if app.state.connector_scheduler is not None:
                 app.state.connector_scheduler.shutdown(wait=False)
+            await app.state.ingestion_queue.stop()
             await app.state.graphiti_pool.close_all()
             app.state.neo4j_client.close()
 

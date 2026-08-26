@@ -42,3 +42,11 @@ def test_unchanged_status_uses_the_same_staleness_rule_as_synced(monkeypatch):
     monkeypatch.setattr(settings, "connector_sync_interval_minutes", 15)
     assert _connector_health(_connector("unchanged", minutes_ago=200)) == "stale"
     assert _connector_health(_connector("unchanged", minutes_ago=5)) == "ok"
+
+
+def test_queued_status_is_always_queued_health_even_if_the_prior_sync_was_stale():
+    # A sync was just accepted onto the ingestion queue (app/graph/ingestion_queue.py)
+    # -- mark_sync_queued() sets status="queued" without touching last_synced_at,
+    # so the prior (possibly very old) timestamp must not leak "stale" through here.
+    assert _connector_health(_connector("queued", minutes_ago=9999)) == "queued"
+    assert _connector_health(_connector("queued", minutes_ago=None)) == "queued"
