@@ -48,7 +48,16 @@ def _not_yet_invalidated(invalid_at) -> bool:
 # out with other entities' unrelated facts that just happen to read similarly.
 # This regex pulls out multi-word capitalized phrases so a named entity can be
 # resolved directly against the graph and its own edges/summary used instead.
-_PROPER_NOUN_RE = re.compile(r"\b[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*)+\b")
+#
+# Tolerates a single lowercase connector ("and"/"of"/"&") between capitalized
+# words, so a real company name like "Fenwick & Cole Legal" or "Bank of
+# America" extracts as one whole candidate instead of stopping at the first
+# connector and only ever matching a truncated fragment ("Cole Legal") --
+# which, notably, defeats the exact-match reconciliation in
+# _match_entities_by_name below, since a truncated fragment only ever
+# CONTAINS-matches (deliberately not reconciled across connectors) rather
+# than exactly matching the entity's real, full name.
+_PROPER_NOUN_RE = re.compile(r"\b[A-Z][\w'.-]*(?:\s+(?:(?:and|of|&)\s+)?[A-Z][\w'.-]*)+\b")
 
 # Records ingested without a human-readable name (see FileSourceSpec.name_column
 # in app/ingestion/file_source.py) end up named "<Type> <id>", e.g. "Order
