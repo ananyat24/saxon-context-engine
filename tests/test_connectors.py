@@ -191,6 +191,30 @@ def test_email_connector_source_description():
     assert "mock" in EmailConnector().source_description().lower()
 
 
+def test_document_connector_reads_a_dropped_in_docx(tmp_path, monkeypatch):
+    # Drive/SharePoint already ingest PDF/DOCX; this confirms the local mock
+    # documents connector -- what "drop your own mock data in" actually
+    # targets -- picked up the same capability rather than staying .txt-only.
+    import app.ingestion.document_source as document_source
+    from docx import Document
+
+    docs_dir = tmp_path / "mock_docs"
+    docs_dir.mkdir()
+    (docs_dir / "onboarding-guide.txt").write_text("Riverton Robotics onboarding.", encoding="utf-8")
+    doc = Document()
+    doc.add_paragraph("Contoso vendor policy: net 30 payment terms.")
+    doc.save(docs_dir / "vendor-policy.docx")
+    monkeypatch.setattr(document_source, "_MOCK_DOCS_DIR", docs_dir)
+
+    records = asyncio.run(DocumentConnector().fetch())
+
+    names = {r.name for r in records}
+    assert "onboarding-guide" in names
+    assert "vendor-policy" in names
+    policy = next(r for r in records if r.name == "vendor-policy")
+    assert "net 30 payment terms" in policy.body
+
+
 # --- SSRF guard on the web connector -----------------------------------------
 # A tenant supplies the URL and this server fetches it, so an unvalidated
 # fetch is a ready-made "make the server hit its own internal network"
