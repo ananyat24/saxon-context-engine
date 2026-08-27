@@ -246,6 +246,19 @@ class Settings(BaseSettings):
     sharepoint_client_id: str = ""
     sharepoint_client_secret: str = ""
 
+    # This deployment's own public HTTPS URL (no trailing slash), e.g.
+    # "https://saxon-context-engine.example.azurecontainerapps.io" -- used
+    # to build the notificationUrl a Microsoft Graph push subscription
+    # calls back to (see app/ingestion/graph_subscriptions.py,
+    # app/api/webhooks.py). Not derived from the incoming request instead,
+    # because Azure Container Apps' ingress terminates HTTPS and forwards
+    # to this container over plain HTTP, so the request's own scheme/host
+    # can't be trusted to reconstruct the real public HTTPS URL. Left blank
+    # for local dev (push subscriptions just aren't attempted -- Graph
+    # can't reach localhost anyway); scripts/deploy_azure.sh sets this
+    # automatically for an Azure deploy, same as MCP_ALLOWED_HOSTS.
+    public_base_url: str = ""
+
     # Background connector syncing (see app/graph/connector_scheduler.py) --
     # every tenant's connectors get synced automatically on this interval,
     # not just when someone clicks "Sync now". 15 minutes is a reasonable

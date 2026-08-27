@@ -9,6 +9,7 @@
 # thin HTTP wrapper around that (look up the connector, call it, translate
 # the result into an HTTP response), not a second implementation of the
 # fetch -> dedup-check -> ingest sequence.
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
@@ -131,7 +132,39 @@ def _serialize(c: dict) -> dict:
         "last_synced_at": c["last_synced_at"],
         "last_error": c["last_error"],
         "health": _connector_health(c),
+        "push_enabled": bool(c.get("push_subscription_id")),
     }
+
+
+# Connector types real-time push (app/ingestion/graph_subscriptions.py) is
+# wired up for -- see that module's docstring for why sharepoint isn't
+# included yet. Attempting this for a type not in here is simply skipped.
+_PUSH_CAPABLE_TYPES = {"outlook_mail"}
+
+
+async def _try_enable_push(tenant: TenantConfig, connector: dict, mailbox: str, repo: GraphRepository) -> None:
+    """Best-effort: a failure here (missing PUBLIC_BASE_URL, Graph
+    rejecting the subscription, a network error) leaves the connector
+    exactly as usable as it was before push existed -- polled on the
+    normal interval -- so it's caught and logged, never raised to the
+    caller. Only called for a type in _PUSH_CAPABLE_TYPES."""
+    if not settings.public_base_url:
+        return
+    from app.ingestion.graph_subscriptions import create_mail_subscription, new_client_state
+
+    client_state = new_client_state()
+    notification_url = f"{settings.public_base_url}/api/v1/webhooks/graph"
+    try:
+        subscription_id, expires_at = await create_mail_subscription(mailbox, notification_url, client_state)
+    except ConnectorFetchError as e:
+        logging.getLogger(__name__).warning(
+            f"Could not enable push for connector '{connector['id']}' ({tenant.tenant_id}): {e}"
+        )
+        return
+    connectors.set_push_subscription(
+        tenant.tenant_id, connector["id"], subscription_id=subscription_id, client_state=client_state,
+        expires_at=expires_at, repo=repo,
+    )
 
 
 @router.get("")
@@ -141,7 +174,9 @@ def list_connectors(request: Request, tenant: TenantConfig = Depends(require_ten
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_connector(req: CreateConnectorRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)):
+async def create_connector(
+    req: CreateConnectorRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)
+):
     if req.type not in _CONNECTOR_FACTORIES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -179,15 +214,23 @@ def create_connector(req: CreateConnectorRequest, request: Request, tenant: Tena
     created = connectors.create_connector(
         tenant.tenant_id, req.name.strip(), req.type, req.group_id, url, repo=repo
     )
+    if req.type in _PUSH_CAPABLE_TYPES:
+        await _try_enable_push(tenant, created, url, repo)
+        created = connectors.get_connector(tenant.tenant_id, created["id"], repo=repo)
     return _serialize(created)
 
 
 @router.delete("/{connector_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_connector(connector_id: str, request: Request, tenant: TenantConfig = Depends(require_tenant)):
+async def delete_connector(connector_id: str, request: Request, tenant: TenantConfig = Depends(require_tenant)):
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
-    deleted = connectors.delete_connector(tenant.tenant_id, connector_id, repo=repo)
-    if not deleted:
+    connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
+    if connector is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
+    if connector.get("push_subscription_id"):
+        from app.ingestion.graph_subscriptions import delete_subscription
+
+        await delete_subscription(connector["push_subscription_id"])
+    connectors.delete_connector(tenant.tenant_id, connector_id, repo=repo)
 
 
 @router.post("/{connector_id}/sync", status_code=status.HTTP_202_ACCEPTED)

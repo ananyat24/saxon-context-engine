@@ -23,10 +23,10 @@ from urllib.parse import urlparse
 
 import httpx
 
-from app.config import settings
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector, hash_records
 from app.ingestion.document_text_extraction import BINARY_TEXT_PARSERS, MAX_BINARY_BYTES, PLAIN_TEXT_MIME_TYPES
 from app.ingestion.file_source import SourceRecord
+from app.ingestion.graph_auth import get_graph_access_token
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
@@ -59,36 +59,7 @@ class SharePointConnector(SourceConnector):
         self.hostname, self.site_path = _parse_site_url(self.site_url)
 
     async def _get_access_token(self, client: httpx.AsyncClient) -> str:
-        tenant_id = settings.sharepoint_tenant_id
-        client_id = settings.sharepoint_client_id
-        client_secret = settings.sharepoint_client_secret
-        if not (tenant_id and client_id and client_secret):
-            raise ConnectorFetchError(
-                "SharePoint isn't configured on this server -- ask your operator to set "
-                "SHAREPOINT_TENANT_ID, SHAREPOINT_CLIENT_ID, and SHAREPOINT_CLIENT_SECRET."
-            )
-        try:
-            resp = await client.post(
-                f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "scope": "https://graph.microsoft.com/.default",
-                },
-            )
-        except httpx.HTTPError as e:
-            raise ConnectorFetchError(f"Could not reach Microsoft's login service: {e}") from e
-        if resp.status_code >= 400:
-            raise ConnectorFetchError(
-                "Could not authenticate to SharePoint -- check the app registration's tenant id, "
-                "client id, and client secret, and that it's been granted (and admin-consented) "
-                "the Sites.Read.All application permission."
-            )
-        token = resp.json().get("access_token")
-        if not token:
-            raise ConnectorFetchError("Microsoft's login service didn't return an access token.")
-        return token
+        return await get_graph_access_token(client, missing_permission_hint="Sites.Read.All")
 
     async def _resolve_drive_id(self, client: httpx.AsyncClient, headers: dict) -> str:
         try:

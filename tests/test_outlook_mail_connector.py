@@ -22,18 +22,18 @@ def test_source_description_includes_the_mailbox():
 
 
 def test_fetch_fails_clearly_when_not_configured(monkeypatch):
-    monkeypatch.setattr("app.ingestion.outlook_mail_source.settings.sharepoint_tenant_id", "")
-    monkeypatch.setattr("app.ingestion.outlook_mail_source.settings.sharepoint_client_id", "")
-    monkeypatch.setattr("app.ingestion.outlook_mail_source.settings.sharepoint_client_secret", "")
+    monkeypatch.setattr("app.ingestion.graph_auth.settings.sharepoint_tenant_id", "")
+    monkeypatch.setattr("app.ingestion.graph_auth.settings.sharepoint_client_id", "")
+    monkeypatch.setattr("app.ingestion.graph_auth.settings.sharepoint_client_secret", "")
     connector = OutlookMailConnector("alerts@contoso.com")
     with pytest.raises(ConnectorFetchError, match="isn't configured"):
         asyncio.run(connector.fetch())
 
 
 def _patch_auth(monkeypatch):
-    monkeypatch.setattr("app.ingestion.outlook_mail_source.settings.sharepoint_tenant_id", "tenant-123")
-    monkeypatch.setattr("app.ingestion.outlook_mail_source.settings.sharepoint_client_id", "client-abc")
-    monkeypatch.setattr("app.ingestion.outlook_mail_source.settings.sharepoint_client_secret", "secret-xyz")
+    monkeypatch.setattr("app.ingestion.graph_auth.settings.sharepoint_tenant_id", "tenant-123")
+    monkeypatch.setattr("app.ingestion.graph_auth.settings.sharepoint_client_id", "client-abc")
+    monkeypatch.setattr("app.ingestion.graph_auth.settings.sharepoint_client_secret", "secret-xyz")
 
 
 class _FakeResponse:

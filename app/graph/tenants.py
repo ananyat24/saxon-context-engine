@@ -25,7 +25,7 @@ import hashlib
 import secrets
 from typing import Optional
 
-from app.config import KnowledgeBase, TenantConfig
+from app.config import KnowledgeBase, TenantConfig, settings
 from app.graph.graph_repository import GraphRepository
 
 
@@ -49,6 +49,29 @@ def _row_to_tenant_config(row: dict) -> TenantConfig:
         for kb_id, kb_label in zip(row["kb_ids"] or [], row["kb_labels"] or [])
     ]
     return TenantConfig(tenant_id=row["tenant_id"], gemini_api_key=row["gemini_api_key"], knowledge_bases=knowledge_bases)
+
+
+def find_tenant_by_tenant_id(tenant_id: str, repo: Optional[GraphRepository] = None) -> Optional[TenantConfig]:
+    """Static config first (settings.tenant_api_keys, keyed by API key, so
+    this scans its values), then the Neo4j-backed store -- same "static
+    first" order as find_tenant_by_api_key. Used where a caller already has
+    a tenant_id but not the tenant's own API key, e.g. app/api/webhooks.py
+    mapping an inbound Graph notification's connector back to a tenant to
+    sync as."""
+    for tenant in settings.tenant_api_keys.values():
+        if tenant.tenant_id == tenant_id:
+            return tenant
+
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        "MATCH (t:Tenant {tenant_id: $tenant_id}) "
+        "RETURN t.tenant_id AS tenant_id, t.gemini_api_key AS gemini_api_key, "
+        "t.kb_ids AS kb_ids, t.kb_labels AS kb_labels",
+        {"tenant_id": tenant_id},
+    )
+    if not rows:
+        return None
+    return _row_to_tenant_config(rows[0])
 
 
 def find_tenant_by_api_key(api_key: str, repo: Optional[GraphRepository] = None) -> Optional[TenantConfig]:

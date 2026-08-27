@@ -33,6 +33,13 @@ _FIELDS = (
     "id, tenant_id, name, type, group_id, url, status, last_synced_at, "
     "last_error, content_hash"
 )
+# Real-time push (see app/ingestion/graph_subscriptions.py, app/api/webhooks.py)
+# -- kept as separate optional fields rather than folded into _FIELDS above
+# since every existing connector predates them (null on any row created
+# before this), but still returned by list/get below: app/api/connectors.py's
+# _serialize() needs push_subscription_id to report whether push is enabled.
+_PUSH_FIELDS = "push_subscription_id, push_client_state, push_expires_at"
+_ALL_FIELDS = f"{_FIELDS}, {_PUSH_FIELDS}"
 
 
 def list_connectors(tenant_id: str, repo: Optional[GraphRepository] = None) -> list[dict]:
@@ -40,13 +47,14 @@ def list_connectors(tenant_id: str, repo: Optional[GraphRepository] = None) -> l
     rows = repo.execute_cypher(
         f"""
         MATCH (c:Connector {{tenant_id: $tenant_id}})
-        RETURN {_as_return(_FIELDS)}
+        RETURN {_as_return(_ALL_FIELDS)}
         ORDER BY c.created_at DESC
         """,
         {"tenant_id": tenant_id},
     )
     for row in rows:
         row["last_synced_at"] = GraphRepository._to_native(row["last_synced_at"])
+        row["push_expires_at"] = GraphRepository._to_native(row["push_expires_at"])
     return rows
 
 
@@ -58,13 +66,14 @@ def get_connector(tenant_id: str, connector_id: str, repo: Optional[GraphReposit
     rows = repo.execute_cypher(
         f"""
         MATCH (c:Connector {{id: $id, tenant_id: $tenant_id}})
-        RETURN {_as_return(_FIELDS)}
+        RETURN {_as_return(_ALL_FIELDS)}
         """,
         {"id": connector_id, "tenant_id": tenant_id},
     )
     if not rows:
         return None
     rows[0]["last_synced_at"] = GraphRepository._to_native(rows[0]["last_synced_at"])
+    rows[0]["push_expires_at"] = GraphRepository._to_native(rows[0]["push_expires_at"])
     return rows[0]
 
 
@@ -159,6 +168,83 @@ def record_sync_result(
         f"MATCH (c:Connector {{id: $id, tenant_id: $tenant_id}}) SET {', '.join(set_clauses)}",
         params,
     )
+
+
+def set_push_subscription(
+    tenant_id: str,
+    connector_id: str,
+    *,
+    subscription_id: str,
+    client_state: str,
+    expires_at,
+    repo: Optional[GraphRepository] = None,
+) -> None:
+    """Records a newly-created (or renewed) Microsoft Graph subscription --
+    see app/ingestion/graph_subscriptions.py. Called after a successful
+    create_mail_subscription()/renew_subscription() call, never on its own;
+    a failed subscription attempt just leaves these fields unset/stale and
+    the connector keeps working via polling."""
+    repo = repo or GraphRepository()
+    repo.execute_cypher(
+        "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) "
+        "SET c.push_subscription_id = $subscription_id, c.push_client_state = $client_state, "
+        "c.push_expires_at = $expires_at",
+        {
+            "id": connector_id,
+            "tenant_id": tenant_id,
+            "subscription_id": subscription_id,
+            "client_state": client_state,
+            "expires_at": expires_at.isoformat(),
+        },
+    )
+
+
+def clear_push_subscription(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> None:
+    """Called when a subscription is deleted, or renewal fails permanently
+    (see app/graph/connector_scheduler.py) -- the connector falls back to
+    polling-only, same as it worked before push was ever set up."""
+    repo = repo or GraphRepository()
+    repo.execute_cypher(
+        "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) "
+        "SET c.push_subscription_id = null, c.push_client_state = null, c.push_expires_at = null",
+        {"id": connector_id, "tenant_id": tenant_id},
+    )
+
+
+def get_connector_by_subscription_id(subscription_id: str, repo: Optional[GraphRepository] = None) -> Optional[dict]:
+    """Maps an inbound Graph notification's subscriptionId back to the
+    connector it belongs to -- app/api/webhooks.py's only way to know which
+    connector to sync, since the notification itself carries no tenant/API
+    key. subscription_id is Graph-assigned and globally unique, so this
+    intentionally isn't scoped by tenant_id the way every other lookup in
+    this module is."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        f"MATCH (c:Connector {{push_subscription_id: $subscription_id}}) "
+        f"RETURN {_as_return(_FIELDS)}, {_as_return(_PUSH_FIELDS)}",
+        {"subscription_id": subscription_id},
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    row["last_synced_at"] = GraphRepository._to_native(row["last_synced_at"])
+    row["push_expires_at"] = GraphRepository._to_native(row["push_expires_at"])
+    return row
+
+
+def list_connectors_with_push_subscriptions(repo: Optional[GraphRepository] = None) -> list[dict]:
+    """Every connector (any tenant) with an active push subscription -- what
+    the scheduler's renewal check iterates, since a subscription nearing
+    expiry has to be renewed regardless of which tenant owns its connector."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        f"MATCH (c:Connector) WHERE c.push_subscription_id IS NOT NULL "
+        f"RETURN {_as_return(_FIELDS)}, {_as_return(_PUSH_FIELDS)}"
+    )
+    for row in rows:
+        row["last_synced_at"] = GraphRepository._to_native(row["last_synced_at"])
+        row["push_expires_at"] = GraphRepository._to_native(row["push_expires_at"])
+    return rows
 
 
 def _as_return(fields: str) -> str:

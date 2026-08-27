@@ -21,9 +21,9 @@ import re
 
 import httpx
 
-from app.config import settings
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector, hash_records
 from app.ingestion.file_source import SourceRecord
+from app.ingestion.graph_auth import get_graph_access_token
 from app.ingestion.html_text import html_to_text
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -43,37 +43,7 @@ class OutlookMailConnector(SourceConnector):
             raise ConnectorFetchError(f"'{mailbox}' doesn't look like a mailbox address.")
 
     async def _get_access_token(self, client: httpx.AsyncClient) -> str:
-        tenant_id = settings.sharepoint_tenant_id
-        client_id = settings.sharepoint_client_id
-        client_secret = settings.sharepoint_client_secret
-        if not (tenant_id and client_id and client_secret):
-            raise ConnectorFetchError(
-                "Outlook mail isn't configured on this server -- ask your operator to set "
-                "SHAREPOINT_TENANT_ID, SHAREPOINT_CLIENT_ID, and SHAREPOINT_CLIENT_SECRET "
-                "(the same Azure AD app registration SharePoint uses)."
-            )
-        try:
-            resp = await client.post(
-                f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "scope": "https://graph.microsoft.com/.default",
-                },
-            )
-        except httpx.HTTPError as e:
-            raise ConnectorFetchError(f"Could not reach Microsoft's login service: {e}") from e
-        if resp.status_code >= 400:
-            raise ConnectorFetchError(
-                "Could not authenticate to Microsoft Graph -- check the app registration's tenant id, "
-                "client id, and client secret, and that it's been granted (and admin-consented) "
-                "the Mail.Read application permission."
-            )
-        token = resp.json().get("access_token")
-        if not token:
-            raise ConnectorFetchError("Microsoft's login service didn't return an access token.")
-        return token
+        return await get_graph_access_token(client, missing_permission_hint="Mail.Read")
 
     async def fetch(self) -> list[SourceRecord]:
         async with httpx.AsyncClient(timeout=15.0) as client:

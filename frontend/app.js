@@ -389,7 +389,8 @@ function renderConnectorsTable() {
       return `<tr data-id="${escapeXml(c.id)}">
         <td><button type="button" class="connector-name-link" data-preview-id="${escapeXml(c.id)}">${escapeXml(c.name)}</button></td>
         <td>
-          <span class="badge badge-neutral">${escapeXml(typeLabel)}</span><br />
+          <span class="badge badge-neutral">${escapeXml(typeLabel)}</span>
+          ${c.push_enabled ? `<span class="badge badge-ok" title="Syncs instantly on new mail, not just on the usual interval">Real-time</span>` : ""}<br />
           <span class="muted" style="font-size:0.8rem">${escapeXml(c.url)}</span>
         </td>
         <td>${escapeXml(kbLabel(c.group_id))}</td>

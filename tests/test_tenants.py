@@ -91,3 +91,32 @@ def test_hash_is_deterministic_but_not_reversible_looking():
     assert h1 == h2
     assert h1 != "some-key"
     assert len(h1) == 64  # sha256 hex digest
+
+
+def test_find_tenant_by_tenant_id_checks_static_config_first(monkeypatch, repo):
+    from app.config import KnowledgeBase, TenantConfig
+
+    static_tenant = TenantConfig(
+        tenant_id="static1", gemini_api_key="static-key", knowledge_bases=[KnowledgeBase(id="kb1", label="KB")]
+    )
+    monkeypatch.setattr("app.graph.tenants.settings.tenant_api_keys", {"any-key": static_tenant})
+
+    found = tenants.find_tenant_by_tenant_id("static1", repo=repo)
+    assert found is static_tenant
+
+
+def test_find_tenant_by_tenant_id_falls_back_to_neo4j(monkeypatch, repo):
+    monkeypatch.setattr("app.graph.tenants.settings.tenant_api_keys", {})
+    tenant_id = f"test_tenant_by_id_{uuid.uuid4().hex[:8]}"
+    try:
+        tenants.create_tenant(tenant_id, "fake-gemini-key", [KnowledgeBase(id="kb1", label="KB")], repo=repo)
+        found = tenants.find_tenant_by_tenant_id(tenant_id, repo=repo)
+        assert found is not None
+        assert found.tenant_id == tenant_id
+    finally:
+        tenants.delete_tenant(tenant_id, repo=repo)
+
+
+def test_find_tenant_by_tenant_id_returns_none_when_nowhere(monkeypatch, repo):
+    monkeypatch.setattr("app.graph.tenants.settings.tenant_api_keys", {})
+    assert tenants.find_tenant_by_tenant_id("no-such-tenant-anywhere", repo=repo) is None

@@ -380,6 +380,19 @@ shows up a moment later.
 A scanned/image-only PDF has no extractable text layer and is silently
 skipped, not OCR'd. Legacy binary `.doc` (not `.docx`) isn't supported.
 
+**Real-time push, for `outlook_mail`.** Every connector type is still
+polled on the usual interval, but `outlook_mail` also gets a Microsoft
+Graph push subscription (`app/ingestion/graph_subscriptions.py`) the moment
+it's created (needs `PUBLIC_BASE_URL` set -- see `.env.example`) -- new mail
+triggers an immediate sync via `POST /api/v1/webhooks/graph`, instead of
+waiting for the next poll. The demo UI's connector table shows a "Real-time"
+badge when this is active. It's best-effort: if `PUBLIC_BASE_URL` isn't set
+or Graph refuses the subscription, the connector still works, just polled
+only. The subscription is renewed automatically before it expires
+(`app/graph/connector_scheduler.py`); if a renewal is ever refused (e.g. the
+permission was revoked), the connector quietly falls back to polling-only
+rather than erroring.
+
 Facts from different connectors about the same real-world thing (a CRM
 record and a document both mentioning "Fenwick & Cole Legal", say) are
 pooled together when the name matches exactly -- see
@@ -659,6 +672,7 @@ saxon-context-engine/
 │   │   ├── connector_sync.py           # fetch -> dedup-check -> ingest, shared by manual and scheduled sync
 │   │   ├── web_source.py, google_drive_source.py, sharepoint_source.py  # real live connectors
 │   │   ├── gmail_source.py, outlook_mail_source.py                     # real live mailbox connectors
+│   │   ├── graph_auth.py, graph_subscriptions.py                       # shared MS Graph auth + push subscriptions
 │   │   ├── html_text.py                # shared HTML-to-text stripping (web pages, mail bodies)
 │   │   ├── database_source.py, document_source.py, email_source.py      # demo/mock-data connectors
 │   │   ├── document_text_extraction.py # shared PDF/DOCX text extraction (Drive + SharePoint)
@@ -734,10 +748,10 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
 | Core data models (`app/models/`) | Implemented |
 | Ontology (`app/ontology/`, `ontology/`) | Implemented and tested |
 | Graph persistence (`app/graph/`) | Implemented and tested |
-| Ingestion (`app/ingestion/`) | Eight connector types: `web`, `google_drive`, `sharepoint`, `gmail`, and `outlook_mail` are real live sources; `database`/`documents`/`email` read bundled demo data. Scheduled + on-demand sync, content-hash dedup, and an in-process queue decoupling a sync trigger from extraction |
+| Ingestion (`app/ingestion/`) | Eight connector types: `web`, `google_drive`, `sharepoint`, `gmail`, and `outlook_mail` are real live sources; `database`/`documents`/`email` read bundled demo data. Scheduled + on-demand sync, content-hash dedup, an in-process queue decoupling a sync trigger from extraction, and real-time push (not just polling) for `outlook_mail` via Microsoft Graph subscriptions |
 | Retrieval (`app/retrieval/`) | Named-entity resolution (including cross-source pooling, tolerant of a legal-suffix/punctuation name variant across sources) tried first, Graphiti's hybrid search as a fallback -- see `GraphRepository.search_graphiti_facts` |
 | Context composition (`app/context/`) | Synthesized answers, per-fact source attribution, a short-lived response cache, and per-query observability (`retrieval_path`/`cache_hit`/`cost_usd`) |
-| API (`app/api/`) | `/health`, `/entities`, `/context/query`, `/graph/*` (role-based visibility), `/document-sets`, `/connectors`, `/admin` (operator-only tenant management, no redeploy needed) |
+| API (`app/api/`) | `/health`, `/entities`, `/context/query`, `/graph/*` (role-based visibility), `/document-sets`, `/connectors`, `/admin` (operator-only tenant management, no redeploy needed), `/webhooks/graph` (unauthenticated -- Microsoft Graph push notifications) |
 | MCP (`app/mcp/`) | `query_context_graph` and `list_available_sources` tools, same auth and query path as the HTTP API |
 | Deployment | Live on Azure Container Apps + Neo4j AuraDB -- see [Deployment](#deployment) |
 
@@ -748,25 +762,34 @@ setup outside this repo's control, or genuinely not worth building yet at
 this project's current scale. See [`CLAUDE.md`](CLAUDE.md) for the full
 reasoning behind each.
 
-- **Real-time push ingestion (CDC/webhooks).** Every connector today is
-  polled (scheduled + on-demand), not pushed to. Debezium-based CDC for
-  direct database access, and real webhook subscriptions for Drive/SharePoint,
-  both need external, source-side registration (a verified webhook domain,
-  subscription renewal management) that whoever owns those source accounts
-  would need to set up -- not something this repo can stand up on its own.
-  The ingestion queue (`app/graph/ingestion_queue.py`) is the actual
-  prerequisite for this: a webhook receiver has to ack fast and can't block
-  on an LLM call, which is what that now lets it do.
+- **Real-time push ingestion, for the rest of the connector types.**
+  `outlook_mail` now pushes -- a Microsoft Graph subscription calls back to
+  `POST /api/v1/webhooks/graph` the moment new mail arrives, auto-renewed
+  before it expires (`app/ingestion/graph_subscriptions.py`,
+  `app/graph/connector_scheduler.py`), instead of waiting for the next poll.
+  `sharepoint` can use the identical Graph subscription mechanism (it needs
+  one extra call to resolve a drive_id first -- a small, contained addition,
+  not a redesign). `google_drive`/`gmail` push notifications are a
+  different, harder case: Google requires the receiving domain itself to be
+  verified in Google Cloud Console before it will send push notifications
+  to it, a one-time setup step outside this repo's control. Debezium-based
+  CDC for a direct database connector is a separate, larger undertaking,
+  worth it once a real client's source is a database rather than a mailbox/
+  document store. The ingestion queue (`app/graph/ingestion_queue.py`) was
+  the actual prerequisite for any of this: a webhook receiver has to ack
+  fast and can't block on an LLM call, which is what that now lets it do.
 - **Stronger cross-source entity resolution.** Today's matching is exact
-  name equality (see [Source connectors](#source-connectors)), which is
-  real and deterministic but weaker than matching on a genuine shared key
-  (an email address, an external system ID) -- worth revisiting once such a
-  key actually exists in real client data.
-- **A real admin plane.** `config/tenants.json` (or the `TENANT_API_KEYS` env
-  var) is fine for a handful of clients managed by hand; a Postgres-backed
-  admin plane, and an ontology-authoring UI on top of it (domain/client
-  packs are hand-edited YAML today), would matter once there are enough
-  clients that hand-editing doesn't scale.
+  name equality, tolerant of a legal-suffix/punctuation/"&"-vs-"and"
+  variant (see [Source connectors](#source-connectors)) -- real and
+  deterministic, but still weaker than matching on a genuine shared key (an
+  email address, an external system ID) -- worth revisiting once such a key
+  actually exists in real client data.
+- **A richer admin plane.** Tenant management now has a live path (the
+  admin API, [Adding a client's API key](#adding-a-clients-api-key)) that
+  doesn't need a redeploy; still missing is any UI for it (curl/a REST
+  client only, for now) and an ontology-authoring UI (domain/client packs
+  are hand-edited YAML today) -- worth building once there are enough
+  clients that doing either by hand doesn't scale.
 - **Per-tenant Neo4j databases.** Today's isolation is `group_id`-scoped
   within one shared Neo4j Community database -- a reasonable baseline, not
   the strongest possible guarantee (see [API access](#api-access)). Worth a

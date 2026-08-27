@@ -16,6 +16,7 @@
 # should move this to a single dedicated worker (see CLAUDE.md's v2 "worker
 # pool" step) rather than running it on every instance.
 import logging
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -65,6 +66,45 @@ async def _sync_all_connectors(neo4j_client: Neo4jClient) -> None:
                 )
 
 
+async def _renew_expiring_push_subscriptions(neo4j_client: Neo4jClient) -> None:
+    """Every connector's Microsoft Graph push subscription (see
+    app/ingestion/graph_subscriptions.py) that's due to expire soon gets
+    renewed -- a subscription left unrenewed silently stops delivering
+    notifications a few days after it's created, with no other symptom
+    than the connector quietly going back to polling-only (which still
+    works, just not in real time). Runs every tick alongside
+    _sync_all_connectors, not on its own separate schedule -- one
+    background job is simpler to reason about than two."""
+    from app.ingestion.graph_subscriptions import RENEW_WHEN_WITHIN, renew_subscription
+    from app.ingestion.connector_base import ConnectorFetchError
+
+    repo = GraphRepository(neo4j_client=neo4j_client)
+    now = datetime.now(timezone.utc)
+    for connector in connectors.list_connectors_with_push_subscriptions(repo=repo):
+        expires_at = connector.get("push_expires_at")
+        if expires_at is None or (expires_at - now) > RENEW_WHEN_WITHIN:
+            continue
+        try:
+            new_expires_at = await renew_subscription(connector["push_subscription_id"])
+            connectors.set_push_subscription(
+                connector["tenant_id"], connector["id"],
+                subscription_id=connector["push_subscription_id"],
+                client_state=connector["push_client_state"],
+                expires_at=new_expires_at, repo=repo,
+            )
+        except ConnectorFetchError as e:
+            # Can't be renewed (permission revoked, subscription already
+            # gone, etc.) -- fall back to polling-only rather than retrying
+            # a renewal that will keep failing every tick.
+            logger.warning(f"Could not renew push subscription for connector '{connector['id']}': {e}")
+            connectors.clear_push_subscription(connector["tenant_id"], connector["id"], repo=repo)
+
+
+async def _tick(neo4j_client: Neo4jClient) -> None:
+    await _sync_all_connectors(neo4j_client)
+    await _renew_expiring_push_subscriptions(neo4j_client)
+
+
 def start_connector_scheduler(neo4j_client: Neo4jClient) -> AsyncIOScheduler | None:
     """Returns None (and starts nothing) if disabled via settings --
     app/main.py's lifespan handles that case by simply not stopping
@@ -75,7 +115,7 @@ def start_connector_scheduler(neo4j_client: Neo4jClient) -> AsyncIOScheduler | N
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
-        _sync_all_connectors,
+        _tick,
         "interval",
         minutes=settings.connector_sync_interval_minutes,
         args=[neo4j_client],

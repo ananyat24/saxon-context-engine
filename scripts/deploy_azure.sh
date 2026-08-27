@@ -138,6 +138,11 @@ echo "=== 7. Creating (or updating) the Container App ==="
 EXISTING_FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
   --query properties.configuration.ingress.fqdn --output tsv 2>/dev/null || echo "")
 MCP_ALLOWED_HOSTS="localhost:8000,127.0.0.1:8000${EXISTING_FQDN:+,$EXISTING_FQDN}"
+# PUBLIC_BASE_URL (app/config.py) -- this deployment's own public HTTPS URL,
+# used to build the notificationUrl a Microsoft Graph push subscription
+# calls back to (app/ingestion/graph_subscriptions.py). Same "patch in once
+# the FQDN is known" handling as MCP_ALLOWED_HOSTS for a brand-new app.
+PUBLIC_BASE_URL="${EXISTING_FQDN:+https://$EXISTING_FQDN}"
 
 # google-drive-service-account-json and sharepoint-client-secret are the two
 # genuinely optional secrets (see their "leave unset to deploy without it"
@@ -175,6 +180,7 @@ ENV_ARGS=(
   SHAREPOINT_TENANT_ID="$SHAREPOINT_TENANT_ID"
   SHAREPOINT_CLIENT_ID="$SHAREPOINT_CLIENT_ID"
   MCP_ALLOWED_HOSTS="$MCP_ALLOWED_HOSTS"
+  PUBLIC_BASE_URL="$PUBLIC_BASE_URL"
 )
 [ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && ENV_ARGS+=(GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json)
 [ -n "$SHAREPOINT_CLIENT_SECRET" ] && ENV_ARGS+=(SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret)
@@ -212,12 +218,13 @@ else
     --min-replicas 0 --max-replicas 3 \
     --secrets "${SECRET_ARGS[@]}" \
     --env-vars "${ENV_ARGS[@]}"
-  # MCP_ALLOWED_HOSTS above only has localhost -- this app's real FQDN wasn't
-  # assigned until the create call just above. Patch it in now that it's known.
+  # MCP_ALLOWED_HOSTS/PUBLIC_BASE_URL above only have localhost/nothing --
+  # this app's real FQDN wasn't assigned until the create call just above.
+  # Patch both in now that it's known.
   NEW_FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
     --query properties.configuration.ingress.fqdn --output tsv)
   az containerapp update --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
-    --set-env-vars MCP_ALLOWED_HOSTS="localhost:8000,127.0.0.1:8000,$NEW_FQDN"
+    --set-env-vars MCP_ALLOWED_HOSTS="localhost:8000,127.0.0.1:8000,$NEW_FQDN" PUBLIC_BASE_URL="https://$NEW_FQDN"
 fi
 
 echo "=== Done ==="
