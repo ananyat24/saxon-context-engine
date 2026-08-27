@@ -74,6 +74,33 @@ _PROPER_NOUN_RE = re.compile(r"\b[A-Z][\w'.-]*(?:\s+(?:(?:and|of|&)\s+)?[A-Z][\w
 # short-circuit an otherwise normal query into a false "not found".
 _ID_PHRASE_RE = re.compile(r"\b[A-Za-z][\w'.-]*\s+#?[\w-]*\d[\w-]*\b")
 
+# Trailing legal-entity words that don't change *which* real-world company a
+# name refers to -- "Fenwick & Cole Legal" and "Fenwick & Cole Legal, Inc."
+# name the same entity, but the exact-match reconciliation in
+# _match_entities_by_name below would treat them as two unrelated ones.
+# Deliberately still an equality check after stripping these (not a fuzzy/
+# edit-distance match) -- see that method's docstring for why a looser match
+# risks merging two genuinely different entities.
+_LEGAL_SUFFIX_WORDS = {
+    "inc", "incorporated", "llc", "ltd", "limited", "corp", "corporation",
+    "co", "company", "plc", "gmbh", "llp", "lp",
+}
+_NAME_PUNCT_RE = re.compile(r"[.,]")
+_NAME_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_entity_name(name: str) -> str:
+    """A name equality check that isn't defeated by a legal suffix, "&" vs.
+    "and", punctuation, or extra whitespace -- see _LEGAL_SUFFIX_WORDS above.
+    Two names that normalize the same are treated as the same real-world
+    entity; two that don't are left alone."""
+    normalized = name.lower().replace("&", " and ")
+    normalized = _NAME_PUNCT_RE.sub("", normalized)
+    words = _NAME_WS_RE.sub(" ", normalized).strip().split(" ")
+    while words and words[-1] in _LEGAL_SUFFIX_WORDS:
+        words.pop()
+    return " ".join(words)
+
 
 def _extract_candidate_entities(query_text: str) -> list[str]:
     candidates = set(_PROPER_NOUN_RE.findall(query_text))
@@ -150,19 +177,46 @@ class GraphRepository:
         still capped at one).
 
         This is deliberately simple, deterministic reconciliation --
-        normalized name equality -- rather than matching on a real shared
-        key (an email address, an external system id, ...) across sources;
-        see CLAUDE.md's v2.5. The known tradeoff: two different real-world
-        entities that happen to share an exact name would incorrectly
-        merge. Worth revisiting once a stronger signal exists in the data.
+        normalized name equality (see _normalize_entity_name: strips a
+        trailing legal suffix like "Inc"/"LLC", "&" vs. "and", and
+        punctuation/whitespace differences) -- rather than matching on a
+        real shared key (an email address, an external system id, ...)
+        across sources; see CLAUDE.md's v2.5. The known tradeoff: two
+        different real-world entities that happen to normalize to the same
+        name would incorrectly merge. Worth revisiting once a stronger
+        signal exists in the data.
         """
         exact_rows = self.execute_cypher(
             "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) = toLower($name) "
             "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id",
             {"group_ids": group_ids, "name": name},
         )
-        if exact_rows:
-            return exact_rows
+
+        normalized_target = _normalize_entity_name(name)
+        core_token = normalized_target.split(" ")[0] if normalized_target else ""
+        normalized_rows: list[dict[str, Any]] = []
+        # A short core token (e.g. "of", or nothing left after stripping a
+        # suffix) would turn this into an unbounded CONTAINS scan for little
+        # benefit -- skip it in that case.
+        if len(core_token) >= 3:
+            candidate_rows = self.execute_cypher(
+                "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS $core_token "
+                "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id",
+                {"group_ids": group_ids, "core_token": core_token},
+            )
+            normalized_rows = [r for r in candidate_rows if _normalize_entity_name(r["name"]) == normalized_target]
+
+        # Run both, not just normalized-as-fallback-after-exact-fails: an
+        # exact match in one connector's data (e.g. "Fenwick and Cole
+        # Legal") and a legal-suffix variant in another's ("Fenwick & Cole
+        # Legal, Inc.") both need to end up in this reconciliation set, not
+        # just whichever one the exact query alone happened to find.
+        if exact_rows or normalized_rows:
+            by_uuid = {r["uuid"]: r for r in exact_rows}
+            for r in normalized_rows:
+                by_uuid.setdefault(r["uuid"], r)
+            return list(by_uuid.values())
+
         return self.execute_cypher(
             "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS toLower($name) "
             "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id LIMIT 1",
