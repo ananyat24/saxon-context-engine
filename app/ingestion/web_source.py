@@ -10,8 +10,11 @@
 # a real HTML library if/when a connector needs more than "strip tags, keep
 # the visible text."
 import hashlib
+import ipaddress
 import re
+import socket
 from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 import httpx
 
@@ -62,6 +65,40 @@ class WebFetchError(ConnectorFetchError):
     """A URL couldn't be fetched, or didn't look like real page content."""
 
 
+# A tenant supplies this URL and the server fetches it on the tenant's
+# behalf -- without a check like this, a connector is a ready-made SSRF
+# primitive: "add a web connector pointed at http://169.254.169.254/..." (the
+# Azure/AWS/GCP instance-metadata address) or http://localhost:<internal-port>
+# would make this server, sitting inside the deployment's own network, fetch
+# and then hand back whatever internal service lives there. Only "the request
+# would leave the deployment's network to a normal public address" is allowed.
+_MAX_REDIRECTS = 5
+
+
+def _assert_public_host(hostname: str) -> None:
+    """Resolves `hostname` and rejects it if any resolved address is
+    loopback/private/link-local/reserved/multicast -- covers "localhost",
+    bare IPs, and hostnames that merely resolve to an internal address (DNS
+    rebinding via a domain the attacker controls)."""
+    try:
+        addrs = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as e:
+        raise WebFetchError(f"Could not resolve host '{hostname}': {e}") from e
+    for family, _, _, _, sockaddr in addrs:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            raise WebFetchError(f"'{hostname}' resolves to a non-public address and can't be fetched.")
+
+
+def _assert_fetchable(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise WebFetchError(f"'{url}' must be an http(s) URL.")
+    if not parsed.hostname:
+        raise WebFetchError(f"'{url}' has no host to fetch.")
+    _assert_public_host(parsed.hostname)
+
+
 async def fetch_web_record(url: str) -> SourceRecord:
     """Fetches `url`, strips it down to plain text, and returns it as a
     SourceRecord ready for IngestionPipeline.ingest_episode() -- the same
@@ -70,12 +107,30 @@ async def fetch_web_record(url: str) -> SourceRecord:
     Raises WebFetchError (never a raw httpx exception) on anything that
     should stop a sync and surface a clear message: unreachable host, non-2xx
     status, a non-text response (e.g. a PDF or image), too large, or nothing
-    extractable once the tags are stripped.
+    extractable once the tags are stripped. Also rejects the URL up front,
+    and every redirect hop, if it points at a non-public address -- see
+    _assert_fetchable().
     """
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=_FETCH_TIMEOUT_SECONDS) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
+        # Redirects are followed manually (not follow_redirects=True) so each
+        # hop's target gets the same public-address check as the original
+        # URL -- otherwise a public URL that 302s to an internal address
+        # would sail straight through the check above.
+        async with httpx.AsyncClient(follow_redirects=False, timeout=_FETCH_TIMEOUT_SECONDS) as client:
+            current_url = url
+            for _ in range(_MAX_REDIRECTS + 1):
+                _assert_fetchable(current_url)
+                resp = await client.get(current_url)
+                if resp.is_redirect:
+                    location = resp.headers.get("location")
+                    if not location:
+                        break
+                    current_url = str(httpx.URL(current_url).join(location))
+                    continue
+                resp.raise_for_status()
+                break
+            else:
+                raise WebFetchError(f"'{url}' redirected too many times.")
     except httpx.HTTPError as e:
         raise WebFetchError(f"Could not fetch '{url}': {e}") from e
 

@@ -13,7 +13,7 @@ from app.ingestion.database_source import DatabaseConnector
 from app.ingestion.document_source import DocumentConnector
 from app.ingestion.email_source import EmailConnector
 from app.ingestion.file_source import SourceRecord
-from app.ingestion.web_source import WebConnector, WebFetchError, content_hash, fetch_web_record
+from app.ingestion.web_source import WebConnector, WebFetchError, content_hash, fetch_web_record, _assert_fetchable
 
 
 def test_source_connector_is_abstract():
@@ -104,12 +104,21 @@ def test_fetch_web_record_rejects_non_text_content(monkeypatch):
     # No real network call -- monkeypatches httpx to return a non-text
     # content-type, confirming the connector layer surfaces a clear
     # ConnectorFetchError rather than trying to extract text from a PDF/image.
+    # socket.getaddrinfo is also monkeypatched so the SSRF guard's DNS lookup
+    # doesn't depend on real network access in tests.
+    import socket as socket_module
+
     import httpx
+
+    monkeypatch.setattr(
+        socket_module, "getaddrinfo", lambda *a, **kw: [(socket_module.AF_INET, None, None, "", ("93.184.216.34", 0))]
+    )
 
     class _FakeResponse:
         headers = {"content-type": "application/pdf"}
         content = b"%PDF-1.4"
         text = ""
+        is_redirect = False
 
         def raise_for_status(self):
             pass
@@ -180,3 +189,115 @@ def test_email_connector_parses_headers_and_body():
 
 def test_email_connector_source_description():
     assert "mock" in EmailConnector().source_description().lower()
+
+
+# --- SSRF guard on the web connector -----------------------------------------
+# A tenant supplies the URL and this server fetches it, so an unvalidated
+# fetch is a ready-made "make the server hit its own internal network"
+# primitive. These confirm the guard actually blocks the addresses that
+# matter, without needing a real network call.
+
+
+def test_web_connector_rejects_non_http_scheme():
+    with pytest.raises(WebFetchError):
+        _assert_fetchable("file:///etc/passwd")
+
+
+def test_web_connector_rejects_loopback_host():
+    with pytest.raises(WebFetchError):
+        _assert_fetchable("http://127.0.0.1/")
+
+
+def test_web_connector_rejects_localhost_hostname():
+    with pytest.raises(WebFetchError):
+        _assert_fetchable("http://localhost:8000/admin")
+
+
+def test_web_connector_rejects_cloud_metadata_address():
+    # 169.254.169.254 is the instance-metadata endpoint on Azure/AWS/GCP --
+    # link-local, so covered by the same check, but worth its own explicit
+    # test since it's the actual attack this guard exists to stop.
+    with pytest.raises(WebFetchError):
+        _assert_fetchable("http://169.254.169.254/metadata/instance")
+
+
+def test_web_connector_allows_a_public_address():
+    # 93.184.216.34 is example.com's (public, IANA-reserved-for-documentation
+    # in the DNS sense, but a real routable unicast address) -- just needs to
+    # not be loopback/private/link-local/reserved/multicast.
+    _assert_fetchable("https://93.184.216.34/")
+
+
+def test_fetch_web_record_rejects_redirect_to_internal_address(monkeypatch):
+    # A public URL that 302s to an internal address is the classic SSRF
+    # bypass for a check that only validates the original URL -- this proves
+    # each redirect hop is re-validated, not just the first one. socket.
+    # getaddrinfo is monkeypatched so this doesn't depend on real DNS.
+    import socket as socket_module
+
+    import httpx
+
+    def fake_getaddrinfo(host, *args, **kwargs):
+        if host == "example.com":
+            return [(socket_module.AF_INET, None, None, "", ("93.184.216.34", 0))]
+        return [(socket_module.AF_INET, None, None, "", ("169.254.169.254", 0))]
+
+    monkeypatch.setattr(socket_module, "getaddrinfo", fake_getaddrinfo)
+
+    class _RedirectResponse:
+        status_code = 302
+        headers = {"location": "http://169.254.169.254/metadata"}
+        is_redirect = True
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url):
+            return _RedirectResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeClient())
+
+    with pytest.raises(WebFetchError):
+        asyncio.run(fetch_web_record("https://example.com"))
+
+
+# --- Database connector: dropping in extra/replacement mock CSVs ------------
+
+
+def test_database_connector_picks_up_a_second_csv_with_no_known_spec(tmp_path, monkeypatch):
+    # Simulates "drop your own mock data in" -- a CSV that isn't accounts.csv
+    # and has no hand-picked FileSourceSpec should still ingest via the
+    # inferred id/name columns, not be silently skipped.
+    import app.ingestion.database_source as database_source
+
+    mock_dir = tmp_path / "mock_crm"
+    mock_dir.mkdir()
+    (mock_dir / "accounts.csv").write_text(
+        "AccountID,CompanyName\nACC-1,Acme\n", encoding="utf-8"
+    )
+    (mock_dir / "vendors.csv").write_text(
+        "VendorId,VendorName,Region\nV-1,Contoso Supply,EMEA\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(database_source, "_MOCK_CRM_DIR", mock_dir)
+
+    connector = DatabaseConnector()
+    records = asyncio.run(connector.fetch())
+
+    assert any("Acme" in r.body for r in records)
+    vendor_record = next(r for r in records if "Contoso Supply" in r.body)
+    assert "V-1" in vendor_record.body
+
+
+def test_database_connector_errors_clearly_when_folder_has_no_csvs(tmp_path, monkeypatch):
+    import app.ingestion.database_source as database_source
+
+    mock_dir = tmp_path / "mock_crm"
+    mock_dir.mkdir()
+    monkeypatch.setattr(database_source, "_MOCK_CRM_DIR", mock_dir)
+
+    with pytest.raises(ConnectorFetchError):
+        asyncio.run(DatabaseConnector().fetch())
