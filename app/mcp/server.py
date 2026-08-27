@@ -14,6 +14,7 @@
 # Mounted into the same FastAPI app/process as the HTTP API (app/main.py) --
 # one container, one deploy, no separate auth model or infrastructure to
 # stand up for this to work.
+import asyncio
 from typing import Optional
 
 from fastapi import HTTPException
@@ -53,18 +54,26 @@ def configure(neo4j_client: Neo4jClient, graphiti_pool: TenantGraphitiPool) -> N
     _graphiti_pool = graphiti_pool
 
 
-def _authenticate(ctx: Context) -> TenantConfig:
-    """Same lookup as app/security.py's require_tenant, against MCP's own
-    header mapping instead of a FastAPI Header() dependency. Raises ToolError
-    (not HTTPException -- there's no HTTP response to shape here), which the
-    MCP SDK treats as an anticipated failure and surfaces to the calling
-    agent verbatim -- a plain exception would be masked as a generic
-    "Error executing tool" with no detail, per mcp.server.mcpserver.tools.base.Tool.run."""
+async def _authenticate(ctx: Context) -> TenantConfig:
+    """Same lookup as app/security.py's require_tenant (static config first,
+    then the Neo4j-backed store a tenant created through the admin API
+    lands in -- see app/graph/tenants.py), against MCP's own header mapping
+    instead of a FastAPI Header() dependency. Raises ToolError (not
+    HTTPException -- there's no HTTP response to shape here), which the MCP
+    SDK treats as an anticipated failure and surfaces to the calling agent
+    verbatim -- a plain exception would be masked as a generic "Error
+    executing tool" with no detail, per mcp.server.mcpserver.tools.base.Tool.run."""
     headers = ctx.headers or {}
     api_key = headers.get("x-api-key")
     if not api_key:
         raise ToolError("Missing X-API-Key header. Configure your MCP client with this tenant's API key.")
     tenant = settings.tenant_api_keys.get(api_key)
+    if tenant is None:
+        assert _neo4j_client is not None, "MCP server not configured -- see configure()"
+        from app.graph.tenants import find_tenant_by_api_key
+
+        repo = GraphRepository(neo4j_client=_neo4j_client)
+        tenant = await asyncio.to_thread(find_tenant_by_api_key, api_key, repo=repo)
     if tenant is None:
         raise ToolError("Invalid X-API-Key.")
     return tenant
@@ -90,7 +99,7 @@ async def query_context_graph(
     hierarchy, instead of the whole knowledge base. Mutually exclusive with
     document_set.
     """
-    tenant = _authenticate(ctx)
+    tenant = await _authenticate(ctx)
     assert _neo4j_client is not None and _graphiti_pool is not None, "MCP server not configured -- see configure()"
     try:
         packet = await execute_context_query(
@@ -112,7 +121,7 @@ async def list_available_sources(ctx: Context) -> dict:
     """List this tenant's own connected knowledge bases (individual sources)
     and document sets (named groups of sources), for choosing what to pass
     as query_context_graph's knowledge_base or document_set argument."""
-    tenant = _authenticate(ctx)
+    tenant = await _authenticate(ctx)
     assert _neo4j_client is not None, "MCP server not configured -- see configure()"
     repo = GraphRepository(neo4j_client=_neo4j_client)
     return {

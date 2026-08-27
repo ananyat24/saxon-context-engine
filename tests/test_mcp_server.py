@@ -29,23 +29,38 @@ def _fake_tenant() -> TenantConfig:
 
 def test_authenticate_missing_header_raises_tool_error():
     with pytest.raises(ToolError, match="Missing X-API-Key"):
-        mcp_server_module._authenticate(_FakeContext(headers={}))
+        asyncio.run(mcp_server_module._authenticate(_FakeContext(headers={})))
 
 
 def test_authenticate_no_headers_at_all_raises_tool_error():
     with pytest.raises(ToolError, match="Missing X-API-Key"):
-        mcp_server_module._authenticate(_FakeContext(headers=None))
+        asyncio.run(mcp_server_module._authenticate(_FakeContext(headers=None)))
 
 
-def test_authenticate_unknown_key_raises_tool_error():
+def test_authenticate_unknown_key_raises_tool_error(monkeypatch):
+    # Not in the static config, so this also exercises the Neo4j-backed
+    # tenant fallback (see app/graph/tenants.py) -- monkeypatched here to
+    # keep this test network-free, same as the rest of this file.
+    monkeypatch.setattr(settings, "tenant_api_keys", {})
+    monkeypatch.setattr("app.graph.tenants.find_tenant_by_api_key", lambda api_key, repo=None: None)
+    mcp_server_module.configure(neo4j_client=object(), graphiti_pool=object())
     with pytest.raises(ToolError, match="Invalid X-API-Key"):
-        mcp_server_module._authenticate(_FakeContext(headers={"x-api-key": "not-a-real-key"}))
+        asyncio.run(mcp_server_module._authenticate(_FakeContext(headers={"x-api-key": "not-a-real-key"})))
 
 
 def test_authenticate_valid_key_returns_the_matching_tenant(monkeypatch):
     tenant = _fake_tenant()
     monkeypatch.setattr(settings, "tenant_api_keys", {"real-key": tenant})
-    result = mcp_server_module._authenticate(_FakeContext(headers={"x-api-key": "real-key"}))
+    result = asyncio.run(mcp_server_module._authenticate(_FakeContext(headers={"x-api-key": "real-key"})))
+    assert result is tenant
+
+
+def test_authenticate_falls_back_to_the_neo4j_backed_store(monkeypatch):
+    tenant = _fake_tenant()
+    monkeypatch.setattr(settings, "tenant_api_keys", {})
+    monkeypatch.setattr("app.graph.tenants.find_tenant_by_api_key", lambda api_key, repo=None: tenant)
+    mcp_server_module.configure(neo4j_client=object(), graphiti_pool=object())
+    result = asyncio.run(mcp_server_module._authenticate(_FakeContext(headers={"x-api-key": "a-dynamic-key"})))
     assert result is tenant
 
 

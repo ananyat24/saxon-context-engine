@@ -565,6 +565,31 @@ file (e.g. Azure Container Apps) can set the equivalent `TENANT_API_KEYS`
 environment variable instead -- see `.env.example`. The file takes priority
 if both are present.
 
+**Adding a tenant without a redeploy.** The above is the original path, and
+it's static -- it's only read once at process startup, so onboarding a
+client against an already-deployed instance meant re-running the entire
+deploy script (a full container rebuild) just to add one API key. Set
+`ADMIN_API_KEY` (`.env.example`) to enable an admin API that stores tenants
+in Neo4j instead, which takes effect immediately:
+
+```bash
+# Create a tenant -- the returned api_key is shown exactly once, same as
+# manage_tenants.py's `add`.
+curl -X POST https://<your-deployment>/api/v1/admin/tenants \
+  -H "X-Admin-Key: <ADMIN_API_KEY>" -H "Content-Type: application/json" \
+  -d '{"tenant_id": "acme_corp", "gemini_api_key": "<their Gemini API key>",
+       "knowledge_bases": [{"id": "acme_corp", "label": "Acme Corp"}]}'
+
+# List tenants (keys shown masked, not in full) / remove one
+curl -H "X-Admin-Key: <ADMIN_API_KEY>" https://<your-deployment>/api/v1/admin/tenants
+curl -X DELETE -H "X-Admin-Key: <ADMIN_API_KEY>" https://<your-deployment>/api/v1/admin/tenants/acme_corp
+```
+
+The two paths coexist: `require_tenant` checks the static config first,
+then this Neo4j-backed store, so an existing statically-configured tenant's
+behavior is unchanged. `ADMIN_API_KEY` is a single operator credential --
+never hand it to a client, since it can create or delete *any* tenant.
+
 ## Deployment
 
 `Dockerfile` plus `scripts/deploy_azure.sh` deploy this to Azure Container
@@ -627,6 +652,7 @@ saxon-context-engine/
 │   │   ├── connectors.py               # :Connector storage (create/list/sync-result/health)
 │   │   ├── connector_scheduler.py      # Background interval sync for every tenant's connectors
 │   │   ├── ingestion_queue.py          # In-process queue decoupling a sync trigger from extraction
+│   │   ├── tenants.py                  # :Tenant storage -- add/remove a tenant with no redeploy
 │   │   └── document_sets.py            # :DocumentSet storage (named groups of connectors)
 │   ├── ingestion/                # Turning raw text/records/live sources into graph writes
 │   │   ├── connector_base.py           # SourceConnector interface every connector type implements
@@ -647,7 +673,7 @@ saxon-context-engine/
 │   │   └── response_cache.py     # Short-TTL cache for repeat/near-repeat questions
 │   ├── mcp/
 │   │   └── server.py             # MCP tools (query_context_graph, list_available_sources) over the same query path
-│   └── api/                     # FastAPI routes: /health, /entities, /context, /graph, /document-sets, /connectors
+│   └── api/                     # FastAPI routes: /health, /entities, /context, /graph, /document-sets, /connectors, /admin
 ├── ontology/
 │   ├── README.md                # Ontology design principles and layering
 │   ├── core.yaml                # Enterprise-wide entity/relationship definitions
@@ -709,9 +735,9 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
 | Ontology (`app/ontology/`, `ontology/`) | Implemented and tested |
 | Graph persistence (`app/graph/`) | Implemented and tested |
 | Ingestion (`app/ingestion/`) | Eight connector types: `web`, `google_drive`, `sharepoint`, `gmail`, and `outlook_mail` are real live sources; `database`/`documents`/`email` read bundled demo data. Scheduled + on-demand sync, content-hash dedup, and an in-process queue decoupling a sync trigger from extraction |
-| Retrieval (`app/retrieval/`) | Named-entity resolution (including cross-source pooling) tried first, Graphiti's hybrid search as a fallback -- see `GraphRepository.search_graphiti_facts` |
+| Retrieval (`app/retrieval/`) | Named-entity resolution (including cross-source pooling, tolerant of a legal-suffix/punctuation name variant across sources) tried first, Graphiti's hybrid search as a fallback -- see `GraphRepository.search_graphiti_facts` |
 | Context composition (`app/context/`) | Synthesized answers, per-fact source attribution, a short-lived response cache, and per-query observability (`retrieval_path`/`cache_hit`/`cost_usd`) |
-| API (`app/api/`) | `/health`, `/entities`, `/context/query`, `/graph/*` (role-based visibility), `/document-sets`, `/connectors` |
+| API (`app/api/`) | `/health`, `/entities`, `/context/query`, `/graph/*` (role-based visibility), `/document-sets`, `/connectors`, `/admin` (operator-only tenant management, no redeploy needed) |
 | MCP (`app/mcp/`) | `query_context_graph` and `list_available_sources` tools, same auth and query path as the HTTP API |
 | Deployment | Live on Azure Container Apps + Neo4j AuraDB -- see [Deployment](#deployment) |
 

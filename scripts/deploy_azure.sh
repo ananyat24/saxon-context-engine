@@ -72,6 +72,11 @@ GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON:-}"
 SHAREPOINT_TENANT_ID="${SHAREPOINT_TENANT_ID:-}"
 SHAREPOINT_CLIENT_ID="${SHAREPOINT_CLIENT_ID:-}"
 SHAREPOINT_CLIENT_SECRET="${SHAREPOINT_CLIENT_SECRET:-}"
+# Only needed to enable the admin API (POST/GET/DELETE /api/v1/admin/tenants
+# -- see app/api/admin.py), which lets you add a tenant live, without a
+# redeploy. Leave unset to deploy without it (those routes 500 with a clear
+# "not configured" message rather than accepting no credential at all).
+ADMIN_API_KEY="${ADMIN_API_KEY:-}"
 
 echo "=== 1. Selecting subscription ==="
 az account set --subscription "$SUBSCRIPTION"
@@ -150,6 +155,7 @@ SECRET_ARGS=(
 )
 [ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && SECRET_ARGS+=(google-drive-service-account-json="$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
 [ -n "$SHAREPOINT_CLIENT_SECRET" ] && SECRET_ARGS+=(sharepoint-client-secret="$SHAREPOINT_CLIENT_SECRET")
+[ -n "$ADMIN_API_KEY" ] && SECRET_ARGS+=(admin-api-key="$ADMIN_API_KEY")
 
 ENV_ARGS=(
   NEO4J_URI="$NEO4J_URI"
@@ -172,6 +178,7 @@ ENV_ARGS=(
 )
 [ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && ENV_ARGS+=(GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json)
 [ -n "$SHAREPOINT_CLIENT_SECRET" ] && ENV_ARGS+=(SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret)
+[ -n "$ADMIN_API_KEY" ] && ENV_ARGS+=(ADMIN_API_KEY=secretref:admin-api-key)
 
 if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
   echo "App exists, updating image, secrets, and env vars..."

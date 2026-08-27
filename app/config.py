@@ -98,7 +98,25 @@ class Settings(BaseSettings):
     #                                   "knowledge_bases": [{"id": "<group_id>", "label": "<name>"}]}}
     # Empty by default, meaning no API key will be valid until at least one tenant
     # is added (via the script, or this variable).
+    #
+    # This is the *static* onboarding path -- only read once, at process
+    # startup, so adding a tenant here means a full redeploy. Tenants added
+    # through the admin API (see app/api/admin.py, app/graph/tenants.py) are
+    # stored in Neo4j instead and take effect immediately, no redeploy
+    # needed; app/security.py's require_tenant checks this dict first, then
+    # falls back to that Neo4j-backed store.
     tenant_api_keys: dict[str, TenantConfig] = Field(default_factory=dict)
+
+    # Bearer credential for the admin API (POST/GET/DELETE
+    # /api/v1/admin/tenants -- see app/api/admin.py), which creates the
+    # Neo4j-backed tenants described above. A separate credential from any
+    # tenant's own API key, deliberately: it can create/delete *any*
+    # tenant, so it's an operator secret, not something a client ever holds.
+    # Leave blank to disable the admin API entirely (its routes 500 with a
+    # clear "not configured" message rather than accepting no credential at
+    # all). Generate one yourself, e.g. `python -c "import secrets;
+    # print(secrets.token_urlsafe(32))"`.
+    admin_api_key: str = ""
 
     # Fallback Gemini key used only by local scripts/tests (scripts/*.py) that run
     # outside the multi-tenant API and don't have a TenantConfig to draw from. The

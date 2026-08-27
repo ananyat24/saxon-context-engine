@@ -34,10 +34,17 @@ async def _sync_all_connectors(neo4j_client: Neo4jClient) -> None:
     # from app.main indirectly (via the router), so importing it at the top
     # of this module would risk a circular import at app startup.
     from app.api.connectors import _CONNECTOR_FACTORIES
+    from app.graph import tenants
     from app.ingestion.connector_sync import run_connector_sync
 
     repo = GraphRepository(neo4j_client=neo4j_client)
-    for tenant in settings.tenant_api_keys.values():
+    # Statically-configured tenants (settings.tenant_api_keys) plus any
+    # created live through the admin API (app/api/admin.py) -- a background
+    # sync has to reach every tenant's connectors, not just the ones known
+    # at process startup, or a tenant onboarded without a redeploy would
+    # silently never get the auto-sync half of what "add a connector" means.
+    all_tenants = list(settings.tenant_api_keys.values()) + tenants.list_tenant_configs(repo=repo)
+    for tenant in all_tenants:
         for connector in connectors.list_connectors(tenant.tenant_id, repo=repo):
             factory = _CONNECTOR_FACTORIES.get(connector["type"])
             if factory is None:

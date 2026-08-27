@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from mcp.server.transport_security import TransportSecuritySettings
 from app.api import api_router
 from app.config import settings
-from app.graph import authorization, connectors, document_sets
+from app.graph import authorization, connectors, document_sets, tenants
 from app.graph.connector_scheduler import start_connector_scheduler
 from app.graph.graph_repository import GraphRepository
 from app.graph.ingestion_queue import IngestionQueue
@@ -61,6 +61,7 @@ async def lifespan(app: FastAPI):
     authorization.ensure_authorization_indexes(repo=repo)
     document_sets.ensure_document_set_indexes(repo=repo)
     connectors.ensure_connector_indexes(repo=repo)
+    tenants.ensure_tenant_indexes(repo=repo)
     # Periodically syncs every tenant's connectors in the background -- see
     # app/graph/connector_scheduler.py. Returns None (and starts nothing) if
     # disabled via settings.connector_sync_enabled.

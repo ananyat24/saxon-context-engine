@@ -34,6 +34,7 @@ def test_start_connector_scheduler_starts_when_enabled(monkeypatch):
 def test_sync_all_connectors_calls_run_connector_sync_for_every_tenant_connector(monkeypatch):
     tenant = TenantConfig(tenant_id="t1", gemini_api_key="fake", knowledge_bases=[KnowledgeBase(id="kb1", label="KB")])
     monkeypatch.setattr(settings, "tenant_api_keys", {"key": tenant})
+    monkeypatch.setattr("app.graph.tenants.list_tenant_configs", lambda repo=None: [])
 
     fake_connectors = [
         {"id": "c1", "type": "web", "group_id": "kb1", "content_hash": None},
@@ -59,9 +60,43 @@ def test_sync_all_connectors_calls_run_connector_sync_for_every_tenant_connector
     assert calls == [("t1", "c1")]
 
 
+def test_sync_all_connectors_also_syncs_dynamically_created_tenants(monkeypatch):
+    # A tenant onboarded via the admin API (app/api/admin.py) lives only in
+    # Neo4j, not settings.tenant_api_keys -- the scheduler has to reach it
+    # too, or "add a connector" for that tenant would silently never
+    # auto-sync in the background.
+    monkeypatch.setattr(settings, "tenant_api_keys", {})
+    dynamic_tenant = TenantConfig(
+        tenant_id="dynamic1", gemini_api_key="fake", knowledge_bases=[KnowledgeBase(id="kb1", label="KB")]
+    )
+    monkeypatch.setattr(
+        "app.graph.tenants.list_tenant_configs", lambda repo=None: [dynamic_tenant]
+    )
+
+    fake_connectors = [{"id": "c1", "type": "web", "group_id": "kb1", "content_hash": None}]
+    monkeypatch.setattr(
+        "app.graph.connector_scheduler.connectors.list_connectors",
+        lambda tenant_id, repo=None: fake_connectors,
+    )
+    monkeypatch.setattr("app.api.connectors._CONNECTOR_FACTORIES", {"web": lambda c: object()})
+
+    calls = []
+
+    async def fake_run(tenant_arg, connector_arg, factory_arg, *, repo):
+        calls.append((tenant_arg.tenant_id, connector_arg["id"]))
+        return {"synced": True, "skipped_unchanged": False, "error": None, "spend_limit_exceeded": False}
+
+    monkeypatch.setattr("app.ingestion.connector_sync.run_connector_sync", fake_run)
+
+    asyncio.run(connector_scheduler._sync_all_connectors(neo4j_client=None))
+
+    assert calls == [("dynamic1", "c1")]
+
+
 def test_sync_all_connectors_survives_one_connector_raising(monkeypatch):
     tenant = TenantConfig(tenant_id="t1", gemini_api_key="fake", knowledge_bases=[KnowledgeBase(id="kb1", label="KB")])
     monkeypatch.setattr(settings, "tenant_api_keys", {"key": tenant})
+    monkeypatch.setattr("app.graph.tenants.list_tenant_configs", lambda repo=None: [])
 
     fake_connectors = [
         {"id": "c1", "type": "web", "group_id": "kb1", "content_hash": None},

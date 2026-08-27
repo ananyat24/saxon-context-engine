@@ -22,15 +22,24 @@
 # Neo4j database (Neo4j Enterprise Edition) or a fully separate deployment per
 # tenant. Revisit that tradeoff if/when a client's compliance requirements demand
 # physical rather than logical isolation.
-from fastapi import Header, HTTPException, status
+import secrets
+
+from fastapi import Header, HTTPException, Request, status
 
 from app.config import TenantConfig, settings
 
 
-def require_tenant(x_api_key: str = Header(..., alias="X-API-Key")) -> TenantConfig:
+def require_tenant(request: Request, x_api_key: str = Header(..., alias="X-API-Key")) -> TenantConfig:
     """FastAPI dependency: looks up the caller's API key and returns the
     TenantConfig (their knowledge bases + their own Gemini key) it's allowed to
     use. Raises 401 for an unknown/missing key.
+
+    Checks the static, startup-time settings.tenant_api_keys first (no I/O,
+    handles every tenant onboarded the original way -- see that field's own
+    docstring), then falls back to the Neo4j-backed store a tenant created
+    through the admin API lands in (app/graph/tenants.py) -- so a *new*
+    tenant is usable immediately, without a redeploy, while an existing
+    tenant's behavior is unchanged.
 
     Route handlers should use the returned TenantConfig directly and must not
     also accept a group_id or API-key field from the request body -- that would
@@ -38,8 +47,29 @@ def require_tenant(x_api_key: str = Header(..., alias="X-API-Key")) -> TenantCon
     """
     tenant = settings.tenant_api_keys.get(x_api_key)
     if tenant is None:
+        from app.graph.graph_repository import GraphRepository
+        from app.graph.tenants import find_tenant_by_api_key
+
+        repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+        tenant = find_tenant_by_api_key(x_api_key, repo=repo)
+    if tenant is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
     return tenant
+
+
+def require_admin(x_admin_key: str = Header(..., alias="X-Admin-Key")) -> None:
+    """FastAPI dependency backing the admin API (app/api/admin.py) -- a
+    single operator-held credential, separate from any tenant's own API
+    key, since it can create/delete *any* tenant. secrets.compare_digest
+    (not `==`) so a mistyped key can't be brute-forced faster via response-
+    timing differences on how many leading characters matched."""
+    if not settings.admin_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The admin API isn't configured on this server -- ask your operator to set ADMIN_API_KEY.",
+        )
+    if not secrets.compare_digest(x_admin_key, settings.admin_api_key):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid admin key")
 
 
 def resolve_knowledge_base(tenant: TenantConfig, knowledge_base: str | None) -> str:
