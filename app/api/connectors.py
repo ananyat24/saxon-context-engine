@@ -23,7 +23,9 @@ from app.ingestion.connector_sync import run_connector_sync
 from app.ingestion.database_source import DatabaseConnector
 from app.ingestion.document_source import DocumentConnector
 from app.ingestion.email_source import EmailConnector
+from app.ingestion.gmail_source import GmailConnector
 from app.ingestion.google_drive_source import GoogleDriveConnector
+from app.ingestion.outlook_mail_source import OutlookMailConnector
 from app.ingestion.sharepoint_source import SharePointConnector
 from app.ingestion.web_source import WebConnector
 from app.security import require_tenant
@@ -34,11 +36,12 @@ router = APIRouter()
 # Adding a new type (another real live source, once credentials exist) is:
 # implement SourceConnector (see app/ingestion/connector_base.py) and add one
 # entry here -- no changes needed to the sync route below, IngestionPipeline,
-# or ontology handling. "database"/"documents"/"email" read bundled mock
-# data rather than a live source (see each module's docstring) -- they exist
-# to prove the connector types most clients actually have (a CRM/DB, a
-# document store, an inbox) work end to end. "google_drive" and "sharepoint"
-# are the real live source connectors.
+# or ontology handling. "database"/"email" read bundled mock data rather than
+# a live source (see each module's docstring) -- "database" stands in for a
+# CRM/DB until one's wired up, and "email" is the from-scratch fallback for a
+# mailbox that isn't Gmail or Microsoft 365. Every other type below is a real
+# live source: "web" (any URL), "google_drive"/"sharepoint" (live document
+# stores), and "gmail"/"outlook_mail" (live mailboxes).
 _CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
     "web": lambda connector: WebConnector(connector["url"]),
     "database": lambda connector: DatabaseConnector(),
@@ -46,21 +49,31 @@ _CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
     "email": lambda connector: EmailConnector(),
     "google_drive": lambda connector: GoogleDriveConnector(connector["url"]),
     "sharepoint": lambda connector: SharePointConnector(connector["url"]),
+    "gmail": lambda connector: GmailConnector(connector["url"]),
+    "outlook_mail": lambda connector: OutlookMailConnector(connector["url"]),
 }
 
-# Which types read from a tenant-supplied address (a URL/site link) vs. a
-# fixed bundled sample with nothing to collect (see _CONNECTOR_FACTORIES
+# Which types read from a tenant-supplied address (a URL/site link/mailbox)
+# vs. a fixed bundled sample with nothing to collect (see _CONNECTOR_FACTORIES
 # above) or an operator-wide credential with no per-connector address at all.
-_TYPES_REQUIRING_URL = {"web", "google_drive", "sharepoint"}
+_TYPES_REQUIRING_URL = {"web", "google_drive", "sharepoint", "gmail", "outlook_mail"}
 
 # Real live connector types need an operator-wide credential configured
 # before a tenant can even create one -- checked here so that's a clear 400
 # at creation time, not a confusing failure the first time someone clicks
 # "Sync now". Each check function takes no arguments and returns whether
-# that type's required setting(s) are present.
+# that type's required setting(s) are present. gmail/outlook_mail reuse the
+# same operator credentials as google_drive/sharepoint respectively (see
+# app/ingestion/gmail_source.py and app/ingestion/outlook_mail_source.py for
+# why) -- the extra Graph/Workspace permission each needs on top of that
+# shared credential can't be checked from here, only at sync time.
 _OPERATOR_CONFIG_CHECKS: dict[str, Callable[[], bool]] = {
     "google_drive": lambda: bool(settings.google_drive_service_account_json),
+    "gmail": lambda: bool(settings.google_drive_service_account_json),
     "sharepoint": lambda: bool(
+        settings.sharepoint_tenant_id and settings.sharepoint_client_id and settings.sharepoint_client_secret
+    ),
+    "outlook_mail": lambda: bool(
         settings.sharepoint_tenant_id and settings.sharepoint_client_id and settings.sharepoint_client_secret
     ),
 }

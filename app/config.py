@@ -186,6 +186,16 @@ class Settings(BaseSettings):
     # Console: enable the Drive API, create a service account, create a JSON
     # key for it, then share the target Drive folder with that service
     # account's email (found in the key JSON's "client_email" field).
+    #
+    # The same service account also backs the "gmail" connector type (see
+    # app/ingestion/gmail_source.py) -- reading a mailbox needs one more
+    # setup step beyond this key, though, since a mailbox can't be "shared"
+    # with a service account the way a Drive folder can: a Google Workspace
+    # admin must grant it domain-wide delegation for the gmail.readonly
+    # scope (Workspace Admin console -> Security -> API controls ->
+    # Domain-wide Delegation -> add the service account's numeric client id
+    # with that scope). Domain-wide delegation is a Workspace (paid)
+    # feature -- gmail doesn't work against a personal Gmail account.
     google_drive_service_account_json: str = ""
 
     # Azure AD (Entra ID) app registration credentials for the "sharepoint"
@@ -205,6 +215,15 @@ class Settings(BaseSettings):
     # registrations -> New registration, then Certificates & secrets -> New
     # client secret, then API permissions -> Add a permission -> Microsoft
     # Graph -> Application permissions -> Sites.Read.All -> Grant admin consent.
+    #
+    # The same app registration also backs the "outlook_mail" connector type
+    # (see app/ingestion/outlook_mail_source.py) -- that one additionally
+    # needs the Mail.Read Microsoft Graph *application* permission granted
+    # and admin-consented on top of Sites.Read.All (API permissions -> Add a
+    # permission -> Microsoft Graph -> Application permissions -> Mail.Read
+    # -> Grant admin consent). Same org-wide caveat as Sites.Read.All: once
+    # consented, this connector type can read any mailbox in the tenant, not
+    # just the one a connector happens to point at.
     sharepoint_tenant_id: str = ""
     sharepoint_client_id: str = ""
     sharepoint_client_secret: str = ""
