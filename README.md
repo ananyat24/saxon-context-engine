@@ -368,11 +368,13 @@ shows up a moment later.
 
 | Type | What it reads | Auth |
 |---|---|---|
-| `web` | A single web page | none -- just fetches the URL |
+| `web` | A single web page | none -- just fetches the URL (SSRF-guarded: rejects loopback/private/link-local/reserved/multicast targets and redirects, so a connector can't be pointed at internal infrastructure) |
 | `google_drive` | Plain text, Markdown, CSV, PDF, Word (`.docx`), Google Docs/Sheets/Slides in a shared Drive folder | a Google Cloud service account (`GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`); the folder must be explicitly shared with that account's email first |
 | `sharepoint` | Plain text/Markdown/CSV/PDF/`.docx` files in a site's default document library | an Azure AD app registration via OAuth2 client credentials (`SHAREPOINT_TENANT_ID`/`CLIENT_ID`/`CLIENT_SECRET`) -- note this grant is org-wide (`Sites.Read.All`) once admin-consented, not per-site like Drive's sharing model |
-| `database` | A small bundled demo CRM dataset | none -- demo data, not a live source |
-| `documents` | A small bundled demo document store | none -- demo data, not a live source |
+| `gmail` | Recent messages in one Gmail inbox | the same Drive service account, but a mailbox can't be per-folder-shared -- a Workspace admin must grant it domain-wide delegation for `gmail.readonly`; doesn't work against a personal (non-Workspace) Gmail account |
+| `outlook_mail` | Recent messages in one Microsoft 365 mailbox's inbox | the same SharePoint app registration, plus the `Mail.Read` Graph application permission, admin-consented, alongside `Sites.Read.All` |
+| `database` | Every CSV bundled under `data/samples/mock_crm/` | none -- demo data, not a live source; drop in your own CSV(s) and it infers id/name columns for anything that isn't the original `accounts.csv` |
+| `documents` | Every `.txt`/`.pdf`/`.docx` bundled under `data/samples/mock_docs/` | none -- demo data, not a live source |
 | `email` | A small bundled demo inbox | none -- demo data, not a live source |
 
 A scanned/image-only PDF has no extractable text layer and is silently
@@ -629,7 +631,9 @@ saxon-context-engine/
 │   ├── ingestion/                # Turning raw text/records/live sources into graph writes
 │   │   ├── connector_base.py           # SourceConnector interface every connector type implements
 │   │   ├── connector_sync.py           # fetch -> dedup-check -> ingest, shared by manual and scheduled sync
-│   │   ├── web_source.py, google_drive_source.py, sharepoint_source.py   # real live connectors
+│   │   ├── web_source.py, google_drive_source.py, sharepoint_source.py  # real live connectors
+│   │   ├── gmail_source.py, outlook_mail_source.py                     # real live mailbox connectors
+│   │   ├── html_text.py                # shared HTML-to-text stripping (web pages, mail bodies)
 │   │   ├── database_source.py, document_source.py, email_source.py      # demo/mock-data connectors
 │   │   ├── document_text_extraction.py # shared PDF/DOCX text extraction (Drive + SharePoint)
 │   │   ├── structured.py               # row -> prose conversion for structured sources
@@ -704,7 +708,7 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
 | Core data models (`app/models/`) | Implemented |
 | Ontology (`app/ontology/`, `ontology/`) | Implemented and tested |
 | Graph persistence (`app/graph/`) | Implemented and tested |
-| Ingestion (`app/ingestion/`) | Six connector types: `web`, `google_drive`, and `sharepoint` are real live sources; `database`/`documents`/`email` read bundled demo data. Scheduled + on-demand sync, content-hash dedup, and an in-process queue decoupling a sync trigger from extraction |
+| Ingestion (`app/ingestion/`) | Eight connector types: `web`, `google_drive`, `sharepoint`, `gmail`, and `outlook_mail` are real live sources; `database`/`documents`/`email` read bundled demo data. Scheduled + on-demand sync, content-hash dedup, and an in-process queue decoupling a sync trigger from extraction |
 | Retrieval (`app/retrieval/`) | Named-entity resolution (including cross-source pooling) tried first, Graphiti's hybrid search as a fallback -- see `GraphRepository.search_graphiti_facts` |
 | Context composition (`app/context/`) | Synthesized answers, per-fact source attribution, a short-lived response cache, and per-query observability (`retrieval_path`/`cache_hit`/`cost_usd`) |
 | API (`app/api/`) | `/health`, `/entities`, `/context/query`, `/graph/*` (role-based visibility), `/document-sets`, `/connectors` |
