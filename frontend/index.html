@@ -201,19 +201,21 @@
                 knowledge bases. Each sync fetches the latest content and only re-processes it
                 if it's actually changed since last time.</p>
             <p id="connectorsHealthSummary" class="muted" style="font-size:0.85rem"></p>
-            <table class="doc-sets-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Source</th>
-                        <th>Feeds into</th>
-                        <th>Status</th>
-                        <th>Last synced</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody id="connectorsBody"></tbody>
-            </table>
+            <div class="table-scroll">
+                <table class="doc-sets-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Source</th>
+                            <th>Feeds into</th>
+                            <th>Status</th>
+                            <th>Last synced</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="connectorsBody"></tbody>
+                </table>
+            </div>
             <p id="connectorsEmpty" class="muted" style="display:none">No source connectors yet -- add one below.</p>
 
             <details id="connectorFormWrap" class="raw-details">
@@ -280,18 +282,20 @@
             <p class="muted">Group your connectors into a named bundle, then use it to control
                 which of them the question above searches across -- instead of picking exactly
                 one connector every time.</p>
-            <table class="doc-sets-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Connectors</th>
-                        <th>Status</th>
-                        <th>Public</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody id="docSetsBody"></tbody>
-            </table>
+            <div class="table-scroll">
+                <table class="doc-sets-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Connectors</th>
+                            <th>Status</th>
+                            <th>Public</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="docSetsBody"></tbody>
+                </table>
+            </div>
             <p id="docSetsEmpty" class="muted" style="display:none">No document sets yet -- create one below.</p>
 
             <details id="docSetFormWrap" class="raw-details">

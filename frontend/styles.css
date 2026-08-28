@@ -375,11 +375,16 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
 .raw-details { margin-top: 0.75rem; }
 .raw-details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
 
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  margin-top: 0.75rem;
+}
 .doc-sets-table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 0.75rem;
   font-size: 0.85rem;
+  table-layout: fixed;
 }
 .doc-sets-table th {
   text-align: left;
@@ -395,8 +400,27 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-primary);
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 .doc-sets-table tr:last-child td { border-bottom: none; }
+
+/* Column proportions per table -- table-layout: fixed (above) needs these so
+   a long, unbreakable value (a connector's full URL, in particular) wraps
+   within its own cell instead of blowing out the column width, without
+   squeezing the shorter columns (Status, Last synced, the action buttons)
+   down to nothing. */
+#connectorsCard .doc-sets-table th:nth-child(1), #connectorsCard .doc-sets-table td:nth-child(1) { width: 15%; }
+#connectorsCard .doc-sets-table th:nth-child(2), #connectorsCard .doc-sets-table td:nth-child(2) { width: 32%; }
+#connectorsCard .doc-sets-table th:nth-child(3), #connectorsCard .doc-sets-table td:nth-child(3) { width: 15%; }
+#connectorsCard .doc-sets-table th:nth-child(4), #connectorsCard .doc-sets-table td:nth-child(4) { width: 15%; }
+#connectorsCard .doc-sets-table th:nth-child(5), #connectorsCard .doc-sets-table td:nth-child(5) { width: 13%; }
+#connectorsCard .doc-sets-table th:nth-child(6), #connectorsCard .doc-sets-table td:nth-child(6) { width: 10%; }
+
+#docSetsCard .doc-sets-table th:nth-child(1), #docSetsCard .doc-sets-table td:nth-child(1) { width: 20%; }
+#docSetsCard .doc-sets-table th:nth-child(2), #docSetsCard .doc-sets-table td:nth-child(2) { width: 45%; }
+#docSetsCard .doc-sets-table th:nth-child(3), #docSetsCard .doc-sets-table td:nth-child(3) { width: 15%; }
+#docSetsCard .doc-sets-table th:nth-child(4), #docSetsCard .doc-sets-table td:nth-child(4) { width: 10%; }
+#docSetsCard .doc-sets-table th:nth-child(5), #docSetsCard .doc-sets-table td:nth-child(5) { width: 10%; }
 
 .doc-set-connector-picker {
   margin: 0.6rem 0;
