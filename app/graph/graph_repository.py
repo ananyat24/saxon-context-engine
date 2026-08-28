@@ -186,8 +186,21 @@ class GraphRepository:
         name would incorrectly merge. Worth revisiting once a stronger
         signal exists in the data.
         """
+        # NOT n:Decision throughout this method (and every other general
+        # entity/fact query in this class) -- a :Decision node is an
+        # internal audit record of a past generated recommendation (see
+        # app/graph/decisions.py), not a business entity a person would ever
+        # be asking about. It's labeled :Entity too (the ontology models
+        # Decision as extending Event, which extends Entity), so without
+        # this exclusion it's indistinguishable from real data to every
+        # query in this class -- found for real in production: a Decision
+        # node's own auto-generated name ("Recommendation for: <query>") got
+        # sampled as a suggested-question topic, and its INVOLVES edge's
+        # boilerplate fact text ("Saxon generated this recommendation while
+        # analyzing: <query>") got returned as if it were a real fact about
+        # the entity the Decision was about.
         exact_rows = self.execute_cypher(
-            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) = toLower($name) "
+            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) = toLower($name) AND NOT n:Decision "
             "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id",
             {"group_ids": group_ids, "name": name},
         )
@@ -200,7 +213,7 @@ class GraphRepository:
         # benefit -- skip it in that case.
         if len(core_token) >= 3:
             candidate_rows = self.execute_cypher(
-                "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS $core_token "
+                "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS $core_token AND NOT n:Decision "
                 "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id",
                 {"group_ids": group_ids, "core_token": core_token},
             )
@@ -218,7 +231,7 @@ class GraphRepository:
             return list(by_uuid.values())
 
         return self.execute_cypher(
-            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS toLower($name) "
+            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS toLower($name) AND NOT n:Decision "
             "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id LIMIT 1",
             {"group_ids": group_ids, "name": name},
         )
@@ -305,9 +318,18 @@ class GraphRepository:
     def _entity_own_facts(self, uuid: str, visible_uuids: Optional[set[str]]) -> list[dict[str, Any]]:
         """Pulls every edge directly touching a resolved entity straight from
         Neo4j -- precise by construction, unlike semantic search, since it can
-        only ever return facts that are actually about this entity."""
+        only ever return facts that are actually about this entity.
+
+        Excludes an edge to/from a :Decision node -- that's an internal
+        audit record of a past generated recommendation (see
+        app/graph/decisions.py), not a real fact about this entity, and its
+        boilerplate INVOLVES-edge text ("Saxon generated this recommendation
+        while analyzing: <query>") isn't something a person asking about
+        this entity should ever see mixed in with its actual facts. See
+        _match_entities_by_name's docstring for the same exclusion and why.
+        """
         rows = self.execute_cypher(
-            "MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-(m) "
+            "MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-(m) WHERE NOT m:Decision "
             "RETURN r.fact AS fact, r.name AS relationship_type, r.valid_at AS valid_at, "
             "r.invalid_at AS invalid_at, r.expired_at AS expired_at, r.group_id AS group_id, "
             "startNode(r).uuid AS source_node_uuid, endNode(r).uuid AS target_node_uuid",
@@ -352,6 +374,7 @@ class GraphRepository:
         its nodes are visible to this caller)."""
         rows = self.execute_cypher(
             "MATCH p = shortestPath((a:Entity {uuid: $uuid_a})-[:RELATES_TO*1..4]-(b:Entity {uuid: $uuid_b})) "
+            "WHERE NONE(node IN nodes(p) WHERE node:Decision) "
             "RETURN [rel IN relationships(p) | rel.fact] AS facts, "
             "[n IN nodes(p) | n.uuid] AS path_uuids",
             {"uuid_a": uuid_a, "uuid_b": uuid_b},
@@ -385,6 +408,7 @@ class GraphRepository:
             f"""
             MATCH p = shortestPath((a:Entity {{uuid: $uuid_a}})-[:RELATES_TO*1..{self._CAUSAL_MAX_HOPS}]-(b:Entity {{uuid: $uuid_b}}))
             WHERE ALL(node IN nodes(p) WHERE node.group_id IN $group_ids)
+              AND NONE(node IN nodes(p) WHERE node:Decision)
             WITH relationships(p) AS rels, [n IN nodes(p) | n.uuid] AS path_uuids
             UNWIND range(0, size(rels) - 1) AS hop
             WITH rels[hop] AS rel, hop, path_uuids
@@ -483,6 +507,7 @@ class GraphRepository:
             MATCH p = (n:Entity {{uuid: $uuid}})-[:RELATES_TO*1..{self._CAUSAL_MAX_HOPS}]-(m:Entity)
             WHERE ALL(rel IN relationships(p) WHERE rel.name IN $causal_types)
               AND ALL(node IN nodes(p) WHERE node.group_id IN $group_ids)
+              AND NONE(node IN nodes(p) WHERE node:Decision)
             WITH p, relationships(p) AS rels, nodes(p) AS path_nodes, length(p) AS path_length
             UNWIND range(0, size(rels) - 1) AS hop
             WITH rels[hop] AS rel, hop, path_length, path_nodes

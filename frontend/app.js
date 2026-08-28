@@ -1437,10 +1437,17 @@ const RETRIEVAL_PATH_LABELS = {
 
 // Small, quiet observability line (v4): how this specific answer was
 // produced -- see app/context/orchestrator.py's retrieval_path and
-// app/context/query_service.py's cache_hit/cost_usd. Not meant to be the
-// focus of the page, just visible proof of the token/cost-efficiency story
-// (skip semantic search when a named entity already answers it, skip the
-// whole retrieval+synthesis call on a cache hit) for anyone who wants it.
+// app/context/query_service.py's cache_hit. Not meant to be the focus of
+// the page, just visible proof of the retrieval-efficiency story (skip
+// semantic search when a named entity already answers it, skip the whole
+// retrieval+synthesis call on a cache hit) for anyone who wants it.
+//
+// Deliberately does NOT include cost_usd -- what this app spends on LLM
+// calls is this operator's own internal cost, not something every tenant's
+// end user browsing the page needs to see next to their answer. It's still
+// in the raw API response for anyone building their own tooling against
+// it; the running total for whoever operates this deployment is behind
+// ADMIN_API_KEY (see the footer link, and GET /api/v1/admin/spend).
 function renderQueryStats(el, metadata) {
   if (!metadata) {
     el.hidden = true;
@@ -1450,9 +1457,6 @@ function renderQueryStats(el, metadata) {
   const pathLabel = RETRIEVAL_PATH_LABELS[metadata.retrieval_path];
   if (pathLabel) parts.push(pathLabel);
   if (metadata.cache_hit) parts.push("served from cache (no new retrieval or LLM call)");
-  if (typeof metadata.cost_usd === "number") {
-    parts.push(metadata.cost_usd > 0 ? `~$${metadata.cost_usd.toFixed(4)} estimated` : "no LLM cost incurred");
-  }
   if (!parts.length) {
     el.hidden = true;
     return;
@@ -1482,6 +1486,47 @@ function renderMcpCard() {
     `Header:    X-API-Key: ${key}\n\n` +
     `Streamable HTTP transport -- add this URL and header in your MCP client's server settings.`;
 }
+
+// --- Admin: running spend (footer link) -------------------------------------
+// Deliberately separate from the tenant access key above -- this reads
+// GET /api/v1/admin/spend, gated by the operator-only ADMIN_API_KEY (see
+// app/security.py's require_admin), never a tenant's own key. Not meant to
+// be a real admin panel -- just enough to keep the running total out of the
+// per-query line every tenant's user sees, without losing visibility for
+// whoever actually operates this deployment. Kept in localStorage under a
+// different key than saxon_api_key so entering one never substitutes for
+// the other.
+function getAdminKey() {
+  return localStorage.getItem("saxon_admin_key") || "";
+}
+
+document.getElementById("adminSpendBtn").addEventListener("click", async () => {
+  let key = getAdminKey();
+  if (!key) {
+    key = window.prompt("Admin key (ADMIN_API_KEY):") || "";
+    if (!key) return;
+    localStorage.setItem("saxon_admin_key", key);
+  }
+  try {
+    const res = await fetch(`${API}/admin/spend`, { headers: { "X-Admin-Key": key } });
+    if (res.status === 401) {
+      localStorage.removeItem("saxon_admin_key"); // a stored key that no longer works shouldn't keep silently failing
+      window.alert("That admin key isn't valid.");
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      window.alert(body.detail || "Could not load spend totals.");
+      return;
+    }
+    const data = await res.json();
+    const line = (label, bucket) =>
+      `${label}: $${bucket.spent_usd.toFixed(4)} of $${bucket.budget_usd.toFixed(2)} budget`;
+    window.alert(`${line("Query spend", data.query)}\n${line("Ingestion spend", data.ingestion)}`);
+  } catch (err) {
+    window.alert(`Error: ${err.message}`);
+  }
+});
 
 // --- Init -------------------------------------------------------------------
 async function loadTenantData() {

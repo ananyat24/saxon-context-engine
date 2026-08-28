@@ -6,12 +6,32 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from app.config import KnowledgeBase
+from app.config import KnowledgeBase, settings
 from app.graph import tenants
 from app.graph.graph_repository import GraphRepository
+from app.graph.spend_limiter import get_limiter
 from app.security import require_admin
 
 router = APIRouter(dependencies=[Depends(require_admin)])
+
+
+@router.get("/spend")
+def get_spend():
+    """The real, persisted running totals for both spend-limiter buckets
+    (see app/graph/spend_limiter.py) -- moved behind ADMIN_API_KEY rather
+    than shown per-query in the main UI, which every tenant's user could
+    see regardless of whether they should know this app's own operating
+    cost. Per-query cost is still in the raw API response
+    (metadata.cost_usd) for anyone building their own tooling against it --
+    this route is just what the demo UI's own admin-only footer reads."""
+    limiter = get_limiter()
+    return {
+        "query": {"spent_usd": round(limiter.spent("query"), 6), "budget_usd": settings.azure_openai_query_budget_usd},
+        "ingestion": {
+            "spent_usd": round(limiter.spent("ingestion"), 6),
+            "budget_usd": settings.azure_openai_ingestion_budget_usd,
+        },
+    }
 
 
 class CreateTenantRequest(BaseModel):

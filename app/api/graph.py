@@ -58,18 +58,25 @@ def get_summary(
         rel_count = authorization.get_visible_relationship_count(group_id, user_id, repo=repo)
         labels = authorization.get_visible_entity_types(group_id, user_id, repo=repo)
     else:
+        # NOT n:Decision (and a/b below) throughout this route -- a
+        # :Decision node is an internal audit record of a past generated
+        # recommendation (see app/graph/decisions.py), not a business entity
+        # this "what does the graph actually know" summary should count or
+        # list as a present entity type. See GraphRepository._entity_own_facts's
+        # docstring for the full story on why this exclusion exists.
         node_count = repo.execute_cypher(
-            "MATCH (n:Entity {group_id: $group_id}) RETURN count(n) AS c",
+            "MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:Decision RETURN count(n) AS c",
             {"group_id": group_id},
         )[0]["c"]
         rel_count = repo.execute_cypher(
-            "MATCH (:Entity {group_id: $group_id})-[r:RELATES_TO]->(:Entity {group_id: $group_id}) RETURN count(r) AS c",
+            "MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id}) "
+            "WHERE NOT a:Decision AND NOT b:Decision RETURN count(r) AS c",
             {"group_id": group_id},
         )[0]["c"]
         labels = [
             row["labels"]
             for row in repo.execute_cypher(
-                "MATCH (n:Entity {group_id: $group_id}) RETURN DISTINCT labels(n) AS labels",
+                "MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:Decision RETURN DISTINCT labels(n) AS labels",
                 {"group_id": group_id},
             )
         ]
@@ -104,7 +111,7 @@ def get_nodes(
 
     return repo.execute_cypher(
         """
-        MATCH (n:Entity {group_id: $group_id})
+        MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:Decision
         RETURN n.uuid AS id, n.name AS name, labels(n) AS labels, n.summary AS summary
         ORDER BY n.created_at DESC
         LIMIT $limit
@@ -134,6 +141,7 @@ def get_relationships(
     return repo.execute_cypher(
         """
         MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id})
+        WHERE NOT a:Decision AND NOT b:Decision
         RETURN a.name AS source, r.name AS type, b.name AS target, r.fact AS fact
         ORDER BY r.created_at DESC
         LIMIT $limit

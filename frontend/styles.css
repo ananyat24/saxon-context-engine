@@ -540,3 +540,19 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
 .graph-viz .gv-node { fill: var(--navy); stroke: var(--accent); stroke-width: 2; }
 .graph-viz .gv-label { fill: var(--text-secondary); font-size: 9px; font-family: 'Inclusive Sans', sans-serif; }
 .graph-viz .gv-edge-label { fill: var(--text-muted); font-size: 7px; font-family: 'Inclusive Sans', sans-serif; }
+
+.page-footer {
+  max-width: 900px;
+  margin: 2rem auto 1.5rem;
+  padding: 0 1.25rem;
+  text-align: right;
+}
+.footer-admin-link {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.2rem;
+}
+.footer-admin-link:hover { color: var(--text-secondary); text-decoration: underline; }
