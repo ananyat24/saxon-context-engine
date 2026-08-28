@@ -160,6 +160,104 @@ def test_fetch_reads_supported_files_and_skips_the_rest(monkeypatch):
     assert "Google Drive (readme.txt)" in names
 
 
+# --- Regression: Drive doesn't always report an accurate mimeType for a
+# regular file -- depending on the upload path (drag-drop, Drive for
+# Desktop, some third-party sync tools), a genuine .csv can come back
+# tagged application/octet-stream instead of text/csv, which used to make
+# every file in an otherwise-valid folder look unsupported and fail the
+# whole sync with "No supported files found" even though the files were
+# exactly the supported kind. Extension is now checked as a fallback
+# alongside mimeType (same fix shape sharepoint_source.py already needed).
+
+
+def test_fetch_reads_a_csv_with_a_generic_mimetype_via_extension_fallback(monkeypatch):
+    _patch_auth(monkeypatch)
+
+    files = [{"id": "csv1", "name": "orders.csv", "mimeType": "application/octet-stream"}]
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/files"):
+                return _FakeResponse(200, json_data={"files": files})
+            if url.endswith("/csv1"):
+                assert params["alt"] == "media"
+                return _FakeResponse(200, text="OrderID,Status\nSO-1,shipped")
+            raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeClient())
+
+    connector = GoogleDriveConnector("1AbC-defGHI_23")
+    records = asyncio.run(connector.fetch())
+
+    assert len(records) == 1
+    assert records[0].body == "OrderID,Status\nSO-1,shipped"
+
+
+def test_fetch_reads_a_pdf_with_a_generic_mimetype_via_extension_fallback(monkeypatch):
+    _patch_auth(monkeypatch)
+
+    files = [{"id": "pdf1", "name": "report.pdf", "mimeType": "application/octet-stream"}]
+
+    class _FakeBinaryResponse:
+        status_code = 200
+        content = b"fake-pdf-bytes"
+
+        def raise_for_status(self):
+            pass
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            if url.endswith("/files"):
+                return _FakeResponse(200, json_data={"files": files})
+            return _FakeBinaryResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeClient())
+    monkeypatch.setattr(
+        "app.ingestion.google_drive_source._BINARY_PARSERS",
+        {"application/pdf": lambda data: f"parsed:{data.decode()}"},
+    )
+
+    connector = GoogleDriveConnector("1AbC-defGHI_23")
+    records = asyncio.run(connector.fetch())
+
+    assert len(records) == 1
+    assert records[0].body == "parsed:fake-pdf-bytes"
+
+
+def test_fetch_still_skips_a_genuinely_unsupported_file_with_no_matching_extension(monkeypatch):
+    _patch_auth(monkeypatch)
+
+    files = [{"id": "img1", "name": "photo.png", "mimeType": "application/octet-stream"}]
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url, headers=None, params=None):
+            return _FakeResponse(200, json_data={"files": files})
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeClient())
+
+    connector = GoogleDriveConnector("1AbC-defGHI_23")
+    with pytest.raises(ConnectorFetchError, match="No supported files"):
+        asyncio.run(connector.fetch())
+
+
 def test_fetch_raises_clear_error_on_403(monkeypatch):
     _patch_auth(monkeypatch)
 

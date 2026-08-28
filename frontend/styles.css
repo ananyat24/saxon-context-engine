@@ -78,6 +78,17 @@ header {
 .badge-muted { background: rgba(255,255,255,0.15); color: #cdd6e2; }
 .badge-neutral { background: var(--surface-sunken); color: var(--text-muted); }
 
+/* A real <button>, styled to still read as a badge -- for the "Error"
+   status pill, which is clickable (see formatSyncStatus in app.js) to show
+   why a sync failed, not just decorative. */
+.badge-btn {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.badge-btn:hover { filter: brightness(1.1); }
+.badge-btn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+
 .kb-select {
   background: rgba(255,255,255,0.1);
   color: #f3f6fa;

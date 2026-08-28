@@ -13,6 +13,7 @@
 import asyncio
 import json
 import re
+from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -24,7 +25,9 @@ from app.config import settings
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector, hash_records
 from app.ingestion.document_text_extraction import (
     BINARY_TEXT_PARSERS as _BINARY_PARSERS,
+    DOCX_MIME as _DOCX_MIME,
     MAX_BINARY_BYTES as _MAX_BINARY_BYTES,
+    PDF_MIME as _PDF_MIME,
     PLAIN_TEXT_MIME_TYPES as _SUPPORTED_FILE_MIME_TYPES,
 )
 from app.ingestion.file_source import SourceRecord
@@ -57,6 +60,20 @@ _GOOGLE_NATIVE_EXPORT_MIME_TYPES = {
 # also doubles as a defensive check before the id is interpolated into a
 # Drive API `q` search-query string below.
 _DRIVE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+# Drive's own mimeType field for a regular (non-Google-native) file isn't
+# always reliable -- depending on how a file got into the folder (drag-drop
+# from certain OS file managers, Drive for Desktop sync, some third-party
+# upload tools), a genuine .csv/.txt/.md can come back tagged as something
+# generic like application/octet-stream instead of text/csv, which used to
+# make every file in an otherwise-valid folder look unsupported and fail the
+# whole sync with "No supported files found" even though the files were
+# exactly the supported kind. SharePoint's connector already has to work
+# around the equivalent Graph API quirk for the same reason (see
+# sharepoint_source.py's own _TEXT_EXTENSIONS) -- extension is checked as a
+# fallback signal alongside mimeType here too, not instead of it.
+_TEXT_EXTENSIONS = (".txt", ".md", ".csv")
+_BINARY_MIME_BY_EXTENSION = {".pdf": _PDF_MIME, ".docx": _DOCX_MIME}
 
 
 def _extract_folder_id(url_or_id: str) -> str:
@@ -157,7 +174,10 @@ class GoogleDriveConnector(SourceConnector):
             return None  # not recursing into subfolders in this MVP
 
         export_mime = _GOOGLE_NATIVE_EXPORT_MIME_TYPES.get(mime)
-        parser = _BINARY_PARSERS.get(mime)
+        is_plain_text = mime in _SUPPORTED_FILE_MIME_TYPES or name.lower().endswith(_TEXT_EXTENSIONS)
+        parser = _BINARY_PARSERS.get(mime) or _BINARY_PARSERS.get(
+            _BINARY_MIME_BY_EXTENSION.get(Path(name).suffix.lower(), "")
+        )
         try:
             if export_mime:
                 resp = await client.get(
@@ -167,7 +187,7 @@ class GoogleDriveConnector(SourceConnector):
                 )
                 resp.raise_for_status()
                 text = resp.text.strip()
-            elif mime in _SUPPORTED_FILE_MIME_TYPES:
+            elif is_plain_text:
                 resp = await client.get(
                     f"https://www.googleapis.com/drive/v3/files/{file_id}",
                     headers=headers,

@@ -374,8 +374,15 @@ function formatSyncStatus(c) {
   };
   const label = labels[c.status] || c.status;
   const cls = c.status === "error" ? "badge-bad" : c.status === "never_synced" ? "badge-neutral" : "badge-ok";
-  const title = c.status === "error" && c.last_error ? ` title="${escapeXml(c.last_error)}"` : "";
-  return `<span class="badge ${cls}"${title}>${escapeXml(label)}</span>`;
+  // An error badge is a real button, not just a span with a hover title --
+  // the hover title stays too (still useful on desktop without a click),
+  // but a click is the discoverable, works-on-touch way to actually read
+  // why a sync failed, rather than a message that only ever showed up if
+  // you happened to hover exactly the right badge.
+  if (c.status === "error" && c.last_error) {
+    return `<button type="button" class="badge badge-bad badge-btn" title="${escapeXml(c.last_error)}" data-sync-error-id="${escapeXml(c.id)}">${escapeXml(label)}</button>`;
+  }
+  return `<span class="badge ${cls}">${escapeXml(label)}</span>`;
 }
 
 const CONNECTOR_TYPE_LABELS = {
@@ -468,6 +475,12 @@ function renderConnectorsTable() {
   });
   body.querySelectorAll("[data-sync-id]").forEach((btn) => {
     btn.addEventListener("click", () => syncConnector(btn.dataset.syncId));
+  });
+  body.querySelectorAll("[data-sync-error-id]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const c = connectorDirectory.find((x) => x.id === btn.dataset.syncErrorId);
+      window.alert(c?.last_error || "This connector's last sync failed, but no explanation was recorded.");
+    });
   });
   body.querySelectorAll("[data-delete-connector-id]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1323,7 +1336,30 @@ async function runCausalQuery() {
     const data = await res.json();
     const rec = data.metadata?.recommendation;
     if (!rec) {
-      recEl.innerHTML = `<p class="muted">${escapeXml(data.metadata?.summary || "No causal chain found for that.")}</p>`;
+      // No real causal chain -- either nothing at all to go on
+      // (retrieval_path "none"/"causal_chain_empty"), or a fallback to the
+      // entity's own directly-known facts (retrieval_path
+      // "causal_fallback_direct_facts", see get_causal_context_packet).
+      // The fallback case used to render identically to a real causal
+      // answer -- same muted paragraph, no distinguishing label -- which
+      // made it look like the causal engine had actually explained
+      // something (and, when the plain "Ask" answer happened to be the
+      // same single fact, made the two panels look like an outright bug).
+      // Labeling it explicitly as "no causal chain, here's the closest
+      // known fact instead" is the fix: still honest that this ISN'T an
+      // inference, but no longer indistinguishable from one.
+      const summary = data.metadata?.summary || "No causal chain found for that.";
+      const facts = data.metadata?.facts || [];
+      if (data.metadata?.retrieval_path === "causal_fallback_direct_facts") {
+        const factsHost = document.createElement("div");
+        renderFacts(factsHost, facts);
+        recEl.innerHTML = `
+          <p class="fact-list-label">No causal chain connects this to anything else -- here's the most directly relevant fact instead (not an inference, not a recommendation):</p>
+          <p>${escapeXml(summary)}</p>`;
+        recEl.appendChild(factsHost);
+      } else {
+        recEl.innerHTML = `<p class="muted">${escapeXml(summary)}</p>`;
+      }
       return;
     }
     // Deliberately styled/labeled distinctly from the plain-facts answer
