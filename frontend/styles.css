@@ -470,6 +470,16 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
 .sync-btn:hover { text-decoration: underline; }
 .sync-btn:disabled { color: var(--text-muted); cursor: default; text-decoration: none; }
 
+.upload-csv-label {
+  display: inline-block;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.2rem 0.4rem;
+}
+.upload-csv-label:hover { text-decoration: underline; }
+
 .scope-select { margin-bottom: 0.75rem; color: var(--text-primary); background: var(--surface-alt); border-color: var(--border-subtle); }
 .scope-select[hidden] { display: none; }
 

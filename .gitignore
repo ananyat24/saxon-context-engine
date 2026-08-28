@@ -20,3 +20,8 @@ data/processed/ingest_log.json
 # Per-machine running total for the local Azure OpenAI spend caps -- see
 # app/graph/spend_limiter.py
 data/processed/azure_openai_spend.json
+
+# Files uploaded to a "database" connector (POST /connectors/{id}/files --
+# see app/ingestion/database_source.py) -- a tenant's own real data, not
+# source, and never meant to end up in this repo.
+data/uploads/

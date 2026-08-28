@@ -11,9 +11,10 @@
 # fetch -> dedup-check -> ingest sequence.
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Callable, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.config import TenantConfig, settings
@@ -21,7 +22,7 @@ from app.graph import connectors
 from app.graph.graph_repository import GraphRepository
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector
 from app.ingestion.connector_sync import run_connector_sync
-from app.ingestion.database_source import DatabaseConnector
+from app.ingestion.database_source import DatabaseConnector, connector_upload_dir
 from app.ingestion.document_source import DocumentConnector
 from app.ingestion.email_source import EmailConnector
 from app.ingestion.gmail_source import GmailConnector
@@ -45,7 +46,7 @@ router = APIRouter()
 # stores), and "gmail"/"outlook_mail" (live mailboxes).
 _CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
     "web": lambda connector: WebConnector(connector["url"]),
-    "database": lambda connector: DatabaseConnector(),
+    "database": lambda connector: DatabaseConnector(connector.get("id", "")),
     "documents": lambda connector: DocumentConnector(),
     "email": lambda connector: EmailConnector(),
     "google_drive": lambda connector: GoogleDriveConnector(connector["url"]),
@@ -239,6 +240,54 @@ async def delete_connector(connector_id: str, request: Request, tenant: TenantCo
 
         await delete_subscription(connector["push_subscription_id"])
     connectors.delete_connector(tenant.tenant_id, connector_id, repo=repo)
+
+
+# Generous enough for a real CSV export, small enough that an upload can't
+# be used to fill up disk -- this app has no per-tenant storage quota
+# elsewhere, so a fixed cap here is the only thing bounding it.
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/{connector_id}/files", status_code=status.HTTP_201_CREATED)
+async def upload_connector_file(
+    connector_id: str, file: UploadFile, request: Request, tenant: TenantConfig = Depends(require_tenant)
+):
+    """Drops a CSV into this connector's own upload folder (see
+    app/ingestion/database_source.py's DatabaseConnector) -- a plain "Sync
+    now" afterward ingests it, the same as any other connector type. Only
+    for "database"-type connectors today; "documents"/"email" are still the
+    bundled-mock-data placeholders CLAUDE.md's v1 note describes.
+
+    The uploaded filename never becomes a filesystem path as given -- only
+    its basename (Path(...).name, which drops any "../" or directory
+    component) is used, and only under this connector's own id-derived
+    folder, so there's no way a client-supplied name can write outside it.
+    """
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
+    if connector is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
+    if connector["type"] != "database":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File upload is only supported for Database/CRM connectors.",
+        )
+
+    filename = Path(file.filename or "").name
+    if not filename or filename in (".", "..") or not filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only a named .csv file is accepted.")
+
+    body = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(body) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"File exceeds the {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit.",
+        )
+
+    upload_dir = connector_upload_dir(connector_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    (upload_dir / filename).write_bytes(body)
+    return {"filename": filename, "size": len(body)}
 
 
 @router.post("/{connector_id}/sync", status_code=status.HTTP_202_ACCEPTED)

@@ -325,3 +325,219 @@ def test_database_connector_errors_clearly_when_folder_has_no_csvs(tmp_path, mon
 
     with pytest.raises(ConnectorFetchError):
         asyncio.run(DatabaseConnector().fetch())
+
+
+# --- Database connector: per-connector uploaded CSVs (the "easily droppable
+# CSV" fix) -- a connector reads from its OWN upload folder, populated only
+# by POST /connectors/{id}/files, falling back to the shared demo dataset
+# when nothing's been uploaded to it. ----------------------------------------
+
+
+def test_database_connector_prefers_its_own_uploaded_csvs(tmp_path, monkeypatch):
+    import app.ingestion.database_source as database_source
+
+    monkeypatch.setattr(database_source, "UPLOADS_ROOT", tmp_path / "uploads")
+    upload_dir = database_source.connector_upload_dir("conn-123")
+    upload_dir.mkdir(parents=True)
+    (upload_dir / "widgets.csv").write_text("WidgetID,WidgetName\nW-1,Left Bracket\n", encoding="utf-8")
+
+    connector = DatabaseConnector("conn-123")
+    records = asyncio.run(connector.fetch())
+
+    assert len(records) == 1
+    assert "Left Bracket" in records[0].body
+    assert "Left Bracket" not in connector.source_description()
+    assert "Uploaded" in connector.source_description()
+
+
+def test_database_connector_falls_back_to_demo_data_with_no_uploads(tmp_path, monkeypatch):
+    import app.ingestion.database_source as database_source
+
+    monkeypatch.setattr(database_source, "UPLOADS_ROOT", tmp_path / "uploads")
+
+    connector = DatabaseConnector("conn-with-nothing-uploaded")
+    records = asyncio.run(connector.fetch())
+
+    # Same bundled demo dataset as DatabaseConnector() with no id at all.
+    assert len(records) == 6
+    assert connector.source_description() == "Demo CRM accounts (mock structured data)"
+
+
+def test_database_connector_with_no_id_always_uses_demo_data(tmp_path, monkeypatch):
+    # The pre-creation validation call in app/api/connectors.py probes a
+    # type's factory with {} before a connector (and its id) exists --
+    # DatabaseConnector("") must never resolve to the shared uploads root.
+    import app.ingestion.database_source as database_source
+
+    uploads_root = tmp_path / "uploads"
+    uploads_root.mkdir()
+    (uploads_root / "stray.csv").write_text("Id,Name\n1,Should not be read\n", encoding="utf-8")
+    monkeypatch.setattr(database_source, "UPLOADS_ROOT", uploads_root)
+
+    connector = DatabaseConnector("")
+    records = asyncio.run(connector.fetch())
+
+    assert not any("Should not be read" in r.body for r in records)
+    assert connector.source_description() == "Demo CRM accounts (mock structured data)"
+
+
+# --- POST /connectors/{id}/files -- the HTTP side of "easily droppable CSV" -
+# Needs a real, reachable Neo4j (same caveat as test_source_authority.py):
+# creates and cleans up its own throwaway :Connector node. Calls the route
+# function directly with a fake Request and Depends() resolved by hand (same
+# pattern test_odata.py uses), rather than a full TestClient -- an UploadFile
+# can be constructed directly (FastAPI supports this), so no ASGI/HTTP layer
+# is needed to exercise the real filesystem-write + validation logic.
+import io
+import uuid as uuid_module
+
+from fastapi import HTTPException, UploadFile
+
+from app.api import connectors as connectors_api
+from app.config import KnowledgeBase, TenantConfig
+from app.graph import connectors as connectors_storage
+from app.graph.graph_repository import GraphRepository
+
+
+class _FakeUploadAppState:
+    def __init__(self):
+        self.neo4j_client = None
+
+
+class _FakeUploadApp:
+    def __init__(self):
+        self.state = _FakeUploadAppState()
+
+
+class _FakeUploadRequest:
+    def __init__(self):
+        self.app = _FakeUploadApp()
+
+
+def _upload_tenant(tenant_id: str) -> TenantConfig:
+    return TenantConfig(tenant_id=tenant_id, gemini_api_key="fake", knowledge_bases=[KnowledgeBase(id="kb1", label="KB")])
+
+
+def _csv_upload(filename: str, content: bytes = b"Id,Name\n1,Test\n") -> UploadFile:
+    return UploadFile(file=io.BytesIO(content), filename=filename)
+
+
+@pytest.fixture
+def upload_repo():
+    return GraphRepository()
+
+
+def test_upload_saves_a_csv_under_the_connectors_own_folder(tmp_path, monkeypatch, upload_repo):
+    import app.ingestion.database_source as database_source
+
+    monkeypatch.setattr(database_source, "UPLOADS_ROOT", tmp_path / "uploads")
+    tenant_id = f"test_upload_tenant_{uuid_module.uuid4().hex[:8]}"
+    connector = connectors_storage.create_connector(
+        tenant_id, "My CSVs", "database", "kb1", "Uploaded CSV data", repo=upload_repo,
+    )
+    try:
+        result = asyncio.run(
+            connectors_api.upload_connector_file(
+                connector["id"], _csv_upload("widgets.csv", b"WidgetID,WidgetName\nW-1,Bracket\n"),
+                _FakeUploadRequest(), tenant=_upload_tenant(tenant_id),
+            )
+        )
+        assert result == {"filename": "widgets.csv", "size": len(b"WidgetID,WidgetName\nW-1,Bracket\n")}
+        saved = database_source.connector_upload_dir(connector["id"]) / "widgets.csv"
+        assert saved.read_bytes() == b"WidgetID,WidgetName\nW-1,Bracket\n"
+    finally:
+        connectors_storage.delete_connector(tenant_id, connector["id"], repo=upload_repo)
+
+
+def test_upload_strips_any_path_traversal_from_the_filename(tmp_path, monkeypatch, upload_repo):
+    import app.ingestion.database_source as database_source
+
+    monkeypatch.setattr(database_source, "UPLOADS_ROOT", tmp_path / "uploads")
+    tenant_id = f"test_upload_traversal_{uuid_module.uuid4().hex[:8]}"
+    connector = connectors_storage.create_connector(
+        tenant_id, "My CSVs", "database", "kb1", "Uploaded CSV data", repo=upload_repo,
+    )
+    try:
+        result = asyncio.run(
+            connectors_api.upload_connector_file(
+                connector["id"], _csv_upload("../../evil.csv"), _FakeUploadRequest(), tenant=_upload_tenant(tenant_id),
+            )
+        )
+        # The traversal components are stripped -- it lands as a normal file
+        # under this connector's own folder, never above it.
+        assert result["filename"] == "evil.csv"
+        assert (database_source.connector_upload_dir(connector["id"]) / "evil.csv").exists()
+        assert not (tmp_path / "evil.csv").exists()
+    finally:
+        connectors_storage.delete_connector(tenant_id, connector["id"], repo=upload_repo)
+
+
+def test_upload_rejects_a_non_csv_file(upload_repo):
+    tenant_id = f"test_upload_wrongext_{uuid_module.uuid4().hex[:8]}"
+    connector = connectors_storage.create_connector(
+        tenant_id, "My CSVs", "database", "kb1", "Uploaded CSV data", repo=upload_repo,
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                connectors_api.upload_connector_file(
+                    connector["id"], _csv_upload("data.txt"), _FakeUploadRequest(), tenant=_upload_tenant(tenant_id),
+                )
+            )
+        assert exc_info.value.status_code == 400
+    finally:
+        connectors_storage.delete_connector(tenant_id, connector["id"], repo=upload_repo)
+
+
+def test_upload_rejects_a_non_database_connector(upload_repo):
+    tenant_id = f"test_upload_wrongtype_{uuid_module.uuid4().hex[:8]}"
+    connector = connectors_storage.create_connector(
+        tenant_id, "A web source", "web", "kb1", "https://example.com", repo=upload_repo,
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                connectors_api.upload_connector_file(
+                    connector["id"], _csv_upload("data.csv"), _FakeUploadRequest(), tenant=_upload_tenant(tenant_id),
+                )
+            )
+        assert exc_info.value.status_code == 400
+    finally:
+        connectors_storage.delete_connector(tenant_id, connector["id"], repo=upload_repo)
+
+
+def test_upload_404s_for_a_connector_belonging_to_another_tenant(upload_repo):
+    owner_tenant = f"test_upload_owner_{uuid_module.uuid4().hex[:8]}"
+    connector = connectors_storage.create_connector(
+        owner_tenant, "My CSVs", "database", "kb1", "Uploaded CSV data", repo=upload_repo,
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                connectors_api.upload_connector_file(
+                    connector["id"], _csv_upload("data.csv"), _FakeUploadRequest(),
+                    tenant=_upload_tenant(f"someone_else_{uuid_module.uuid4().hex[:8]}"),
+                )
+            )
+        assert exc_info.value.status_code == 404
+    finally:
+        connectors_storage.delete_connector(owner_tenant, connector["id"], repo=upload_repo)
+
+
+def test_upload_rejects_a_file_over_the_size_limit(monkeypatch, upload_repo):
+    monkeypatch.setattr(connectors_api, "_MAX_UPLOAD_BYTES", 10)
+    tenant_id = f"test_upload_toolarge_{uuid_module.uuid4().hex[:8]}"
+    connector = connectors_storage.create_connector(
+        tenant_id, "My CSVs", "database", "kb1", "Uploaded CSV data", repo=upload_repo,
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                connectors_api.upload_connector_file(
+                    connector["id"], _csv_upload("data.csv", b"Id,Name\n1,Way too much data for the limit\n"),
+                    _FakeUploadRequest(), tenant=_upload_tenant(tenant_id),
+                )
+            )
+        assert exc_info.value.status_code == 413
+    finally:
+        connectors_storage.delete_connector(tenant_id, connector["id"], repo=upload_repo)

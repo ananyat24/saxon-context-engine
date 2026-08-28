@@ -400,6 +400,14 @@ function renderConnectorsTable() {
         <td>
           <button class="sync-btn" type="button" data-sync-id="${escapeXml(c.id)}">Sync now</button>
           <button class="delete-btn" type="button" data-delete-connector-id="${escapeXml(c.id)}">Delete</button>
+          ${
+            c.type === "database"
+              ? `<br /><label class="upload-csv-label">
+                   Upload CSV
+                   <input type="file" accept=".csv" hidden data-upload-csv-id="${escapeXml(c.id)}" />
+                 </label>`
+              : ""
+          }
         </td>
       </tr>`;
     })
@@ -417,6 +425,16 @@ function renderConnectorsTable() {
       if (window.confirm(`Remove ${label}? This won't remove anything already added to the graph.`)) {
         deleteConnector(btn.dataset.deleteConnectorId);
       }
+    });
+  });
+  // A dropped-in file is uploaded right away (see uploadConnectorCsv below);
+  // it isn't ingested until "Sync now" runs, same as any other connector
+  // type -- uploading just makes the file available for the next sync.
+  body.querySelectorAll("[data-upload-csv-id]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file) uploadConnectorCsv(input.dataset.uploadCsvId, file);
+      input.value = ""; // lets the same filename be picked again later
     });
   });
 }
@@ -611,6 +629,47 @@ async function pollUntilSyncSettles(id, attempt = 0) {
   await new Promise((resolve) => setTimeout(resolve, SYNC_POLL_INTERVAL_MS));
   await loadConnectors();
   pollUntilSyncSettles(id, attempt + 1);
+}
+
+// "Easily droppable CSV": a Database/CRM connector accepts a CSV upload
+// directly, landing it in that connector's own folder server-side (see
+// app/api/connectors.py's POST /connectors/{id}/files) -- one file per
+// record type is the expected shape, matching how the bundled sample
+// datasets are laid out. The upload alone doesn't ingest anything; "Sync
+// now" (unchanged) picks up whatever's been uploaded, the same as any other
+// connector type.
+async function uploadConnectorCsv(id, file) {
+  const row = document.querySelector(`#connectorsBody tr[data-id="${CSS.escape(id)}"]`);
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const res = await fetch(`${API}/connectors/${encodeURIComponent(id)}/files`, {
+      method: "POST",
+      headers: authHeaders(), // deliberately no Content-Type -- the browser sets the multipart boundary itself
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      window.alert(body.detail || `Could not upload "${file.name}".`);
+      return;
+    }
+  } catch (err) {
+    window.alert(`Error uploading "${file.name}": ${err.message}`);
+    return;
+  }
+  // Not persisted -- just a quick confirmation the drop landed, so someone
+  // dropping in several files in a row can see each one register before
+  // clicking "Sync now" once at the end.
+  if (row) {
+    const link = row.querySelector(".connector-name-link");
+    if (link) {
+      const original = link.textContent;
+      link.textContent = `${original} (${file.name} uploaded)`;
+      setTimeout(() => {
+        link.textContent = original;
+      }, 3000);
+    }
+  }
 }
 
 async function deleteConnector(id) {
