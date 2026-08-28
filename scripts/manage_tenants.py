@@ -10,6 +10,7 @@
 #   python scripts/manage_tenants.py add --name "Acme Corp" --gemini-key AIza...
 #   python scripts/manage_tenants.py add-knowledge-base acme_corp --id northwind --label "Northwind"
 #   python scripts/manage_tenants.py list
+#   python scripts/manage_tenants.py rotate acme_corp
 #   python scripts/manage_tenants.py remove acme_corp
 import argparse
 import json
@@ -104,6 +105,37 @@ def cmd_list(args: argparse.Namespace) -> None:
         print(f"{'':20s} knowledge bases: {kb_desc}")
 
 
+def cmd_rotate(args: argparse.Namespace) -> None:
+    """Replaces a tenant's API key in place, keeping every other field
+    (tenant_id, gemini_api_key, knowledge_bases) exactly as-is -- the tenant
+    config is stored keyed BY its api key (see cmd_add), so rotating means
+    moving the same config dict to a new key and dropping the old one, not
+    editing any of the config itself. The old key stops authenticating the
+    moment this is saved; there's no overlap window, so line up the client
+    getting the new key with this if that matters."""
+    tenants = load()
+    match = find_by_tenant_id(tenants, args.tenant_id)
+    if not match:
+        print(f"No tenant found with tenant_id '{args.tenant_id}'.", file=sys.stderr)
+        sys.exit(1)
+    old_key, cfg = match
+    new_key = args.api_key or secrets.token_urlsafe(32)
+    if new_key == old_key:
+        print("New API key is identical to the current one -- nothing to do.", file=sys.stderr)
+        sys.exit(1)
+    del tenants[old_key]
+    tenants[new_key] = cfg
+    save(tenants)
+
+    print(f"Rotated the API key for tenant '{args.tenant_id}'. The old key no longer authenticates.")
+    print()
+    print(f"  New API key: {new_key}")
+    print()
+    print("Give this key to the client -- it will not be shown again by `list`.")
+    print("For production: re-run the deploy script (it re-exports TENANT_API_KEYS from this same")
+    print("file), not just a local restart -- Azure won't see this change otherwise.")
+
+
 def cmd_remove(args: argparse.Namespace) -> None:
     tenants = load()
     match = find_by_tenant_id(tenants, args.tenant_id)
@@ -135,6 +167,11 @@ def main() -> None:
 
     p_list = sub.add_parser("list", help="List configured tenants and their knowledge bases (keys shown masked)")
     p_list.set_defaults(func=cmd_list)
+
+    p_rotate = sub.add_parser("rotate", help="Replace a tenant's API key, keeping their config as-is")
+    p_rotate.add_argument("tenant_id")
+    p_rotate.add_argument("--api-key", help="Override the auto-generated replacement key (random by default)")
+    p_rotate.set_defaults(func=cmd_rotate)
 
     p_remove = sub.add_parser("remove", help="Remove a tenant by tenant_id")
     p_remove.add_argument("tenant_id")
