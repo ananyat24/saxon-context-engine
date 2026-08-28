@@ -81,7 +81,14 @@ document.getElementById("kbSelect").addEventListener("change", async (e) => {
   setSelectedKnowledgeBase(e.target.value);
   setSelectedUser(""); // a different knowledge base has a different (or no) org chart
   await loadUsers();
-  renderScopeSelect(); // "This connector only" option's label follows the new selection
+  renderScopeSelect(); // "This connector only" option's label follows the new selection, and doc sets that don't touch this KB drop out
+  // Source connectors and document sets are fetched once per page load
+  // (they don't change when switching knowledge bases), but which of them
+  // are actually *shown* does -- re-render both against the new selection
+  // rather than refetching, since nothing about the underlying data changed.
+  renderConnectorsTable();
+  renderConnectorKbSelect(); // "New source connector" form defaults to the newly-selected KB
+  renderDocSetsTable();
   loadGraph();
   document.getElementById("queryAnswer").textContent = "";
   document.getElementById("queryFacts").innerHTML = "";
@@ -123,16 +130,32 @@ function renderDocSetConnectorPicker(checkedIds = []) {
     .join("");
 }
 
+// A document set can legitimately span several knowledge bases at once --
+// that's its whole point (see app/graph/document_sets.py) -- so "belongs to
+// the current knowledge base" means "touches it at all", not "is entirely
+// contained in it": a set spanning Solandra and Northwind should still show
+// up on either tab, but a Northwind-only set has no business appearing
+// while viewing Solandra. Same reasoning as connectorsForCurrentScope above.
+function docSetsForCurrentScope() {
+  const kb = getSelectedKnowledgeBase();
+  return kb ? documentSetDirectory.filter((ds) => ds.connectors.some((c) => c.id === kb)) : documentSetDirectory;
+}
+
 function renderDocSetsTable() {
   const body = document.getElementById("docSetsBody");
   const empty = document.getElementById("docSetsEmpty");
-  if (documentSetDirectory.length === 0) {
+  const visible = docSetsForCurrentScope();
+  if (visible.length === 0) {
     body.innerHTML = "";
+    empty.textContent =
+      documentSetDirectory.length === 0
+        ? "No document sets yet -- create one below."
+        : "No document sets touch this knowledge base yet -- create one below.";
     empty.style.display = "block";
     return;
   }
   empty.style.display = "none";
-  body.innerHTML = documentSetDirectory
+  body.innerHTML = visible
     .map((ds) => {
       const connectorLabels = ds.connectors.map((c) => escapeXml(c.label)).join(", ");
       const publicBadge = ds.is_public
@@ -166,18 +189,20 @@ function renderDocSetsTable() {
 
 function renderScopeSelect() {
   const select = document.getElementById("scopeSelect");
-  if (documentSetDirectory.length === 0) {
+  const visible = docSetsForCurrentScope();
+  if (visible.length === 0) {
     select.hidden = true;
     select.innerHTML = "";
+    selectedDocumentSet = "";
     return;
   }
   const currentKb = knowledgeBaseDirectory.find((kb) => kb.id === getSelectedKnowledgeBase());
   const singleOption = `<option value="">This connector only${currentKb ? ` (${escapeXml(currentKb.label)})` : ""}</option>`;
-  const setOptions = documentSetDirectory
+  const setOptions = visible
     .map((ds) => `<option value="${escapeXml(ds.id)}">${escapeXml(ds.name)} (${ds.connectors.length} connectors)</option>`)
     .join("");
   select.innerHTML = singleOption + setOptions;
-  select.value = documentSetDirectory.some((ds) => ds.id === selectedDocumentSet) ? selectedDocumentSet : "";
+  select.value = visible.some((ds) => ds.id === selectedDocumentSet) ? selectedDocumentSet : "";
   selectedDocumentSet = select.value;
   select.hidden = false;
 }
@@ -321,6 +346,12 @@ function renderConnectorKbSelect() {
   select.innerHTML = knowledgeBaseDirectory
     .map((kb) => `<option value="${escapeXml(kb.id)}">${escapeXml(kb.label)}</option>`)
     .join("");
+  // Default a new connector to whichever knowledge base is currently
+  // selected, rather than always defaulting to the first option -- still
+  // changeable, just a sensible starting point for "add one below" right
+  // after seeing this knowledge base has none.
+  const current = getSelectedKnowledgeBase();
+  if (current) select.value = current;
 }
 
 function formatSyncStatus(c) {
@@ -358,31 +389,51 @@ const CONNECTOR_TYPE_LABELS = {
   email: "Email inbox (mock)",
 };
 
+// connectorDirectory itself stays the full, tenant-wide list (needed for
+// by-id lookups from sync/delete/preview, and it's fetched once regardless
+// of which knowledge base is selected) -- but a client with several
+// knowledge bases under one tenant/API key (e.g. a shared demo key spanning
+// Northwind and a client's own data) shouldn't see every OTHER knowledge
+// base's connectors just because it's viewing this one. Every place that
+// actually *displays* connectors filters through this first, and re-renders
+// whenever the header's knowledge base selection changes (see kbSelect's
+// change handler below).
+function connectorsForCurrentScope() {
+  const kb = getSelectedKnowledgeBase();
+  return kb ? connectorDirectory.filter((c) => c.group_id === kb) : connectorDirectory;
+}
+
 function renderConnectorsHealthSummary() {
   const summaryEl = document.getElementById("connectorsHealthSummary");
-  if (connectorDirectory.length === 0) {
+  const visible = connectorsForCurrentScope();
+  if (visible.length === 0) {
     summaryEl.textContent = "";
     return;
   }
-  const needsAttention = connectorDirectory.filter((c) => c.health === "error" || c.health === "stale").length;
+  const needsAttention = visible.filter((c) => c.health === "error" || c.health === "stale").length;
   summaryEl.textContent =
     needsAttention === 0
-      ? `All ${connectorDirectory.length} connector${connectorDirectory.length === 1 ? "" : "s"} syncing normally.`
-      : `${needsAttention} of ${connectorDirectory.length} connector${connectorDirectory.length === 1 ? "" : "s"} need${needsAttention === 1 ? "s" : ""} attention.`;
+      ? `All ${visible.length} connector${visible.length === 1 ? "" : "s"} syncing normally.`
+      : `${needsAttention} of ${visible.length} connector${visible.length === 1 ? "" : "s"} need${needsAttention === 1 ? "s" : ""} attention.`;
 }
 
 function renderConnectorsTable() {
   const body = document.getElementById("connectorsBody");
   const empty = document.getElementById("connectorsEmpty");
   renderConnectorsHealthSummary();
-  if (connectorDirectory.length === 0) {
+  const visible = connectorsForCurrentScope();
+  if (visible.length === 0) {
     body.innerHTML = "";
+    empty.textContent =
+      connectorDirectory.length === 0
+        ? "No source connectors yet -- add one below."
+        : "No source connectors for this knowledge base yet -- add one below.";
     empty.style.display = "block";
     return;
   }
   empty.style.display = "none";
   const kbLabel = (id) => knowledgeBaseDirectory.find((kb) => kb.id === id)?.label || id;
-  body.innerHTML = connectorDirectory
+  body.innerHTML = visible
     .map((c) => {
       const lastSynced = c.last_synced_at ? new Date(c.last_synced_at).toLocaleString() : "—";
       const typeLabel = CONNECTOR_TYPE_LABELS[c.type] || c.type;
