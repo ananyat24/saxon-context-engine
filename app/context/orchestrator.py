@@ -367,6 +367,30 @@ class ContextOrchestrator:
         )
         return _CausalRecommendation.model_validate(result)
 
+    async def _fact_only_causal_packet(
+        self, query: str, group_ids: Optional[List[str]], facts: list[dict], retrieval_path: str
+    ) -> ContextPacket:
+        """Shared by both fact-only fallback shapes in get_causal_context_packet
+        below (a single entity with no causal-typed edges of its own, and a
+        two-entity connecting path that isn't entirely causal-typed) --
+        same fact-only synthesis the plain Ask path uses (_synthesize_answer),
+        never a fabricated recommendation, never a :Decision. `facts` must be
+        non-empty and pre-filtered to is_valid; retrieval_path distinguishes
+        which shape this is in telemetry."""
+        lines = [f["fact"] for f in facts]
+        summary = lines[0] if len(lines) == 1 else await self._synthesize_answer(query, lines)
+        return ContextPacket(
+            query=query,
+            metadata={
+                "group_ids": group_ids,
+                "summary": summary,
+                "facts": facts,
+                "recommendation": None,
+                "decision_id": None,
+                "retrieval_path": retrieval_path,
+            },
+        )
+
     async def get_causal_context_packet(
         self,
         query: str,
@@ -374,11 +398,18 @@ class ContextOrchestrator:
         visible_uuids: Optional[set[str]] = None,
         tenant_id: Optional[str] = None,
     ) -> ContextPacket:
-        """The causal-reasoning mode: resolves query to a starting entity,
-        walks a few hops over the ontology's causal relationship types
-        (DEPENDS_ON/CAUSED_BY/AFFECTS/RESULTED_IN/SOURCED_FROM -- see
-        GraphRepository.causal_chain_for_query), and synthesizes a
-        what-happened/why/impact/recommendation answer from that chain.
+        """The causal-reasoning mode: resolves query to a starting entity (or,
+        for a "how is X connected to Y" question, two of them -- see
+        GraphRepository.causal_chain_for_query), assembles either the
+        causal-typed chain out from one entity or the shortest path
+        connecting two, and synthesizes a what-happened/why/impact/
+        recommendation answer from it -- but only when that assembled
+        context is *entirely* causal-typed (GraphRepository.is_entirely_causal).
+        When it isn't (a two-entity path made of ordinary relationships, or
+        a single entity with no causal-typed edges of its own at all), this
+        falls back to the exact same fact-only synthesis the plain Ask path
+        uses, with the full evidence still attached -- never a fabricated
+        causal chain, never a recommendation, never a :Decision.
 
         Deliberately a separate method from get_context_packet, not a mode
         flag on it: the fact-only synthesis path above must never be
@@ -392,14 +423,8 @@ class ContextOrchestrator:
         a failure to record doesn't fail the query itself, since the
         recommendation is still valid to hand back even if logging it
         failed.
-
-        When no causal-typed chain exists from the resolved entity, falls
-        back to that entity's own directly-touching facts of any
-        relationship type, answered the same fact-only way the plain Ask
-        path would (see the chain_lines-empty branch below) -- never as a
-        fabricated causal chain, and never with a recommendation/Decision.
         """
-        anchor, chain_facts = await self._repo.causal_chain_for_query(query, group_ids, visible_uuids)
+        anchor, second_entity, chain_facts = await self._repo.causal_chain_for_query(query, group_ids, visible_uuids)
         if anchor is None:
             return ContextPacket(
                 query=query,
@@ -413,52 +438,52 @@ class ContextOrchestrator:
                 },
             )
 
-        chain_lines = [f["fact"] for f in chain_facts if f.get("is_valid", True)]
-        if not chain_lines:
-            # No causal-typed (DEPENDS_ON/CAUSED_BY/...) chain from this
-            # entity -- fall back to its own directly-touching facts of ANY
-            # relationship type, run through the same fact-only synthesis
-            # the plain Ask path uses (_synthesize_answer), rather than just
-            # saying nothing was found. This is deliberately NOT "walk any
-            # relationship as if it were causal": no recommendation gets
-            # generated here and no :Decision gets recorded -- it's the
-            # exact same fact-only answer a plain Ask would give for this
-            # entity. The nuance the fact-only synthesis already provides is
-            # what makes this safe to show unconditionally: it's told to
-            # answer the *question*, so an irrelevant fact (e.g. a
-            # LOCATED_AT edge when the question has nothing to do with
-            # location) simply doesn't make it into the one-sentence
-            # answer, while a genuinely relevant one (e.g. "where is X
-            # located" against a real LOCATED_AT edge) does. Every fact
-            # still comes back in metadata.facts either way, same as the
-            # plain path.
-            direct_facts = self._repo.direct_facts_for(anchor["uuid"], visible_uuids)
-            direct_lines = [f["fact"] for f in direct_facts if f.get("is_valid", True)]
-            if not direct_lines:
-                return ContextPacket(
-                    query=query,
-                    metadata={
-                        "group_ids": group_ids,
-                        "summary": f'No causal chain -- or any other recorded fact -- connecting "{anchor["name"]}" to anything else in this knowledge base.',
-                        "facts": [],
-                        "recommendation": None,
-                        "decision_id": None,
-                        "retrieval_path": "causal_chain_empty",
-                    },
-                )
-            summary = direct_lines[0] if len(direct_lines) == 1 else await self._synthesize_answer(query, direct_lines)
+        valid_chain_facts = [f for f in chain_facts if f.get("is_valid", True)]
+        if not valid_chain_facts:
+            if second_entity is not None:
+                # Mirrors search_graphiti_facts's own two-entity "not found"
+                # phrasing -- there's genuinely nothing to fall back to here
+                # (a fact-only answer about one entity's own edges wouldn't
+                # answer "how are these two connected" either).
+                summary = f'No connection found between "{anchor["name"]}" and "{second_entity["name"]}" in this knowledge base.'
+            else:
+                # Single entity, no causal-typed chain -- fall back to its
+                # own directly-touching facts of ANY relationship type,
+                # rather than just saying nothing was found. Deliberately
+                # NOT "walk any relationship as if it were causal": routed
+                # through _fact_only_causal_packet below, same as the
+                # two-entity-but-not-causal case, so neither ever produces a
+                # recommendation/Decision. The relevance nuance
+                # (_synthesize_answer answers the *question*, so an
+                # irrelevant fact never makes it into a multi-fact summary)
+                # comes for free from that shared helper.
+                direct_facts = [f for f in self._repo.direct_facts_for(anchor["uuid"], visible_uuids) if f.get("is_valid", True)]
+                if direct_facts:
+                    return await self._fact_only_causal_packet(query, group_ids, direct_facts, "causal_fallback_direct_facts")
+                summary = f'No causal chain -- or any other recorded fact -- connecting "{anchor["name"]}" to anything else in this knowledge base.'
             return ContextPacket(
                 query=query,
                 metadata={
                     "group_ids": group_ids,
                     "summary": summary,
-                    "facts": direct_facts,
+                    "facts": [],
                     "recommendation": None,
                     "decision_id": None,
-                    "retrieval_path": "causal_fallback_direct_facts",
+                    "retrieval_path": "causal_chain_empty",
                 },
             )
 
+        if not self._repo.is_entirely_causal(valid_chain_facts):
+            # A two-entity connecting path isn't restricted to causal-typed
+            # edges the way the single-anchor walk is (see
+            # causal_chain_for_query) -- "how is X connected to Y" needs the
+            # real shortest path, whatever it's made of. When that path
+            # isn't entirely causal, treating it as one would mean inferring
+            # a "why" from, say, a shared location, which isn't a real
+            # causal story -- fact-only, fully-sourced instead.
+            return await self._fact_only_causal_packet(query, group_ids, valid_chain_facts, "causal_path_between_entities")
+
+        chain_lines = [f["fact"] for f in valid_chain_facts]
         recommendation = None
         decision_id = None
         try:

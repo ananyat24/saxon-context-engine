@@ -1337,24 +1337,30 @@ async function runCausalQuery() {
     const rec = data.metadata?.recommendation;
     if (!rec) {
       // No real causal chain -- either nothing at all to go on
-      // (retrieval_path "none"/"causal_chain_empty"), or a fallback to the
-      // entity's own directly-known facts (retrieval_path
-      // "causal_fallback_direct_facts", see get_causal_context_packet).
-      // The fallback case used to render identically to a real causal
-      // answer -- same muted paragraph, no distinguishing label -- which
-      // made it look like the causal engine had actually explained
-      // something (and, when the plain "Ask" answer happened to be the
-      // same single fact, made the two panels look like an outright bug).
-      // Labeling it explicitly as "no causal chain, here's the closest
-      // known fact instead" is the fix: still honest that this ISN'T an
-      // inference, but no longer indistinguishable from one.
+      // (retrieval_path "none"/"causal_chain_empty"), or a fact-only
+      // fallback with real evidence behind it: either a single entity's own
+      // directly-known facts ("causal_fallback_direct_facts") or the actual
+      // connecting path between two named entities that wasn't entirely
+      // causal-typed ("causal_path_between_entities") -- see
+      // get_causal_context_packet. Both fallback shapes used to render
+      // identically to a real causal answer -- same muted paragraph, no
+      // distinguishing label, no evidence list at all -- which made it
+      // look like the causal engine had actually explained something (and,
+      // when the plain "Ask" answer happened to draw on the same facts,
+      // made the two panels look like an outright bug/duplicate). Checking
+      // for actual facts rather than one specific retrieval_path string
+      // covers both shapes today and any similar one added later.
       const summary = data.metadata?.summary || "No causal chain found for that.";
       const facts = data.metadata?.facts || [];
-      if (data.metadata?.retrieval_path === "causal_fallback_direct_facts") {
+      if (facts.length > 0) {
+        const disclaimer =
+          data.metadata?.retrieval_path === "causal_path_between_entities"
+            ? "No single causal chain explains this -- here's the actual connection between them instead (not an inference, not a recommendation):"
+            : "No causal chain connects this to anything else -- here's the most directly relevant fact instead (not an inference, not a recommendation):";
         const factsHost = document.createElement("div");
         renderFacts(factsHost, facts);
         recEl.innerHTML = `
-          <p class="fact-list-label">No causal chain connects this to anything else -- here's the most directly relevant fact instead (not an inference, not a recommendation):</p>
+          <p class="fact-list-label">${disclaimer}</p>
           <p>${escapeXml(summary)}</p>`;
         recEl.appendChild(factsHost);
       } else {

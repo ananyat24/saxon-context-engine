@@ -363,6 +363,61 @@ class GraphRepository:
             return None
         return row["facts"]
 
+    def _relationship_path_full_facts(
+        self, uuid_a: str, uuid_b: str, group_ids: list[str], visible_uuids: Optional[set[str]]
+    ) -> Optional[list[dict[str, Any]]]:
+        """Like _relationship_path_facts, but returns full fact dicts (hop
+        order, relationship_type, temporal validity) instead of bare fact
+        strings -- built for the causal-reasoning "how is X connected to Y"
+        case (see causal_chain_for_query below), which needs
+        relationship_type to decide whether the whole connecting path is
+        causal-typed (is_entirely_causal, a real inference-worthy chain) or
+        not (a plain topological connection, reported as fact-only,
+        fully-sourced evidence instead -- see
+        ContextOrchestrator.get_causal_context_packet), and needs is_valid
+        to badge each fact current/superseded in that evidence list.
+        Scoped to group_ids the same way _causal_chain_facts_from is scoped
+        (see that method's docstring for why -- the same reasoning applies
+        here unchanged). Returns None if no path exists, or a node along it
+        isn't in scope/visible to this caller.
+        """
+        rows = self.execute_cypher(
+            f"""
+            MATCH p = shortestPath((a:Entity {{uuid: $uuid_a}})-[:RELATES_TO*1..{self._CAUSAL_MAX_HOPS}]-(b:Entity {{uuid: $uuid_b}}))
+            WHERE ALL(node IN nodes(p) WHERE node.group_id IN $group_ids)
+            WITH relationships(p) AS rels, [n IN nodes(p) | n.uuid] AS path_uuids
+            UNWIND range(0, size(rels) - 1) AS hop
+            WITH rels[hop] AS rel, hop, path_uuids
+            RETURN rel.fact AS fact, rel.name AS relationship_type, hop,
+                   rel.valid_at AS valid_at, rel.invalid_at AS invalid_at, rel.expired_at AS expired_at,
+                   rel.group_id AS group_id, startNode(rel).uuid AS source_node_uuid,
+                   endNode(rel).uuid AS target_node_uuid, path_uuids
+            ORDER BY hop
+            """,
+            {"uuid_a": uuid_a, "uuid_b": uuid_b, "group_ids": group_ids},
+        )
+        if not rows:
+            return None
+        if visible_uuids is not None and not all(u in visible_uuids for u in rows[0]["path_uuids"]):
+            return None
+        facts: list[dict[str, Any]] = []
+        for row in rows:
+            expired_at = self._to_native(row["expired_at"])
+            invalid_at = self._to_native(row["invalid_at"])
+            facts.append({
+                "fact": row["fact"],
+                "relationship_type": row["relationship_type"],
+                "hop": row["hop"],
+                "source_node_uuid": row["source_node_uuid"],
+                "target_node_uuid": row["target_node_uuid"],
+                "valid_at": self._to_native(row["valid_at"]),
+                "invalid_at": invalid_at,
+                "expired_at": expired_at,
+                "group_id": row["group_id"],
+                "is_valid": expired_at is None and _not_yet_invalidated(invalid_at),
+            })
+        return facts
+
     # The ontology's own causal relationship types (see ontology/core.yaml) --
     # the causal-chain retriever below only ever walks edges typed one of
     # these, so it can't wander off into an unrelated part of the graph just
@@ -379,6 +434,23 @@ class GraphRepository:
     # recommendation, not a graph dump -- this is a "few facts explaining a
     # situation" feature, not a bulk export.
     _CAUSAL_FACT_LIMIT = 25
+
+    @classmethod
+    def is_entirely_causal(cls, facts: list[dict[str, Any]]) -> bool:
+        """True only if every fact's relationship_type is one of the
+        ontology's causal types. _causal_chain_facts_from's single-anchor
+        walk is already restricted to causal types by construction, so this
+        is trivially true for it -- but _relationship_path_full_facts's
+        two-entity connecting path is NOT type-restricted (a "how is X
+        connected to Y" question needs the real shortest path, whatever
+        types it's made of, the same way search_graphiti_facts's own
+        two-entity branch already works), so that path can easily mix
+        causal and non-causal hops. ContextOrchestrator uses this to decide
+        whether a connecting path is a genuine causal chain worth inferring
+        a recommendation from, or just a topological connection that should
+        be reported as plain, fully-sourced facts instead -- never the
+        reverse (loosening what counts as "causal enough" to infer from)."""
+        return bool(facts) and all(f.get("relationship_type") in cls._CAUSAL_RELATIONSHIP_TYPES for f in facts)
 
     def _causal_chain_facts_from(
         self, uuid: str, group_ids: list[str], visible_uuids: Optional[set[str]]
@@ -458,26 +530,49 @@ class GraphRepository:
 
     async def causal_chain_for_query(
         self, query_text: str, group_ids: Optional[list[str]], visible_uuids: Optional[set[str]]
-    ) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
-        """Resolves query_text to a starting entity the same way
-        search_graphiti_facts does (see _resolve_named_entities), then walks
-        the causal chain out from it. Returns (anchor_entity, chain_facts);
-        anchor_entity is None when nothing in the query resolved to a real
-        node, in which case chain_facts is always empty.
+    ) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]], list[dict[str, Any]]]:
+        """Resolves query_text the same way search_graphiti_facts does (see
+        _resolve_named_entities), then either:
 
-        Only ever anchors on the first resolved candidate -- unlike
-        search_graphiti_facts's two-entity "how is X connected to Y" path
-        lookup, a causal chain has one starting point, not two named
-        endpoints to connect.
+          - two named entities resolved (e.g. "How is X connected to Y?"):
+            walks the shortest connecting path between them
+            (_relationship_path_full_facts) -- the causal-mode counterpart
+            of search_graphiti_facts's own two-entity branch. This used to
+            not exist at all: a query naming two entities silently anchored
+            on whichever ONE happened to resolve first (regex/candidate
+            order, not query semantics) and returned that entity's own
+            unrelated facts as if they explained a connection to the
+            other -- a real bug, not just an unhelpful fallback, found
+            against real production data (see CLAUDE.md).
+          - one named entity resolved: walks the causal-typed chain out
+            from it (_causal_chain_facts_from), same as before this fix.
+          - nothing resolved: returns (None, None, []).
+
+        Returns (anchor, second_entity, facts). anchor is the "primary"
+        entity either way (the first resolved candidate), so a
+        single-entity caller reads the same as before; second_entity is
+        only ever set in the two-entity case. facts is empty when nothing
+        resolved, or the chain/path itself came back empty (no causal-typed
+        edges from the anchor, or no path at all between the two entities).
+        Unlike the single-anchor walk, a two-entity path's facts are NOT
+        guaranteed to be causal-typed -- see is_entirely_causal, which the
+        caller uses to decide whether to treat it as a real causal chain or
+        report it as a plain, fully-sourced connection instead.
         """
         if not self.graphiti or not group_ids:
-            return None, []
+            return None, None, []
         resolved_groups, _saw_unresolved = await self._resolve_named_entities(query_text, group_ids, visible_uuids)
         if not resolved_groups:
-            return None, []
+            return None, None, []
         anchor = resolved_groups[0][0]
+        if len(resolved_groups) >= 2:
+            second_entity = resolved_groups[1][0]
+            facts = self._relationship_path_full_facts(
+                anchor["uuid"], second_entity["uuid"], group_ids, visible_uuids
+            ) or []
+            return anchor, second_entity, facts
         facts = self._causal_chain_facts_from(anchor["uuid"], group_ids, visible_uuids)
-        return anchor, facts
+        return anchor, None, facts
 
     async def search_graphiti_facts(
         self,

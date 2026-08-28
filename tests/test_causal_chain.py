@@ -2,11 +2,11 @@
 # Creates and cleans up its own throwaway :Entity nodes under a randomly-
 # suffixed group_id.
 #
-# Covers GraphRepository.causal_chain_for_query/_causal_chain_facts_from --
-# the causal-reasoning retriever added for the Context Graph/Layer/Engine
-# pivot (see CLAUDE.md). Built to walk the pivot's own illustrative example:
-# an at-risk Order -> its Product -> a Component -> the Supplier -> an open
-# QualityEvent.
+# Covers GraphRepository.causal_chain_for_query/_causal_chain_facts_from/
+# _relationship_path_full_facts/is_entirely_causal -- the causal-reasoning
+# retriever added for the Context Graph/Layer/Engine pivot (see CLAUDE.md).
+# Built to walk the pivot's own illustrative example: an at-risk Order -> its
+# Product -> a Component -> the Supplier -> an open QualityEvent.
 import asyncio
 import uuid
 from unittest.mock import Mock
@@ -39,12 +39,12 @@ def _causal_edge(repo, source_uuid, target_uuid, rel_type, fact, group_id):
     )
 
 
-def _non_causal_edge(repo, source_uuid, target_uuid, fact, group_id):
+def _non_causal_edge(repo, source_uuid, target_uuid, fact, group_id, rel_type="RELATED_TO"):
     repo.execute_cypher(
         "MATCH (a:Entity {uuid: $a}), (b:Entity {uuid: $b}) "
-        "CREATE (a)-[:RELATES_TO {name: 'RELATED_TO', fact: $fact, group_id: $group_id, "
+        "CREATE (a)-[:RELATES_TO {name: $rel_type, fact: $fact, group_id: $group_id, "
         "valid_at: datetime('2026-01-01T00:00:00Z'), invalid_at: null, expired_at: null}]->(b)",
-        {"a": source_uuid, "b": target_uuid, "fact": fact, "group_id": group_id},
+        {"a": source_uuid, "b": target_uuid, "fact": fact, "group_id": group_id, "rel_type": rel_type},
     )
 
 
@@ -60,14 +60,16 @@ def test_walks_a_multi_hop_causal_chain_from_the_resolved_entity(repo):
         _causal_edge(repo, product, component, "DEPENDS_ON", "Causal Test Widget depends on Causal Test Bearing.", group_id)
         _causal_edge(repo, component, supplier, "SOURCED_FROM", "Causal Test Bearing is sourced from Causal Test Supplier Co.", group_id)
 
-        anchor, facts = asyncio.run(
+        anchor, second_entity, facts = asyncio.run(
             repo.causal_chain_for_query("What's going on with Causal Test Order 9001?", [group_id], None)
         )
         assert anchor["name"] == "Causal Test Order 9001"
+        assert second_entity is None
         fact_texts = {f["fact"] for f in facts}
         assert "Causal Test Order 9001 depends on Causal Test Widget." in fact_texts
         assert "Causal Test Widget depends on Causal Test Bearing." in fact_texts
         assert "Causal Test Bearing is sourced from Causal Test Supplier Co." in fact_texts
+        assert GraphRepository.is_entirely_causal(facts)
     finally:
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
 
@@ -79,10 +81,11 @@ def test_non_causal_relationship_types_are_not_walked(repo):
         unrelated = _node(repo, group_id, "Causal Noncausal Sibling Order")
         _non_causal_edge(repo, order, unrelated, "Causal Noncausal Order is related to Causal Noncausal Sibling Order.", group_id)
 
-        anchor, facts = asyncio.run(
+        anchor, second_entity, facts = asyncio.run(
             repo.causal_chain_for_query("What happened with Causal Noncausal Order?", [group_id], None)
         )
         assert anchor is not None
+        assert second_entity is None
         assert facts == []
     finally:
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
@@ -109,10 +112,11 @@ def test_causal_walk_never_crosses_into_another_groups_node(repo):
             "DEPENDS_ON", "Causal Cross Order depends on Causal Cross Other Tenant Secret.", group_id,
         )
 
-        anchor, facts = asyncio.run(
+        anchor, second_entity, facts = asyncio.run(
             repo.causal_chain_for_query("What happened with Causal Cross Order?", [group_id], None)
         )
         assert anchor is not None
+        assert second_entity is None
         assert facts == []
     finally:
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
@@ -120,10 +124,11 @@ def test_causal_walk_never_crosses_into_another_groups_node(repo):
 
 
 def test_unresolved_query_returns_no_anchor_and_no_facts(repo):
-    anchor, facts = asyncio.run(
+    anchor, second_entity, facts = asyncio.run(
         repo.causal_chain_for_query("What happened with Totally Unknown Causal Entity?", ["nonexistent-group"], None)
     )
     assert anchor is None
+    assert second_entity is None
     assert facts == []
 
 
@@ -135,10 +140,143 @@ def test_visibility_filter_excludes_a_hop_through_a_hidden_node(repo):
         _causal_edge(repo, order, hidden_product, "DEPENDS_ON", "Causal Visibility Order depends on the hidden product.", group_id)
 
         visible_uuids = {order}  # the target end is deliberately excluded
-        anchor, facts = asyncio.run(
+        anchor, second_entity, facts = asyncio.run(
             repo.causal_chain_for_query("What happened with Causal Visibility Order?", [group_id], visible_uuids)
         )
         assert anchor is not None
+        assert second_entity is None
         assert facts == []
     finally:
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+# --- Two-entity "how is X connected to Y" case -------------------------------
+# Regression: this case didn't exist at all before -- a query naming two
+# entities silently anchored on whichever ONE happened to resolve first
+# (candidate order, not query semantics) and returned that entity's own
+# unrelated facts as if they explained a connection to the other. Found for
+# real against production data: "How is Industrial Automation connected to
+# Diego Alvarez?" returned "Vantus Robotics operates in the Industrial
+# Automation industry" -- a fact that doesn't even mention Diego Alvarez.
+
+
+def test_two_entities_resolve_a_connecting_path_not_just_the_first_ones_own_facts(repo):
+    group_id = f"test_causal_twoent_{uuid.uuid4().hex[:8]}"
+    try:
+        person = _node(repo, group_id, "Causal Twoent Diego Alvarez")
+        company = _node(repo, group_id, "Causal Twoent Brightpeak Automation")
+        industry = _node(repo, group_id, "Causal Twoent Industrial Automation")
+        # Diego's own edge (would be picked as "the first entity's own
+        # facts" under the old, buggy single-anchor behavior).
+        _non_causal_edge(
+            repo, company, person,
+            "Causal Twoent Brightpeak Automation has Causal Twoent Diego Alvarez as its account manager.",
+            group_id, rel_type="MANAGED_BY",
+        )
+        # The industry's own edge, unrelated to Diego -- this is the
+        # irrelevant fact the old behavior could have surfaced instead if
+        # candidate ordering had gone the other way.
+        _non_causal_edge(
+            repo, company, industry,
+            "Causal Twoent Brightpeak Automation operates in Causal Twoent Industrial Automation.",
+            group_id, rel_type="IS_A",
+        )
+
+        anchor, second_entity, facts = asyncio.run(
+            repo.causal_chain_for_query(
+                "How is Causal Twoent Industrial Automation connected to Causal Twoent Diego Alvarez?",
+                [group_id], None,
+            )
+        )
+        assert anchor is not None
+        assert second_entity is not None
+        assert {anchor["name"], second_entity["name"]} == {
+            "Causal Twoent Industrial Automation", "Causal Twoent Diego Alvarez",
+        }
+        fact_texts = {f["fact"] for f in facts}
+        # The real connecting path -- both hops, not just one entity's own
+        # unrelated edge.
+        assert "Causal Twoent Brightpeak Automation has Causal Twoent Diego Alvarez as its account manager." in fact_texts
+        assert "Causal Twoent Brightpeak Automation operates in Causal Twoent Industrial Automation." in fact_texts
+        # MANAGED_BY/IS_A aren't causal types -- this path should NOT be
+        # treated as a genuine causal chain.
+        assert not GraphRepository.is_entirely_causal(facts)
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+def test_two_entities_connected_entirely_by_causal_edges_is_entirely_causal(repo):
+    group_id = f"test_causal_twoent_causal_{uuid.uuid4().hex[:8]}"
+    try:
+        component = _node(repo, group_id, "Causal Twoent Causal Component")
+        supplier = _node(repo, group_id, "Causal Twoent Causal Supplier")
+        quality_event = _node(repo, group_id, "Causal Twoent Causal QualityEvent")
+        _causal_edge(repo, component, supplier, "SOURCED_FROM", "Causal Twoent Causal Component is sourced from Causal Twoent Causal Supplier.", group_id)
+        _causal_edge(repo, quality_event, supplier, "AFFECTS", "Causal Twoent Causal QualityEvent affects Causal Twoent Causal Supplier.", group_id)
+
+        anchor, second_entity, facts = asyncio.run(
+            repo.causal_chain_for_query(
+                "How is Causal Twoent Causal Component connected to Causal Twoent Causal QualityEvent?",
+                [group_id], None,
+            )
+        )
+        assert second_entity is not None
+        assert len(facts) == 2
+        assert GraphRepository.is_entirely_causal(facts)
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+def test_two_entities_with_no_path_returns_empty_facts(repo):
+    group_id = f"test_causal_twoent_nopath_{uuid.uuid4().hex[:8]}"
+    try:
+        _node(repo, group_id, "Causal Twoent Isolated One")
+        _node(repo, group_id, "Causal Twoent Isolated Two")
+        # No edge between them at all.
+
+        anchor, second_entity, facts = asyncio.run(
+            repo.causal_chain_for_query(
+                "How is Causal Twoent Isolated One connected to Causal Twoent Isolated Two?",
+                [group_id], None,
+            )
+        )
+        assert anchor is not None
+        assert second_entity is not None
+        assert facts == []
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+def test_two_entity_path_never_crosses_into_another_groups_node(repo):
+    group_id = f"test_causal_twoent_cross_{uuid.uuid4().hex[:8]}"
+    other_group_id = f"test_causal_twoent_cross_other_{uuid.uuid4().hex[:8]}"
+    try:
+        a = _node(repo, group_id, "Causal Twoent Cross A")
+        b = _node(repo, group_id, "Causal Twoent Cross B")
+        bridge = _node(repo, other_group_id, "Causal Twoent Cross Other Tenant Bridge")
+        # The only path from A to B goes through another tenant's node.
+        _non_causal_edge(repo, a, bridge, "Causal Twoent Cross A relates to the bridge.", group_id)
+        _non_causal_edge(repo, bridge, b, "The bridge relates to Causal Twoent Cross B.", other_group_id)
+
+        anchor, second_entity, facts = asyncio.run(
+            repo.causal_chain_for_query("How is Causal Twoent Cross A connected to Causal Twoent Cross B?", [group_id], None)
+        )
+        assert second_entity is not None
+        assert facts == []
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": other_group_id})
+
+
+# --- is_entirely_causal itself -----------------------------------------------
+
+
+def test_is_entirely_causal_false_for_empty_facts():
+    assert GraphRepository.is_entirely_causal([]) is False
+
+
+def test_is_entirely_causal_true_only_when_every_fact_is_causal_typed():
+    all_causal = [{"relationship_type": "SOURCED_FROM"}, {"relationship_type": "AFFECTS"}]
+    mixed = [{"relationship_type": "SOURCED_FROM"}, {"relationship_type": "LOCATED_AT"}]
+    assert GraphRepository.is_entirely_causal(all_causal) is True
+    assert GraphRepository.is_entirely_causal(mixed) is False
