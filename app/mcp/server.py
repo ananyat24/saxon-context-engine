@@ -22,7 +22,7 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from app.config import TenantConfig, settings
-from app.context.query_service import execute_context_query
+from app.context.query_service import execute_causal_query, execute_context_query
 from app.graph import document_sets
 from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
@@ -109,6 +109,46 @@ async def query_context_graph(
             graphiti_pool=_graphiti_pool,
             knowledge_base=knowledge_base,
             document_set=document_set,
+            as_user=as_user,
+        )
+    except HTTPException as e:
+        raise ToolError(str(e.detail))
+    return packet
+
+
+@mcp_server.tool()
+async def query_causal_chain(
+    query: str, ctx: Context, knowledge_base: Optional[str] = None, as_user: Optional[str] = None
+) -> dict:
+    """What happened -> why -> impact -> recommendation, reasoned across a
+    chain of related facts (e.g. an at-risk Order to its Product to a
+    Component to the Supplier to an open QualityEvent) -- distinct from
+    query_context_graph above, which only ever restates facts already in
+    the graph and never infers or recommends anything.
+
+    Returns a dict whose "recommendation" field (what_happened/why/impact/
+    recommendation) is a generated suggestion, kept separate from the
+    grounded "summary" field of facts it was built from -- the two are
+    never blended, so a caller always knows which is which. Saxon does not
+    act on the recommendation; it's also logged as an auditable :Decision
+    graph node ("decision_id") for later review.
+
+    knowledge_base: id of one specific connected source to search. Omit to
+    use the tenant's default source. as_user restricts the chain to what
+    that person can see in their org's hierarchy, same as
+    query_context_graph's as_user. document_set scoping isn't supported for
+    this mode yet -- a causal chain needs one clear knowledge base to write
+    its Decision node into.
+    """
+    tenant = await _authenticate(ctx)
+    assert _neo4j_client is not None and _graphiti_pool is not None, "MCP server not configured -- see configure()"
+    try:
+        packet = await execute_causal_query(
+            tenant=tenant,
+            query=query,
+            neo4j_client=_neo4j_client,
+            graphiti_pool=_graphiti_pool,
+            knowledge_base=knowledge_base,
             as_user=as_user,
         )
     except HTTPException as e:

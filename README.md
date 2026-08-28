@@ -36,6 +36,35 @@ into a shape an AI can use.
 **Live demo:** https://saxon-context-engine.kindsea-5648017b.southindia.azurecontainerapps.io/ui
 (needs an access key -- see [Adding a client's API key](#adding-a-clients-api-key)).
 
+## Vocabulary: Context Graph, Context Layer, Context Engine
+
+Leadership's own framing for this product names three layers; this is the
+same system described earlier, mapped onto that vocabulary rather than
+renamed in the code:
+
+- **Context Graph** -- the enterprise understanding itself: entities,
+  relationships, metrics, semantics, provenance, authority, permissions, and
+  temporal state. In this repo, that's Neo4j + Graphiti's bi-temporal fact
+  tracking, the ontology (`ontology/`), the authorization/org-hierarchy
+  subgraph (`app/graph/authorization.py`), and the connector
+  `source_authority` tie-break (`app/graph/connectors.py`) added below.
+- **Context Layer** -- the reusable contract that presents common business
+  meaning to BI tools, Copilots, agents, and apps alike, decoupled from any
+  one source's own schema. In this repo, that's the ontology's
+  core-plus-domain-pack model (a "customer" means the same thing whether it
+  came from a CRM row or an email) plus the connector abstraction
+  (`SourceConnector`) every source is normalized through before it ever
+  reaches the graph.
+- **Context Engine** -- the runtime: resolve intent -> retrieve -> reconcile
+  -> apply permissions -> assemble governed context. In this repo, that's the
+  retrieval/orchestration path in `app/context/query_service.py`,
+  `app/context/orchestrator.py`, and `app/graph/graph_repository.py`.
+
+Four consumers now sit on top of the same Context Layer, not four separate
+integrations: this project's own chat UI, any MCP-capable Copilot/agent (see
+[MCP server](#mcp-server)), any client app via the HTTP API, and Power BI via
+a read-only OData feed (see [BI access](#bi-access-power-bi--odata)).
+
 ## How it works
 
 Think of a corkboard with pins and string. Each pin is a thing: a person, a
@@ -407,6 +436,55 @@ under one name, so a question can be scoped across all of them at once
 (`document_set` in a query) instead of picking exactly one connector every
 time.
 
+**Source authority.** `POST /api/v1/connectors` also accepts an optional
+`source_authority` (0-100, default 0, higher wins). It's used for exactly
+one thing: when two connectors' facts disagree about the same relationship
+at the same point in time (e.g. an ERP feed says an order shipped, a
+SharePoint doc still says it's pending), the higher-authority source's fact
+is what feeds the synthesized answer (`app/context/orchestrator.py`'s
+`_apply_authority_tie_break`). It never hides or filters anything -- every
+fact from every source still comes back in the response's evidence either
+way, tagged `is_authoritative`/`source_authority`, so a client can always
+see both sides of a disagreement even when only one drove the answer.
+
+## Causal reasoning & recommendations
+
+`POST /api/v1/context/query/causal` is a second, deliberately separate query
+mode from the plain-facts `/query` above -- it answers "what happened -> why
+-> impact -> recommendation" by resolving the query to a starting entity and
+walking a few hops over the ontology's own causal relationship types
+(`DEPENDS_ON`, `CAUSED_BY`, `AFFECTS`, `RESULTED_IN`, `SOURCED_FROM` -- see
+`ontology/core.yaml`), e.g. an at-risk `Order` -> its `Product` -> a
+`Component` -> the `Supplier` -> an open `QualityEvent`
+(`GraphRepository.causal_chain_for_query`).
+
+```bash
+curl -X POST https://<this deployment>/api/v1/context/query/causal \
+  -H "X-API-Key: <tenant key>" -H "Content-Type: application/json" \
+  -d '{"query": "Why is Order 9001 at risk?"}'
+```
+
+The response's `metadata.recommendation` field (`what_happened`/`why`/
+`impact`/`recommendation`) is a generated suggestion; `metadata.summary` is
+still only the grounded chain of facts it was built from -- the two are
+never blended, on purpose. This is the one place in the codebase an LLM call
+is allowed to infer rather than only restate (`/query`'s synthesis is
+explicitly fact-only and stays that way -- this is a second method, not a
+loosened version of it). Any recommendation produced is also written as a
+real, auditable `:Decision` graph node (`ontology/core.yaml`'s `Decision`
+type, previously defined but unused; see `app/graph/decisions.py`) linked to
+the entity it's about, so it's an inspectable fact, not a throwaway string.
+**Saxon never acts on a recommendation it generates -- this is
+recommendation-only, logged for visibility; execution is explicitly out of
+scope.**
+
+Same `as_user` org-hierarchy-scoped visibility as `/query` is supported
+(`{"query": "...", "as_user": "jordan_blake"}`), and `metadata.cost_usd` is
+tracked the same way too (`null` for a Gemini-provider tenant, an estimate
+for Anthropic/Azure OpenAI). `document_set` scoping isn't supported here --
+a causal chain needs one clear knowledge base to write its `Decision` node
+into.
+
 ## MCP server
 
 Any [MCP](https://modelcontextprotocol.io)-capable agent -- Claude Desktop,
@@ -428,6 +506,11 @@ Two tools are exposed:
   `POST /api/v1/context/query`, because it's the same underlying
   implementation (`app/context/query_service.py`) -- an MCP query and an API
   query against the same scope can never drift apart.
+- **`query_causal_chain`** -- the MCP counterpart to
+  `POST /api/v1/context/query/causal` (see
+  [Causal reasoning & recommendations](#causal-reasoning--recommendations)):
+  what happened/why/impact/recommendation, reasoned across a chain of facts,
+  kept separate from the plain fact-restating `query_context_graph` above.
 - **`list_available_sources`** -- lists the tenant's own knowledge bases and
   document sets, so an agent can discover what it's allowed to query instead
   of guessing an id.
@@ -439,6 +522,31 @@ before any tenant data is touched. Locally, run against `http://localhost:8000/m
 see `MCP_ALLOWED_HOSTS` in `.env.example` if you're pointing an MCP client at
 a deployment with a different hostname than the default (`localhost:8000`) --
 the MCP SDK's own DNS-rebinding protection rejects any other Host header.
+
+## BI access (Power BI / OData)
+
+The Context Layer's fourth consumer, alongside the chat UI, MCP agents, and
+client apps: `GET /api/v1/odata/*` (`app/api/odata.py`) is a read-only OData
+v4 feed over the same tenant-scoped entity/fact data `GET /api/v1/graph/*`
+already serves the UI. Power BI Desktop's built-in **Get Data > OData Feed**
+connector can point straight at it -- no custom connector to build or get
+certified:
+
+```
+Feed URL: https://<this deployment>/api/v1/odata
+Auth: Web API key, header X-API-Key: <tenant key>
+```
+
+Two feeds are exposed -- `Entities` (every node in the tenant's knowledge
+base: id, name, entity type, summary) and `Facts` (every relationship: source,
+type, target, the fact text, `valid_at`/`invalid_at`, and `is_valid`, so a
+Power BI report can filter to only-currently-true facts). `?knowledge_base=`
+scopes to one of the tenant's own sources same as everywhere else; `?top=`
+caps how many rows come back (default 200, max 5000). Deliberately minimal --
+`$top` only, not the full OData query grammar (`$filter`/`$orderby`/
+`$expand`) -- since the underlying data source is the same Cypher
+`app/api/graph.py` already runs; extend that file's queries if a report needs
+richer server-side filtering.
 
 ## API access
 
@@ -666,6 +774,7 @@ saxon-context-engine/
 │   │   ├── connector_scheduler.py      # Background interval sync for every tenant's connectors
 │   │   ├── ingestion_queue.py          # In-process queue decoupling a sync trigger from extraction
 │   │   ├── tenants.py                  # :Tenant storage -- add/remove a tenant with no redeploy
+│   │   ├── decisions.py                # Writes a causal-chain recommendation as an auditable :Decision node
 │   │   └── document_sets.py            # :DocumentSet storage (named groups of connectors)
 │   ├── ingestion/                # Turning raw text/records/live sources into graph writes
 │   │   ├── connector_base.py           # SourceConnector interface every connector type implements
@@ -682,12 +791,14 @@ saxon-context-engine/
 │   │   ├── base.py               # Shared interface for query-based retrievers
 │   │   └── graph_retriever.py    # The one retriever wired in -- wraps GraphRepository's search
 │   ├── context/
-│   │   ├── orchestrator.py       # Pools retriever results, synthesizes an answer, classifies retrieval_path
+│   │   ├── orchestrator.py       # Pools retriever results, synthesizes an answer, classifies retrieval_path;
+│   │   │                         # also the causal-chain recommendation mode (get_causal_context_packet)
 │   │   ├── query_service.py      # Scope resolution + cache + orchestrator, shared by the HTTP route and MCP
 │   │   └── response_cache.py     # Short-TTL cache for repeat/near-repeat questions
 │   ├── mcp/
-│   │   └── server.py             # MCP tools (query_context_graph, list_available_sources) over the same query path
-│   └── api/                     # FastAPI routes: /health, /entities, /context, /graph, /document-sets, /connectors, /admin
+│   │   └── server.py             # MCP tools (query_context_graph, query_causal_chain, list_available_sources)
+│   └── api/                     # FastAPI routes: /health, /entities, /context, /graph, /document-sets, /connectors,
+│                                 # /admin, /webhooks, /odata (the Power BI / OData feed)
 ├── ontology/
 │   ├── README.md                # Ontology design principles and layering
 │   ├── core.yaml                # Enterprise-wide entity/relationship definitions
@@ -750,9 +861,9 @@ Validate all ontology files at once with `python scripts/check_ontology.py`.
 | Graph persistence (`app/graph/`) | Implemented and tested |
 | Ingestion (`app/ingestion/`) | Eight connector types: `web`, `google_drive`, `sharepoint`, `gmail`, and `outlook_mail` are real live sources; `database`/`documents`/`email` read bundled demo data. Scheduled + on-demand sync, content-hash dedup, an in-process queue decoupling a sync trigger from extraction, and real-time push (not just polling) for `outlook_mail` via Microsoft Graph subscriptions |
 | Retrieval (`app/retrieval/`) | Named-entity resolution (including cross-source pooling, tolerant of a legal-suffix/punctuation name variant across sources) tried first, Graphiti's hybrid search as a fallback -- see `GraphRepository.search_graphiti_facts` |
-| Context composition (`app/context/`) | Synthesized answers, per-fact source attribution, a short-lived response cache, and per-query observability (`retrieval_path`/`cache_hit`/`cost_usd`) |
-| API (`app/api/`) | `/health`, `/entities`, `/context/query`, `/graph/*` (role-based visibility), `/document-sets`, `/connectors`, `/admin` (operator-only tenant management, no redeploy needed), `/webhooks/graph` (unauthenticated -- Microsoft Graph push notifications) |
-| MCP (`app/mcp/`) | `query_context_graph` and `list_available_sources` tools, same auth and query path as the HTTP API |
+| Context composition (`app/context/`) | Synthesized answers, per-fact source attribution, a short-lived response cache, per-query observability (`retrieval_path`/`cache_hit`/`cost_usd`), source-authority tie-breaking, and a separate causal-chain recommendation mode |
+| API (`app/api/`) | `/health`, `/entities`, `/context/query`, `/context/query/causal`, `/graph/*` (role-based visibility), `/document-sets`, `/connectors`, `/admin` (operator-only tenant management, no redeploy needed), `/webhooks/graph` (unauthenticated -- Microsoft Graph push notifications), `/odata/*` (read-only OData v4 feed for Power BI) |
+| MCP (`app/mcp/`) | `query_context_graph`, `query_causal_chain`, and `list_available_sources` tools, same auth and query path as the HTTP API |
 | Deployment | Live on Azure Container Apps + Neo4j AuraDB -- see [Deployment](#deployment) |
 
 ### Roadmap

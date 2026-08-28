@@ -286,6 +286,14 @@ class GraphRepository:
         return groups, saw_unresolved
 
     @staticmethod
+    def fact_is_valid(expired_at, invalid_at) -> bool:
+        """Public wrapper around _not_yet_invalidated for callers outside
+        this module (e.g. app/api/odata.py) that need the same
+        current-vs-superseded rule this class applies everywhere else,
+        without reaching into a name-mangled internal."""
+        return expired_at is None and _not_yet_invalidated(invalid_at)
+
+    @staticmethod
     def _to_native(value):
         """execute_cypher() returns raw neo4j.time.DateTime objects (unlike
         Graphiti's own search results, which come back as plain datetimes) --
@@ -300,9 +308,9 @@ class GraphRepository:
         only ever return facts that are actually about this entity."""
         rows = self.execute_cypher(
             "MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-(m) "
-            "RETURN r.fact AS fact, r.valid_at AS valid_at, r.invalid_at AS invalid_at, "
-            "r.expired_at AS expired_at, r.group_id AS group_id, startNode(r).uuid AS source_node_uuid, "
-            "endNode(r).uuid AS target_node_uuid",
+            "RETURN r.fact AS fact, r.name AS relationship_type, r.valid_at AS valid_at, "
+            "r.invalid_at AS invalid_at, r.expired_at AS expired_at, r.group_id AS group_id, "
+            "startNode(r).uuid AS source_node_uuid, endNode(r).uuid AS target_node_uuid",
             {"uuid": uuid},
         )
         facts = []
@@ -317,6 +325,7 @@ class GraphRepository:
             invalid_at = self._to_native(row["invalid_at"])
             facts.append({
                 "fact": row["fact"],
+                "relationship_type": row["relationship_type"],
                 "source_node_uuid": row["source_node_uuid"],
                 "target_node_uuid": row["target_node_uuid"],
                 "valid_at": self._to_native(row["valid_at"]),
@@ -353,6 +362,114 @@ class GraphRepository:
         if visible_uuids is not None and not all(u in visible_uuids for u in row["path_uuids"]):
             return None
         return row["facts"]
+
+    # The ontology's own causal relationship types (see ontology/core.yaml) --
+    # the causal-chain retriever below only ever walks edges typed one of
+    # these, so it can't wander off into an unrelated part of the graph just
+    # because a path happens to exist. Deliberately not "any relationship":
+    # a generic BELONGS_TO/LOCATED_AT hop doesn't explain why something
+    # happened, only that two things are related.
+    _CAUSAL_RELATIONSHIP_TYPES = ["DEPENDS_ON", "CAUSED_BY", "AFFECTS", "RESULTED_IN", "SOURCED_FROM"]
+    # "A few hops," not an open-ended traversal -- matches the shape of the
+    # spec's own example (Order -> Product -> Component -> Supplier ->
+    # QualityEvent is 4 hops) without risking a combinatorial blow-up on a
+    # densely-connected graph.
+    _CAUSAL_MAX_HOPS = 4
+    # Keeps the chain small enough to hand an LLM as grounding for a
+    # recommendation, not a graph dump -- this is a "few facts explaining a
+    # situation" feature, not a bulk export.
+    _CAUSAL_FACT_LIMIT = 25
+
+    def _causal_chain_facts_from(
+        self, uuid: str, group_ids: list[str], visible_uuids: Optional[set[str]]
+    ) -> list[dict[str, Any]]:
+        """Walks outward from an already-resolved entity over only the
+        ontology's causal relationship types, instead of the entity's own
+        directly-touching edges (see _entity_own_facts) -- built for
+        "what happened -> why -> impact" questions that need to follow a
+        chain, e.g. an at-risk Order to its Product to a Component to the
+        Supplier to an open QualityEvent to a supporting document.
+
+        Every node along the path is constrained to group_ids, the same way
+        every other relationship traversal in this codebase scopes both
+        ends of an edge (see app/graph/authorization.py, app/api/odata.py's
+        list_facts_odata) -- Graphiti's own group_id partitioning means a
+        RELATES_TO edge shouldn't naturally span two knowledge bases in
+        practice, but this is the one multi-hop (up to 4 edges) traversal
+        in the codebase, and relying on that as an unenforced assumption
+        rather than checking it directly is exactly the kind of gap that
+        turns a future data-quality bug or entity-merge feature into a
+        silent cross-tenant leak -- worse here, since a causal answer also
+        gets written into a permanent, auditable :Decision node.
+
+        Returns facts in path order (shortest paths first, then hop order
+        within a path), deduped by (source, relationship type, target) so a
+        fact reachable via more than one path is only listed once.
+        """
+        rows = self.execute_cypher(
+            f"""
+            MATCH p = (n:Entity {{uuid: $uuid}})-[:RELATES_TO*1..{self._CAUSAL_MAX_HOPS}]-(m:Entity)
+            WHERE ALL(rel IN relationships(p) WHERE rel.name IN $causal_types)
+              AND ALL(node IN nodes(p) WHERE node.group_id IN $group_ids)
+            WITH p, relationships(p) AS rels, nodes(p) AS path_nodes, length(p) AS path_length
+            UNWIND range(0, size(rels) - 1) AS hop
+            WITH rels[hop] AS rel, hop, path_length, path_nodes
+            RETURN DISTINCT rel.fact AS fact, rel.name AS relationship_type, hop, path_length,
+                   rel.valid_at AS valid_at, rel.invalid_at AS invalid_at, rel.expired_at AS expired_at,
+                   rel.group_id AS group_id, startNode(rel).uuid AS source_node_uuid,
+                   endNode(rel).uuid AS target_node_uuid, [x IN path_nodes | x.uuid] AS path_uuids
+            ORDER BY path_length, hop
+            LIMIT {self._CAUSAL_FACT_LIMIT}
+            """,
+            {"uuid": uuid, "group_ids": group_ids, "causal_types": self._CAUSAL_RELATIONSHIP_TYPES},
+        )
+        facts: list[dict[str, Any]] = []
+        seen: set[tuple] = set()
+        for row in rows:
+            if visible_uuids is not None and not all(u in visible_uuids for u in row["path_uuids"]):
+                continue
+            key = (row["source_node_uuid"], row["relationship_type"], row["target_node_uuid"])
+            if key in seen:
+                continue
+            seen.add(key)
+            expired_at = self._to_native(row["expired_at"])
+            invalid_at = self._to_native(row["invalid_at"])
+            facts.append({
+                "fact": row["fact"],
+                "relationship_type": row["relationship_type"],
+                "hop": row["hop"],
+                "source_node_uuid": row["source_node_uuid"],
+                "target_node_uuid": row["target_node_uuid"],
+                "valid_at": self._to_native(row["valid_at"]),
+                "invalid_at": invalid_at,
+                "expired_at": expired_at,
+                "group_id": row["group_id"],
+                "is_valid": expired_at is None and _not_yet_invalidated(invalid_at),
+            })
+        return facts
+
+    async def causal_chain_for_query(
+        self, query_text: str, group_ids: Optional[list[str]], visible_uuids: Optional[set[str]]
+    ) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
+        """Resolves query_text to a starting entity the same way
+        search_graphiti_facts does (see _resolve_named_entities), then walks
+        the causal chain out from it. Returns (anchor_entity, chain_facts);
+        anchor_entity is None when nothing in the query resolved to a real
+        node, in which case chain_facts is always empty.
+
+        Only ever anchors on the first resolved candidate -- unlike
+        search_graphiti_facts's two-entity "how is X connected to Y" path
+        lookup, a causal chain has one starting point, not two named
+        endpoints to connect.
+        """
+        if not self.graphiti or not group_ids:
+            return None, []
+        resolved_groups, _saw_unresolved = await self._resolve_named_entities(query_text, group_ids, visible_uuids)
+        if not resolved_groups:
+            return None, []
+        anchor = resolved_groups[0][0]
+        facts = self._causal_chain_facts_from(anchor["uuid"], group_ids, visible_uuids)
+        return anchor, facts
 
     async def search_graphiti_facts(
         self,
@@ -490,6 +607,7 @@ class GraphRepository:
                 continue
             facts.append({
                 "fact": r.fact,
+                "relationship_type": getattr(r, "name", None),
                 "source_node_uuid": source_uuid,
                 "target_node_uuid": target_uuid,
                 "valid_at": getattr(r, "valid_at", None),

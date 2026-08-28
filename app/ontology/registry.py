@@ -6,7 +6,7 @@
 from copy import deepcopy
 from typing import Any
 
-from .validator import OntologyValidator
+from .validator import OntologyValidationError, OntologyValidator
 
 
 class OntologyRegistry:
@@ -46,17 +46,34 @@ class OntologyRegistry:
                 continue
 
             for key, value in incoming.items():
-                already_defined = (
-                    key in self._ontology[section]
-                    and isinstance(self._ontology[section][key], dict)
-                    and isinstance(value, dict)
-                )
-                if already_defined:
+                existing = self._ontology[section].get(key)
+                if isinstance(existing, dict) and isinstance(value, dict):
                     # Both this layer and an earlier layer define the same key (e.g.
                     # two domain packs both touch "Organization") -- merge their
                     # properties instead of one silently replacing the other.
-                    self._ontology[section][key].update(deepcopy(value))
+                    existing.update(deepcopy(value))
+                elif existing is not None and existing != value:
+                    # A scalar section (aliases is the only one today -- entities/
+                    # relationships/event_types/fact_types entries are always dicts,
+                    # handled by the merge branch above) where two layers define the
+                    # same key with genuinely different values: e.g. one domain pack's
+                    # alias "po" -> "Order" and another's "po" -> "PurchaseOrder".
+                    # This used to silently let whichever pack loaded last win, which
+                    # meant a real ambiguity (which type does "po" actually mean?)
+                    # never surfaced anywhere -- fail loudly at registration time
+                    # instead, the same way a malformed ontology file already does
+                    # (see OntologyValidator), rather than resolving it implicitly by
+                    # load order.
+                    raise OntologyValidationError(
+                        f"Ontology conflict in section '{section}': '{key}' is "
+                        f"{existing!r} in an earlier-registered ontology file and "
+                        f"{value!r} in this one. Rename one of them -- domain packs "
+                        f"are additive (see ontology/README.md) and must not "
+                        f"silently redefine the same key with a different value."
+                    )
                 else:
+                    # Either genuinely new, or the same value redefined identically
+                    # (harmless -- two packs agreeing on an alias isn't a conflict).
                     self._ontology[section][key] = deepcopy(value)
 
     def get_entity_type(self, name: str) -> dict[str, Any] | None:

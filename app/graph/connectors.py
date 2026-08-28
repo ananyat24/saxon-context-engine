@@ -31,7 +31,7 @@ def ensure_connector_indexes(repo: Optional[GraphRepository] = None) -> None:
 
 _FIELDS = (
     "id, tenant_id, name, type, group_id, url, status, last_synced_at, "
-    "last_error, content_hash"
+    "last_error, content_hash, source_authority"
 )
 # Real-time push (see app/ingestion/graph_subscriptions.py, app/api/webhooks.py)
 # -- kept as separate optional fields rather than folded into _FIELDS above
@@ -84,7 +84,15 @@ def create_connector(
     group_id: str,
     url: str,
     repo: Optional[GraphRepository] = None,
+    source_authority: int = 0,
 ) -> dict:
+    """source_authority: an operator/tenant-set rank (higher = more
+    authoritative), used only to break ties when two connectors' facts
+    disagree about the same relationship at the same point in time (see
+    app/context/orchestrator.py's authority tie-break) -- it never hides or
+    filters a fact, every source's own facts stay visible regardless of
+    rank. Defaults to 0 (no special standing) so an unset connector doesn't
+    silently outrank or lose to anything."""
     repo = repo or GraphRepository()
     connector_id = str(uuid.uuid4())
     repo.execute_cypher(
@@ -92,7 +100,7 @@ def create_connector(
         CREATE (c:Connector {
             id: $id, tenant_id: $tenant_id, name: $name, type: $type, group_id: $group_id,
             url: $url, status: 'never_synced', last_synced_at: null, last_error: null,
-            content_hash: null, created_at: datetime()
+            content_hash: null, source_authority: $source_authority, created_at: datetime()
         })
         """,
         {
@@ -102,13 +110,31 @@ def create_connector(
             "type": connector_type,
             "group_id": group_id,
             "url": url,
+            "source_authority": source_authority,
         },
     )
     return {
         "id": connector_id, "tenant_id": tenant_id, "name": name, "type": connector_type,
         "group_id": group_id, "url": url, "status": "never_synced", "last_synced_at": None,
-        "last_error": None, "content_hash": None,
+        "last_error": None, "content_hash": None, "source_authority": source_authority,
     }
+
+
+def authority_by_group_id(tenant_id: str, repo: Optional[GraphRepository] = None) -> dict[str, int]:
+    """Maps each of this tenant's own group_ids (knowledge bases) to the
+    highest source_authority among the connectors feeding it -- more than
+    one connector can write into the same knowledge base, so this takes the
+    max rather than assuming a 1:1 connector-to-group_id mapping. A
+    group_id with no connectors (or only ones with no authority set) is
+    just absent from the returned map; callers should treat a missing
+    entry as authority 0, same as an explicitly-unset connector."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        "MATCH (c:Connector {tenant_id: $tenant_id}) "
+        "RETURN c.group_id AS group_id, max(coalesce(c.source_authority, 0)) AS authority",
+        {"tenant_id": tenant_id},
+    )
+    return {row["group_id"]: row["authority"] for row in rows}
 
 
 def delete_connector(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> bool:

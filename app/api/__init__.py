@@ -10,6 +10,7 @@ from app.api.document_sets import router as document_sets_router
 from app.api.connectors import router as connectors_router
 from app.api.admin import router as admin_router
 from app.api.webhooks import router as webhooks_router
+from app.api.odata import router as odata_router
 
 api_router = APIRouter()
 api_router.include_router(health_router, prefix="/health", tags=["Health"])
@@ -25,5 +26,9 @@ api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 # Unauthenticated (Microsoft Graph calls this directly, with no API key) --
 # see app/api/webhooks.py's module docstring for the actual trust boundary.
 api_router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])
+# The Context Layer's BI surface -- a read-only OData v4 feed Power BI's
+# built-in "OData Feed" connector can point at directly. Same X-API-Key
+# tenant auth as every other route here; see app/api/odata.py.
+api_router.include_router(odata_router, prefix="/odata", tags=["OData / BI"])
 
 __all__ = ["api_router"]

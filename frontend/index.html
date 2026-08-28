@@ -149,10 +149,15 @@
             <div class="row">
                 <input id="queryInput" type="text" placeholder="e.g. who manages the Contoso account" />
                 <button id="askBtn" class="btn btn-accent">Ask</button>
+                <button id="causalBtn" class="btn btn-outline" type="button"
+                    title="Trace what happened, why, its impact, and a recommendation across a chain of related facts">
+                    Explain why + recommend
+                </button>
             </div>
             <div id="queryAnswer" class="result-block"></div>
             <p id="queryStats" class="query-stats" hidden></p>
             <div id="queryFacts" class="fact-list"></div>
+            <div id="causalRecommendation" class="result-block" hidden></div>
             <button id="seeMoreBtn" class="btn btn-outline" type="button" hidden>See more results</button>
             <details id="queryRawWrap" class="raw-details" hidden>
                 <summary>Technical details</summary>
@@ -234,6 +239,19 @@
                 <div class="row">
                     <select id="connectorKbSelect" class="kb-select connector-kb-select"></select>
                 </div>
+                <div class="row">
+                    <label for="connectorAuthority" class="muted" style="font-size:0.85rem">
+                        Source authority (0-100, higher wins a tie)
+                    </label>
+                    <input id="connectorAuthority" type="number" min="0" max="100" value="0" style="width:5rem" />
+                </div>
+                <p class="muted" style="font-size:0.8rem">
+                    Only matters when two connectors' facts disagree about the same thing at the
+                    same time (e.g. an ERP feed says an order shipped, a SharePoint doc still says
+                    it's pending) -- the higher-authority source is used for the answer. Every
+                    fact from every source still shows up in the evidence either way; authority
+                    never hides or filters anything, it only breaks ties.
+                </p>
                 <p class="muted" style="font-size:0.8rem">
                     "Web page", "Google Drive folder", "SharePoint site", "Gmail mailbox", and
                     "Outlook mailbox" all pull from a real live source. For Drive, share the target

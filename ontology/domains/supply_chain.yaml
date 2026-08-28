@@ -1,29 +1,149 @@
 ontology:
   id: saxon-supply_chain
   name: Saxon Supply Chain Ontology
-  version: "0.1.0"
+  version: "0.2.0"
   description: >
-    Domain extension for the Saxon Enterprise Core ontology.
+    Domain extension for the Saxon Enterprise Core ontology, covering the
+    supplier/component/shipment/quality chain that connects a Product back
+    to where it came from. Written to support the causal-chain use case an
+    at-risk Order can trace through: Order -> Product -> Component ->
+    Supplier -> QualityEvent -> supporting Document.
   namespace: saxon.domain.supply_chain
   extends: saxon.core
   extension_policy: additive
 
-entities: {}
-# Add domain concepts here. Every domain entity should extend a core concept.
-#
-# Example:
-# DomainEntity:
-#   extends: Asset
-#   description: Domain-specific specialization.
+entities:
 
-relationships: {}
-# Add only relationships whose meaning is genuinely domain-specific.
-#
-# Example:
-# supply_chain_RELATIONSHIP:
-#   source: DomainEntity
-#   target: Entity
+  Supplier:
+    extends: Organization
+    description: An external vendor that supplies components, materials, or finished goods.
+    properties:
+      supplier_tier: {type: string, required: false}
+      approval_status: {type: string, required: false}
 
-event_types: {}
-fact_types: {}
-aliases: {}
+  Component:
+    extends: Asset
+    description: >
+      A part, material, or sub-assembly sourced from a Supplier and used to
+      build a Product. Extends Asset (not Resource) since it's tracked as a
+      discrete, identifiable thing with its own provenance, not a fungible
+      quantity.
+    properties:
+      component_type: {type: string, required: false}
+      lot_number: {type: string, required: false}
+
+  BillOfMaterials:
+    extends: DataObject
+    description: The list of Components (and quantities) that make up a Product.
+
+  Warehouse:
+    extends: Location
+    description: A facility where inventory is stored.
+
+  InventoryItem:
+    extends: Resource
+    description: A stocked quantity of a Product or Component at a Warehouse.
+    properties:
+      quantity_on_hand: {type: number, required: false}
+      reorder_point: {type: number, required: false}
+
+  PurchaseOrder:
+    extends: Transaction
+    description: An order placed with a Supplier for Components or materials.
+    properties:
+      po_status: {type: string, required: false}
+      amount: {type: number, required: false}
+
+  Shipment:
+    extends: Transaction
+    description: A physical movement of goods from one party/location to another.
+    properties:
+      shipment_status: {type: string, required: false}
+      carrier: {type: string, required: false}
+      tracking_number: {type: string, required: false}
+
+  QualityEvent:
+    extends: Issue
+    description: >
+      A quality problem, deviation, inspection failure, or recall tied to a
+      Component, Supplier, or Product. Extends Issue (not Event) so it
+      inherits severity/status alongside the core's event-time handling.
+    properties:
+      defect_type: {type: string, required: false}
+      corrective_action: {type: string, required: false}
+
+relationships:
+
+  SUPPLIES:
+    source: Supplier
+    target: Component
+    description: Supplier is a source of this Component.
+
+  COMPOSED_OF:
+    source: Product
+    target: Component
+    description: Product is built from this Component.
+
+  LISTED_IN:
+    source: Component
+    target: BillOfMaterials
+    description: Component appears in this bill of materials.
+
+  STOCKED_AT:
+    source: InventoryItem
+    target: Warehouse
+    description: This inventory is held at this Warehouse.
+
+  ORDERED_FROM:
+    source: PurchaseOrder
+    target: Supplier
+    description: Purchase order was placed with this Supplier.
+
+  SHIPPED_VIA:
+    source: Shipment
+    target: Supplier
+    description: Shipment originated from this Supplier.
+
+  DELIVERED_TO:
+    source: Shipment
+    target: Warehouse
+    description: Shipment's destination.
+
+  FLAGGED_BY:
+    source: Supplier
+    target: QualityEvent
+    description: A quality event was raised against this Supplier.
+
+  QUALITY_ISSUE_ON:
+    source: QualityEvent
+    target: Component
+    description: The quality event concerns this specific Component.
+
+event_types:
+
+  ShipmentDelivered:
+    description: A Shipment arrived at its destination.
+
+  QualityEventRaised:
+    description: A QualityEvent was opened against a Supplier or Component.
+
+  InventoryReplenished:
+    description: Stock was received into a Warehouse.
+
+fact_types:
+
+  SupplyLinkFact:
+    description: Subject Component is sourced from a given Supplier during a validity interval.
+
+  InventoryLevelFact:
+    description: Subject InventoryItem had a given quantity on hand at a point in time.
+
+aliases:
+  vendor: Supplier
+  part: Component
+  bom: BillOfMaterials
+  wh: Warehouse
+  po: PurchaseOrder
+  shipment: Shipment
+  recall: QualityEvent
+  defect: QualityEvent

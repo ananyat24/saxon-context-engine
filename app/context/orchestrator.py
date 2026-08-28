@@ -29,6 +29,9 @@ from typing import List, Optional
 from graphiti_core import Graphiti
 from graphiti_core.prompts.models import Message
 from pydantic import BaseModel
+from app.graph import connectors
+from app.graph.decisions import record_decision
+from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
 from app.models.context_packet import ContextPacket
 from app.retrieval.base import TextRetriever
@@ -39,6 +42,19 @@ logger = logging.getLogger(__name__)
 
 class _SynthesizedAnswer(BaseModel):
     answer: str
+
+
+class _CausalRecommendation(BaseModel):
+    what_happened: str
+    why: str
+    impact: str
+    recommendation: str
+
+
+# Kept short for the same reason _SYNTHESIS_MAX_TOKENS is: this runs on every
+# causal query, not just at ingestion time, and a recommendation is meant to
+# be a few sentences a person can act on, not a report.
+_RECOMMENDATION_MAX_TOKENS = 300
 
 
 # Kept low deliberately -- this is one short sentence, not a report. Also
@@ -113,6 +129,73 @@ class ContextOrchestrator:
         self.retrievers: List[TextRetriever] = [GraphRetriever(graphiti_instance, neo4j_client=neo4j_client)]
         if extra_retrievers:
             self.retrievers.extend(extra_retrievers)
+        # Used both for the causal-chain walk and the source-authority tie
+        # break -- neither is a Graphiti hybrid-search call, so both go
+        # straight to Neo4j rather than through a retriever.
+        self._repo = GraphRepository(graphiti_instance, neo4j_client=neo4j_client)
+
+    def _apply_authority_tie_break(self, tenant_id: str, edge_facts: list[dict]) -> None:
+        """When two *different connectors'* facts disagree about the same
+        relationship (same source/target pair and relationship type, both
+        currently valid, different text, and actually attributed to more
+        than one group_id), marks the one from the higher-authority
+        connector `is_authoritative` and the other(s) not -- see
+        app/graph/connectors.py's source_authority field. Every fact still
+        comes back in the response's facts list either way (see
+        get_context_packet below); this only decides which lines feed the
+        synthesized answer, per the pivot's explicit "don't use it to hide
+        or filter anything" rule. Mutates edge_facts in place, adding
+        "source_authority" and "is_authoritative" to every entry.
+
+        Two things had to be tightened after testing against real data --
+        both are cases where a group of facts *looked* like a disagreement
+        under the original (source, target) grouping but was really just
+        several true, complementary facts, and treating them as a
+        disagreement silently dropped one from the answer:
+
+        1. Grouping by relationship_type too (not just the node pair): an
+           order's ship city and ship country point at the same two nodes
+           via different edges.
+        2. Requiring the group to actually span more than one group_id: it
+           turns out a single connector can extract two same-typed,
+           same-pair edges that are still both true (found for real in the
+           northwind data -- "Order 10252 was shipped to the city of
+           Charleroi" and "...to the country of Belgium" are both
+           LOCATED_AT edges from the same connector). source_authority
+           ranks one connector's data over another's, so arbitrating
+           between a connector and itself is never meaningful -- only a
+           group whose facts come from 2+ distinct group_ids is a real
+           cross-source disagreement worth breaking a tie on.
+
+        A fact with no real source/target uuid (e.g. the "how is X connected
+        to Y" path-lookup branch in search_graphiti_facts, which returns
+        every hop with source_node_uuid/target_node_uuid both "") is skipped
+        from grouping entirely, rather than left to collide on that shared
+        blank key -- otherwise every hop of a multi-hop path looks like one
+        giant disagreement and the answer collapses to a single hop.
+        """
+        authority_map = connectors.authority_by_group_id(tenant_id, repo=self._repo)
+        for f in edge_facts:
+            f["source_authority"] = authority_map.get(f.get("group_id"), 0)
+            f["is_authoritative"] = True
+
+        groups: dict[tuple, list[dict]] = {}
+        for f in edge_facts:
+            if not f.get("is_valid", True):
+                continue
+            if not f.get("source_node_uuid") or not f.get("target_node_uuid"):
+                continue
+            key = (f.get("source_node_uuid"), f.get("target_node_uuid"), f.get("relationship_type"))
+            groups.setdefault(key, []).append(f)
+
+        for facts_for_pair in groups.values():
+            distinct_texts = {f["fact"] for f in facts_for_pair}
+            distinct_sources = {f.get("group_id") for f in facts_for_pair}
+            if len(distinct_texts) <= 1 or len(distinct_sources) <= 1:
+                continue  # no disagreement -- nothing to break a tie on
+            winner = max(facts_for_pair, key=lambda f: f["source_authority"])
+            for f in facts_for_pair:
+                f["is_authoritative"] = f is winner
 
     async def _synthesize_answer(self, query: str, current_lines: list[str]) -> str:
         """Condenses several current facts into one clear sentence answering
@@ -165,6 +248,7 @@ class ContextOrchestrator:
         group_ids: Optional[List[str]] = None,
         visible_uuids: Optional[set[str]] = None,
         num_results: int = 8,
+        tenant_id: Optional[str] = None,
     ) -> ContextPacket:
         raw_facts = []
         for retriever in self.retrievers:
@@ -184,12 +268,15 @@ class ContextOrchestrator:
         ]
         edge_facts = [f for f in raw_facts if f.get("kind") != "entity_summary"]
 
+        if tenant_id and group_ids:
+            self._apply_authority_tie_break(tenant_id, edge_facts)
+
         transitions, replaced_fact_ids = _find_transitions(edge_facts)
         transition_lines = [_describe_transition(old, new) for old, new in transitions]
         plain_lines = [
             f["fact"]
             for f in edge_facts
-            if f.get("is_valid", True) and id(f) not in replaced_fact_ids
+            if f.get("is_valid", True) and id(f) not in replaced_fact_ids and f.get("is_authoritative", True)
         ]
 
         # A resolved entity's summary can restate facts that are also present as
@@ -240,5 +327,138 @@ class ContextOrchestrator:
                 "facts": raw_facts,
                 "result_limit_hit": result_limit_hit,
                 "retrieval_path": retrieval_path,
+            },
+        )
+
+    async def _synthesize_recommendation(self, query: str, anchor_name: str, chain_lines: list[str]) -> _CausalRecommendation:
+        """The one place in this codebase an LLM call is deliberately allowed
+        to infer, not just condense -- everywhere else (see
+        _synthesize_answer above) is explicitly fact-only. This is a
+        separate, clearly-labeled mode for exactly that reason: a
+        what-happened/why/impact/recommendation answer requires connecting
+        facts across a causal chain, which is a different (and riskier)
+        kind of output than restating what a single retrieval pass already
+        found. Still grounded -- told to reason only from the given facts,
+        not invent new ones -- but allowed to draw a conclusion from how
+        they connect, which is the actual point of this mode."""
+        messages = [
+            Message(
+                role="system",
+                content=(
+                    "You analyze a chain of related facts pulled from an enterprise "
+                    "knowledge graph to explain a situation and recommend a next step. "
+                    "Reason only from the facts given -- never invent a fact that isn't "
+                    "there -- but you MAY infer likely cause, impact, and a recommendation "
+                    "from how the given facts connect; that inference is the point of "
+                    "this analysis. Keep each field to one or two concise sentences."
+                ),
+            ),
+            Message(
+                role="user",
+                content=(
+                    f"Question: {query}\nStarting point: {anchor_name}\n\n"
+                    "Related facts, in causal-chain order:\n"
+                    + "\n".join(f"- {line}" for line in chain_lines)
+                ),
+            ),
+        ]
+        result = await self.graphiti.llm_client.generate_response(
+            messages, response_model=_CausalRecommendation, max_tokens=_RECOMMENDATION_MAX_TOKENS
+        )
+        return _CausalRecommendation.model_validate(result)
+
+    async def get_causal_context_packet(
+        self,
+        query: str,
+        group_ids: Optional[List[str]] = None,
+        visible_uuids: Optional[set[str]] = None,
+        tenant_id: Optional[str] = None,
+    ) -> ContextPacket:
+        """The causal-reasoning mode: resolves query to a starting entity,
+        walks a few hops over the ontology's causal relationship types
+        (DEPENDS_ON/CAUSED_BY/AFFECTS/RESULTED_IN/SOURCED_FROM -- see
+        GraphRepository.causal_chain_for_query), and synthesizes a
+        what-happened/why/impact/recommendation answer from that chain.
+
+        Deliberately a separate method from get_context_packet, not a mode
+        flag on it: the fact-only synthesis path above must never be
+        loosened to also infer/recommend, and keeping this as its own
+        method (with its own, separately-labeled ContextPacket.metadata
+        field -- "recommendation", never blended into "summary") is what
+        guarantees that. See CLAUDE.md's pivot notes.
+
+        Any recommendation produced is recorded as a :Decision graph node
+        (see app/graph/decisions.py) when tenant_id is given -- best-effort,
+        a failure to record doesn't fail the query itself, since the
+        recommendation is still valid to hand back even if logging it
+        failed.
+        """
+        anchor, chain_facts = await self._repo.causal_chain_for_query(query, group_ids, visible_uuids)
+        if anchor is None:
+            return ContextPacket(
+                query=query,
+                metadata={
+                    "group_ids": group_ids,
+                    "summary": "No entity matching that name was found in this knowledge base.",
+                    "facts": [],
+                    "recommendation": None,
+                    "decision_id": None,
+                    "retrieval_path": "none",
+                },
+            )
+
+        chain_lines = [f["fact"] for f in chain_facts if f.get("is_valid", True)]
+        if not chain_lines:
+            return ContextPacket(
+                query=query,
+                metadata={
+                    "group_ids": group_ids,
+                    "summary": f'No causal chain found connecting "{anchor["name"]}" to anything else in this knowledge base.',
+                    "facts": chain_facts,
+                    "recommendation": None,
+                    "decision_id": None,
+                    "retrieval_path": "causal_chain_empty",
+                },
+            )
+
+        recommendation = None
+        decision_id = None
+        try:
+            rec = await self._synthesize_recommendation(query, anchor["name"], chain_lines)
+            recommendation = {
+                "what_happened": rec.what_happened,
+                "why": rec.why,
+                "impact": rec.impact,
+                "recommendation": rec.recommendation,
+            }
+        except Exception as e:
+            logger.warning(f"Causal recommendation synthesis failed, returning the chain without one: {e}")
+
+        if recommendation and tenant_id and group_ids:
+            try:
+                decision_id = record_decision(
+                    self._repo,
+                    group_id=group_ids[0],
+                    anchor_uuid=anchor["uuid"],
+                    query=query,
+                    recommendation_text=(
+                        f"What happened: {recommendation['what_happened']}\n"
+                        f"Why: {recommendation['why']}\nImpact: {recommendation['impact']}\n"
+                        f"Recommendation: {recommendation['recommendation']}"
+                    ),
+                    rationale="; ".join(chain_lines[:5]),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record Decision entity for causal recommendation: {e}")
+
+        return ContextPacket(
+            query=query,
+            metadata={
+                "group_ids": group_ids,
+                "summary": "\n".join(chain_lines),
+                "facts": chain_facts,
+                "recommendation": recommendation,
+                "decision_id": decision_id,
+                "retrieval_path": "causal_chain",
             },
         )

@@ -88,6 +88,12 @@ class CreateConnectorRequest(BaseModel):
     # for the same boundary applied elsewhere), not an arbitrary new value.
     group_id: str
     url: Optional[str] = Field(default=None, max_length=2000)
+    # Higher = more authoritative -- only used to break ties when two
+    # connectors' facts disagree about the same relationship at the same
+    # point in time (see app/context/orchestrator.py). Never hides or
+    # filters a fact; every source's own facts stay visible regardless of
+    # rank. 0 (the default) means "no special standing".
+    source_authority: int = Field(default=0, ge=0, le=100)
 
 
 # A connector past this many sync intervals since its last success is
@@ -133,6 +139,7 @@ def _serialize(c: dict) -> dict:
         "last_error": c["last_error"],
         "health": _connector_health(c),
         "push_enabled": bool(c.get("push_subscription_id")),
+        "source_authority": c.get("source_authority") or 0,
     }
 
 
@@ -212,7 +219,8 @@ async def create_connector(
 
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
     created = connectors.create_connector(
-        tenant.tenant_id, req.name.strip(), req.type, req.group_id, url, repo=repo
+        tenant.tenant_id, req.name.strip(), req.type, req.group_id, url, repo=repo,
+        source_authority=req.source_authority,
     )
     if req.type in _PUSH_CAPABLE_TYPES:
         await _try_enable_push(tenant, created, url, repo)

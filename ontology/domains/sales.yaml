@@ -1,29 +1,143 @@
 ontology:
   id: saxon-sales
   name: Saxon Sales / CRM Ontology
-  version: "0.1.0"
+  version: "0.2.0"
   description: >
-    Domain extension for the Saxon Enterprise Core ontology.
+    Domain extension for the Saxon Enterprise Core ontology, covering the
+    account/opportunity/order lifecycle a CRM tracks. Every type here
+    specializes a core type rather than introducing a new root concept, so
+    generic queries over Organization/Person/Transaction still find these.
   namespace: saxon.domain.sales
   extends: saxon.core
   extension_policy: additive
 
-entities: {}
-# Add domain concepts here. Every domain entity should extend a core concept.
-#
-# Example:
-# DomainEntity:
-#   extends: Asset
-#   description: Domain-specific specialization.
+entities:
 
-relationships: {}
-# Add only relationships whose meaning is genuinely domain-specific.
-#
-# Example:
-# sales_RELATIONSHIP:
-#   source: DomainEntity
-#   target: Entity
+  Account:
+    extends: Organization
+    description: >
+      A customer or prospect organization tracked in the CRM. Specializes
+      Organization rather than redefining it, so an Account and (say) a
+      Supplier from the supply_chain pack can still be reconciled as the
+      same real-world company where the data actually says so.
+    properties:
+      account_tier: {type: string, required: false}
+      lifecycle_stage: {type: string, required: false}
 
-event_types: {}
-fact_types: {}
-aliases: {}
+  Contact:
+    extends: Person
+    description: A person at an Account, e.g. a buyer, champion, or executive sponsor.
+    properties:
+      contact_role: {type: string, required: false}
+
+  SalesRep:
+    extends: Person
+    description: The internal salesperson or account owner responsible for an Account or Opportunity.
+
+  Lead:
+    extends: Entity
+    description: An unqualified prospect, before it's confirmed as a real Account/Opportunity.
+    properties:
+      lead_source: {type: string, required: false}
+      lead_status: {type: string, required: false}
+
+  Opportunity:
+    extends: Process
+    description: A tracked sales pursuit with an Account, moving through pipeline stages toward a won/lost outcome.
+    properties:
+      stage: {type: string, required: false}
+      amount: {type: number, required: false}
+      close_date: {type: datetime, required: false}
+
+  Quote:
+    extends: Document
+    description: A priced proposal sent to an Account for an Opportunity.
+    properties:
+      quote_status: {type: string, required: false}
+      amount: {type: number, required: false}
+
+  Order:
+    extends: Transaction
+    description: A confirmed purchase by an Account, the commercial record an Opportunity converts into once won.
+    properties:
+      order_status: {type: string, required: false}
+      amount: {type: number, required: false}
+
+  SalesTerritory:
+    extends: Group
+    description: A named sales coverage area (region, segment, or vertical) a rep or team is assigned to.
+
+relationships:
+
+  OWNS_ACCOUNT:
+    source: SalesRep
+    target: Account
+    description: The rep who owns/is responsible for this Account.
+
+  WORKS_AT:
+    source: Contact
+    target: Account
+    description: Contact is employed by this Account.
+
+  PURSUING:
+    source: Account
+    target: Opportunity
+    description: This Account is the subject of this Opportunity.
+
+  CONVERTED_FROM:
+    source: Opportunity
+    target: Lead
+    description: Opportunity was qualified/converted from this Lead.
+
+  QUOTED_FOR:
+    source: Quote
+    target: Opportunity
+    description: Quote was issued as part of this Opportunity.
+
+  RESULTED_IN_ORDER:
+    source: Opportunity
+    target: Order
+    description: Opportunity was won and produced this Order.
+
+  ORDERED_BY:
+    source: Order
+    target: Account
+    description: Account that placed this Order.
+
+  ASSIGNED_TERRITORY:
+    source: SalesRep
+    target: SalesTerritory
+    description: Rep is assigned to this territory.
+
+  COVERS_ACCOUNT:
+    source: SalesTerritory
+    target: Account
+    description: This territory's coverage includes this Account.
+
+event_types:
+
+  OpportunityStageChange:
+    description: An Opportunity moved from one pipeline stage to another.
+
+  OrderPlaced:
+    description: An Order was created from a won Opportunity.
+
+  QuoteSent:
+    description: A Quote was issued to an Account.
+
+fact_types:
+
+  PipelineStageFact:
+    description: Subject Opportunity was in a given stage during a validity interval.
+
+  AccountOwnershipFact:
+    description: Subject Account was owned by a given SalesRep during a validity interval.
+
+aliases:
+  customer: Account
+  client: Account
+  prospect: Lead
+  deal: Opportunity
+  rep: SalesRep
+  ae: SalesRep
+  territory: SalesTerritory

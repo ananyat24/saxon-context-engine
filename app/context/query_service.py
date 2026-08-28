@@ -75,7 +75,8 @@ async def execute_context_query(
     spent_before = limiter.spent("query")
     try:
         packet = await orchestrator.get_context_packet(
-            query, group_ids=group_ids, visible_uuids=visible_uuids, num_results=num_results
+            query, group_ids=group_ids, visible_uuids=visible_uuids, num_results=num_results,
+            tenant_id=tenant.tenant_id,
         )
     except SpendLimitExceeded as e:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
@@ -84,4 +85,51 @@ async def execute_context_query(
         round(limiter.spent("query") - spent_before, 6) if settings.llm_provider in _COST_TRACKED_PROVIDERS else None
     )
     cache.set(cache_key, packet)
+    return packet
+
+
+async def execute_causal_query(
+    *,
+    tenant: TenantConfig,
+    query: str,
+    neo4j_client: Neo4jClient,
+    graphiti_pool: TenantGraphitiPool,
+    knowledge_base: Optional[str] = None,
+    as_user: Optional[str] = None,
+) -> ContextPacket:
+    """The causal-reasoning counterpart to execute_context_query above --
+    same scope resolution as that function's single-knowledge-base branch,
+    including as_user's org-hierarchy-scoped visibility (document_set still
+    isn't supported here, since a causal chain needs one clear knowledge
+    base to write its Decision node into -- that part of the docstring
+    still holds). Deliberately does NOT go through the response cache: a
+    causal query has a real side effect (recording a Decision node -- see
+    app/graph/decisions.py) every time it runs, and caching the response
+    would silently suppress that side effect on a cache hit while still
+    looking like a fresh answer to the caller.
+
+    Tracks cost_usd the same way execute_context_query does (only
+    anthropic/azure_openai are ever recorded against the spend limiter --
+    see _COST_TRACKED_PROVIDERS above), returned in metadata.cost_usd rather
+    than silently left out, so a causal query's cost is visible the same way
+    a plain query's is.
+    """
+    repo = GraphRepository(neo4j_client=neo4j_client)
+    group_id = resolve_knowledge_base(tenant, knowledge_base)
+    user_id = authorization.resolve_as_user(group_id, as_user, repo=repo)
+    visible_uuids = authorization.get_visible_entity_uuids(group_id, user_id, repo=repo) if user_id is not None else None
+
+    graphiti = await graphiti_pool.get_or_create(tenant)
+    orchestrator = ContextOrchestrator(graphiti, neo4j_client=neo4j_client)
+    limiter = get_limiter()
+    spent_before = limiter.spent("query")
+    try:
+        packet = await orchestrator.get_causal_context_packet(
+            query, group_ids=[group_id], visible_uuids=visible_uuids, tenant_id=tenant.tenant_id
+        )
+    except SpendLimitExceeded as e:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
+    packet.metadata["cost_usd"] = (
+        round(limiter.spent("query") - spent_before, 6) if settings.llm_provider in _COST_TRACKED_PROVIDERS else None
+    )
     return packet

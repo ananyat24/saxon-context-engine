@@ -390,7 +390,8 @@ function renderConnectorsTable() {
         <td><button type="button" class="connector-name-link" data-preview-id="${escapeXml(c.id)}">${escapeXml(c.name)}</button></td>
         <td>
           <span class="badge badge-neutral">${escapeXml(typeLabel)}</span>
-          ${c.push_enabled ? `<span class="badge badge-ok" title="Syncs instantly on new mail, not just on the usual interval">Real-time</span>` : ""}<br />
+          ${c.push_enabled ? `<span class="badge badge-ok" title="Syncs instantly on new mail, not just on the usual interval">Real-time</span>` : ""}
+          ${c.source_authority > 0 ? `<span class="badge badge-neutral" title="Wins a tie against a lower-authority source's disagreeing fact">Authority ${c.source_authority}</span>` : ""}<br />
           <span class="muted" style="font-size:0.8rem">${escapeXml(c.url)}</span>
         </td>
         <td>${escapeXml(kbLabel(c.group_id))}</td>
@@ -533,6 +534,7 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
   const needsUrl = CONNECTOR_TYPES_REQUIRING_URL.has(type);
   const url = document.getElementById("connectorUrl").value.trim();
   const groupId = document.getElementById("connectorKbSelect").value;
+  const sourceAuthority = Number(document.getElementById("connectorAuthority").value) || 0;
 
   if (!name || (needsUrl && !url)) {
     statusEl.textContent = needsUrl ? "Give the connector a name and a URL." : "Give the connector a name.";
@@ -546,7 +548,13 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
     const res = await fetch(`${API}/connectors`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ name, type, group_id: groupId, url: needsUrl ? url : undefined }),
+      body: JSON.stringify({
+        name,
+        type,
+        group_id: groupId,
+        url: needsUrl ? url : undefined,
+        source_authority: sourceAuthority,
+      }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -1157,6 +1165,68 @@ async function runAskQuery(resultLimit) {
 
 document.getElementById("askBtn").addEventListener("click", () => runAskQuery(DEFAULT_RESULT_LIMIT));
 document.getElementById("seeMoreBtn").addEventListener("click", () => runAskQuery(EXPANDED_RESULT_LIMIT));
+
+// "Explain why + recommend" -- the causal-reasoning mode (POST
+// /api/v1/context/query/causal, see app/context/orchestrator.py's
+// get_causal_context_packet), deliberately a separate button/call from
+// "Ask" above rather than a mode toggle on it: that endpoint is allowed to
+// infer cause/impact/recommendation from a chain of facts, which the plain
+// Ask path never does, and keeping them as visibly separate UI actions
+// mirrors that separation all the way through the stack.
+async function runCausalQuery() {
+  const recEl = document.getElementById("causalRecommendation");
+  const query = document.getElementById("queryInput").value.trim();
+  if (!query) return;
+  if (!getApiKey()) {
+    recEl.hidden = false;
+    recEl.textContent = 'Click "Access key" in the top right first.';
+    return;
+  }
+  recEl.hidden = false;
+  recEl.innerHTML = `<p class="muted">Tracing the causal chain…</p>`;
+  try {
+    const res = await fetch(`${API}/context/query/causal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        query,
+        knowledge_base: getSelectedKnowledgeBase() || undefined,
+        as_user: getSelectedUser() || undefined,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      recEl.textContent = body.detail || "Could not trace a causal chain for that.";
+      return;
+    }
+    const data = await res.json();
+    const rec = data.metadata?.recommendation;
+    if (!rec) {
+      recEl.innerHTML = `<p class="muted">${escapeXml(data.metadata?.summary || "No causal chain found for that.")}</p>`;
+      return;
+    }
+    // Deliberately styled/labeled distinctly from the plain-facts answer
+    // above -- this is a generated suggestion, not a restated fact, and it
+    // should never read as one. See app/context/orchestrator.py's docstring
+    // on why "recommendation" and "summary" are never blended.
+    const decisionNote = data.metadata?.decision_id
+      ? `<p class="muted" style="font-size:0.8rem">Logged as an auditable recommendation (id: ${escapeXml(data.metadata.decision_id)}). Saxon has not acted on this -- it's a suggestion only.</p>`
+      : "";
+    recEl.innerHTML = `
+      <p class="fact-list-label">Generated recommendation -- not a stated fact, an inference from the chain below:</p>
+      <p><strong>What happened:</strong> ${escapeXml(rec.what_happened)}</p>
+      <p><strong>Why:</strong> ${escapeXml(rec.why)}</p>
+      <p><strong>Impact:</strong> ${escapeXml(rec.impact)}</p>
+      <p><strong>Recommendation:</strong> ${escapeXml(rec.recommendation)}</p>
+      ${decisionNote}
+      <details class="raw-details"><summary>Chain of facts this was based on</summary>
+        <pre class="result-block">${escapeXml(data.metadata?.summary || "")}</pre>
+      </details>`;
+  } catch (err) {
+    recEl.textContent = `Error: ${err.message}`;
+  }
+}
+document.getElementById("causalBtn").addEventListener("click", runCausalQuery);
 
 // Every fact carries whether it's still true or was superseded by something
 // newer -- surfacing that plainly is the actual proof this system tracks
