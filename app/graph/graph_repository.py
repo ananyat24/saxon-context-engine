@@ -448,6 +448,14 @@ class GraphRepository:
             })
         return facts
 
+    def direct_facts_for(self, uuid: str, visible_uuids: Optional[set[str]]) -> list[dict[str, Any]]:
+        """Public wrapper around _entity_own_facts for a caller that already
+        has a resolved entity uuid in hand (e.g. ContextOrchestrator's
+        causal-chain-empty fallback below) and just needs that entity's own
+        directly-touching facts of any relationship type, without going
+        through search_graphiti_facts's full name-resolution flow again."""
+        return self._entity_own_facts(uuid, visible_uuids)
+
     async def causal_chain_for_query(
         self, query_text: str, group_ids: Optional[list[str]], visible_uuids: Optional[set[str]]
     ) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:

@@ -392,6 +392,12 @@ class ContextOrchestrator:
         a failure to record doesn't fail the query itself, since the
         recommendation is still valid to hand back even if logging it
         failed.
+
+        When no causal-typed chain exists from the resolved entity, falls
+        back to that entity's own directly-touching facts of any
+        relationship type, answered the same fact-only way the plain Ask
+        path would (see the chain_lines-empty branch below) -- never as a
+        fabricated causal chain, and never with a recommendation/Decision.
         """
         anchor, chain_facts = await self._repo.causal_chain_for_query(query, group_ids, visible_uuids)
         if anchor is None:
@@ -409,15 +415,47 @@ class ContextOrchestrator:
 
         chain_lines = [f["fact"] for f in chain_facts if f.get("is_valid", True)]
         if not chain_lines:
+            # No causal-typed (DEPENDS_ON/CAUSED_BY/...) chain from this
+            # entity -- fall back to its own directly-touching facts of ANY
+            # relationship type, run through the same fact-only synthesis
+            # the plain Ask path uses (_synthesize_answer), rather than just
+            # saying nothing was found. This is deliberately NOT "walk any
+            # relationship as if it were causal": no recommendation gets
+            # generated here and no :Decision gets recorded -- it's the
+            # exact same fact-only answer a plain Ask would give for this
+            # entity. The nuance the fact-only synthesis already provides is
+            # what makes this safe to show unconditionally: it's told to
+            # answer the *question*, so an irrelevant fact (e.g. a
+            # LOCATED_AT edge when the question has nothing to do with
+            # location) simply doesn't make it into the one-sentence
+            # answer, while a genuinely relevant one (e.g. "where is X
+            # located" against a real LOCATED_AT edge) does. Every fact
+            # still comes back in metadata.facts either way, same as the
+            # plain path.
+            direct_facts = self._repo.direct_facts_for(anchor["uuid"], visible_uuids)
+            direct_lines = [f["fact"] for f in direct_facts if f.get("is_valid", True)]
+            if not direct_lines:
+                return ContextPacket(
+                    query=query,
+                    metadata={
+                        "group_ids": group_ids,
+                        "summary": f'No causal chain -- or any other recorded fact -- connecting "{anchor["name"]}" to anything else in this knowledge base.',
+                        "facts": [],
+                        "recommendation": None,
+                        "decision_id": None,
+                        "retrieval_path": "causal_chain_empty",
+                    },
+                )
+            summary = direct_lines[0] if len(direct_lines) == 1 else await self._synthesize_answer(query, direct_lines)
             return ContextPacket(
                 query=query,
                 metadata={
                     "group_ids": group_ids,
-                    "summary": f'No causal chain found connecting "{anchor["name"]}" to anything else in this knowledge base.',
-                    "facts": chain_facts,
+                    "summary": summary,
+                    "facts": direct_facts,
                     "recommendation": None,
                     "decision_id": None,
-                    "retrieval_path": "causal_chain_empty",
+                    "retrieval_path": "causal_fallback_direct_facts",
                 },
             )
 

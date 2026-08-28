@@ -1084,6 +1084,13 @@ async function runAskQuery(resultLimit) {
   const rawEl = document.getElementById("queryRaw");
   const seeMoreBtn = document.getElementById("seeMoreBtn");
   const statsEl = document.getElementById("queryStats");
+  // A prior "Explain why + recommend" answer has to be cleared here too --
+  // it's a separate result block (see runCausalQuery below) that only ever
+  // gets touched by the causal button, so without this a stale
+  // recommendation from a previous question stayed on screen underneath a
+  // brand new plain-Ask answer, looking like it was still the answer to the
+  // new question.
+  const causalEl = document.getElementById("causalRecommendation");
   const query = document.getElementById("queryInput").value.trim();
   if (!query) return;
   if (!getApiKey()) {
@@ -1092,6 +1099,8 @@ async function runAskQuery(resultLimit) {
     rawWrap.hidden = true;
     seeMoreBtn.hidden = true;
     statsEl.hidden = true;
+    causalEl.hidden = true;
+    causalEl.innerHTML = "";
     return;
   }
 
@@ -1100,6 +1109,8 @@ async function runAskQuery(resultLimit) {
   rawWrap.hidden = true;
   seeMoreBtn.hidden = true;
   statsEl.hidden = true;
+  causalEl.hidden = true;
+  causalEl.innerHTML = "";
   try {
     // A document set scoped to several connectors at once takes priority over
     // the single-connector picker in the header when one's selected -- see

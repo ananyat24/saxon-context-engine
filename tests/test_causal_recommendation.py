@@ -27,12 +27,19 @@ class _FakeGraphiti:
 
 
 class _FakeCausalRepo:
-    def __init__(self, anchor, facts):
+    def __init__(self, anchor, facts, direct_facts=None):
         self._anchor = anchor
         self._facts = facts
+        # The chain-empty fallback's direct_facts_for lookup -- defaults to
+        # empty so existing tests that don't care about it keep behaving
+        # exactly as before (empty chain + no direct facts = truly nothing).
+        self.direct_facts = direct_facts if direct_facts is not None else []
 
     async def causal_chain_for_query(self, query, group_ids, visible_uuids):
         return self._anchor, self._facts
+
+    def direct_facts_for(self, uuid, visible_uuids):
+        return self.direct_facts
 
 
 _LLM_RESPONSE = {
@@ -123,6 +130,74 @@ def test_empty_chain_skips_synthesis_and_decision(monkeypatch):
     assert packet.metadata["recommendation"] is None
     assert called == []
     assert packet.metadata["retrieval_path"] == "causal_chain_empty"
+
+
+# --- Chain-empty fallback to the anchor's own direct facts -----------------
+# When there's no causal-typed chain, "Explain why" used to just say nothing
+# was found even for a question a direct, non-causal fact (e.g. a LOCATED_AT
+# edge) could actually answer -- like "where is X located?". This falls back
+# to that entity's own direct facts, answered the same fact-only way the
+# plain Ask path would: no recommendation, no :Decision, and an irrelevant
+# direct fact simply doesn't make it into the synthesized answer (the same
+# relevance-to-the-question behavior _synthesize_answer already has on the
+# plain path -- not re-tested here, see test_orchestrator_observability.py).
+
+
+def test_empty_causal_chain_falls_back_to_a_single_direct_fact(monkeypatch):
+    called = []
+    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    anchor = {"uuid": "anchor-1", "name": "Fallback Widget"}
+    direct_facts = [{"fact": "Fallback Widget is located in Warehouse 4.", "is_valid": True}]
+    orchestrator = _orchestrator(anchor, [])
+    orchestrator._repo.direct_facts = direct_facts
+
+    packet = asyncio.run(
+        orchestrator.get_causal_context_packet("Where is Fallback Widget located?", group_ids=["kb1"], tenant_id="t1")
+    )
+
+    assert packet.metadata["summary"] == "Fallback Widget is located in Warehouse 4."
+    assert packet.metadata["recommendation"] is None
+    assert packet.metadata["decision_id"] is None
+    assert called == []
+    assert packet.metadata["retrieval_path"] == "causal_fallback_direct_facts"
+    assert packet.metadata["facts"] == direct_facts
+
+
+def test_empty_causal_chain_falls_back_to_synthesizing_several_direct_facts(monkeypatch):
+    called = []
+    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    anchor = {"uuid": "anchor-1", "name": "Multi Fact Widget"}
+    direct_facts = [
+        {"fact": "Multi Fact Widget is located in Warehouse 4.", "is_valid": True},
+        {"fact": "Multi Fact Widget was requested by customer ACME.", "is_valid": True},
+    ]
+    orchestrator = _orchestrator(anchor, [], llm_response={"answer": "Multi Fact Widget is located in Warehouse 4."})
+    orchestrator._repo.direct_facts = direct_facts
+
+    packet = asyncio.run(
+        orchestrator.get_causal_context_packet("Where is Multi Fact Widget located?", group_ids=["kb1"], tenant_id="t1")
+    )
+
+    assert packet.metadata["summary"] == "Multi Fact Widget is located in Warehouse 4."
+    assert packet.metadata["recommendation"] is None
+    assert called == []
+    assert packet.metadata["retrieval_path"] == "causal_fallback_direct_facts"
+
+
+def test_empty_causal_chain_with_no_direct_facts_either_still_reports_not_found(monkeypatch):
+    called = []
+    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    anchor = {"uuid": "anchor-1", "name": "Truly Isolated Widget"}
+    orchestrator = _orchestrator(anchor, [])  # direct_facts defaults to []
+
+    packet = asyncio.run(
+        orchestrator.get_causal_context_packet("Why is Truly Isolated Widget at risk?", group_ids=["kb1"], tenant_id="t1")
+    )
+
+    assert packet.metadata["recommendation"] is None
+    assert called == []
+    assert packet.metadata["retrieval_path"] == "causal_chain_empty"
+    assert packet.metadata["facts"] == []
 
 
 def test_synthesis_failure_still_returns_the_chain_without_recommendation():
