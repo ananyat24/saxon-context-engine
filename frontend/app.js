@@ -1359,9 +1359,17 @@ async function runCausalQuery() {
             : "No causal chain connects this to anything else -- here's the most directly relevant fact instead (not an inference, not a recommendation):";
         const factsHost = document.createElement("div");
         renderFacts(factsHost, facts);
-        recEl.innerHTML = `
-          <p class="fact-list-label">${disclaimer}</p>
-          <p>${escapeXml(summary)}</p>`;
+        // With exactly one fact, the backend's summary IS that fact's own
+        // text verbatim (see orchestrator.py's _fact_only_causal_packet --
+        // "lines[0] if len(lines) == 1"), not a synthesized sentence -- so
+        // restating it in its own paragraph above the evidence list just
+        // said the same sentence twice with zero new information. The
+        // evidence list below (now carrying each fact's real source
+        // document, not just the bare text) is the informative part; only
+        // show the summary paragraph when it's actually a synthesis across
+        // more than one fact.
+        recEl.innerHTML = `<p class="fact-list-label">${disclaimer}</p>` +
+          (facts.length > 1 ? `<p>${escapeXml(summary)}</p>` : "");
         recEl.appendChild(factsHost);
       } else {
         recEl.innerHTML = `<p class="muted">${escapeXml(summary)}</p>`;
@@ -1420,9 +1428,20 @@ function renderFacts(container, facts) {
       // pointless noise on a single-connector query where it's always the
       // same source.
       const kbLabel = f.group_id ? knowledgeBaseDirectory.find((kb) => kb.id === f.group_id)?.label : null;
-      const sourceTag =
-        kbLabel && getSelectedDocumentSet() ? `<span class="fact-source">from ${escapeXml(kbLabel)}</span>` : "";
-      return `<li class="${current ? "" : "fact-superseded"}">${escapeXml(f.fact || "")}${sourceTag}${badge}</li>`;
+      const kbTag =
+        kbLabel && getSelectedDocumentSet() ? `<span class="fact-source">${escapeXml(kbLabel)}</span>` : "";
+      // The actual document/row this fact was extracted from (e.g.
+      // "orders.csv (Order)") -- resolved server-side from Graphiti's own
+      // edge.episodes property (see graph_repository.py's
+      // _resolve_episode_sources), never a guess. This is the piece that
+      // makes "where this answer comes from" mean something beyond
+      // restating the fact text: it names the actual source document(s),
+      // not just which knowledge base it's in.
+      const docSources = Array.isArray(f.sources) ? f.sources.filter(Boolean) : [];
+      const docTag = docSources.length
+        ? `<span class="fact-source" title="Extracted from this source document/record">${escapeXml(docSources.join(", "))}</span>`
+        : "";
+      return `<li class="${current ? "" : "fact-superseded"}">${escapeXml(f.fact || "")}${kbTag}${docTag}${badge}</li>`;
     })
     .join("");
   container.innerHTML =

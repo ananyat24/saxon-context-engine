@@ -306,6 +306,34 @@ class GraphRepository:
         without reaching into a name-mangled internal."""
         return expired_at is None and _not_yet_invalidated(invalid_at)
 
+    def _resolve_episode_sources(self, episode_uuid_lists: list[list[str]]) -> list[list[str]]:
+        """Batch-resolves Graphiti's own `episodes` property (a list of
+        Episodic-node uuids Graphiti already stores on every RELATES_TO edge,
+        naming exactly which ingested episode(s) produced or last touched
+        that fact) to the human-readable `source_description` recorded on
+        each Episodic node -- e.g. "orders.csv (Order)" or a web connector's
+        URL (see app/ingestion/file_source.py's SourceRecord and
+        connector_sync.py, which set it per-record at ingest time).
+
+        This is what lets a fact say WHERE it actually came from -- a
+        specific document/row/page -- instead of just the group_id-level
+        "which knowledge base" the UI already showed. One query for every
+        distinct uuid across the whole batch, not one per fact.
+        """
+        all_uuids = {u for lst in episode_uuid_lists for u in (lst or [])}
+        if not all_uuids:
+            return [[] for _ in episode_uuid_lists]
+        rows = self.execute_cypher(
+            "MATCH (e:Episodic) WHERE e.uuid IN $uuids "
+            "RETURN e.uuid AS uuid, e.source_description AS source_description",
+            {"uuids": list(all_uuids)},
+        )
+        by_uuid = {row["uuid"]: row["source_description"] for row in rows}
+        return [
+            sorted({by_uuid[u] for u in (lst or []) if by_uuid.get(u)})
+            for lst in episode_uuid_lists
+        ]
+
     @staticmethod
     def _to_native(value):
         """execute_cypher() returns raw neo4j.time.DateTime objects (unlike
@@ -332,17 +360,19 @@ class GraphRepository:
             "MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-(m) WHERE NOT m:Decision "
             "RETURN r.fact AS fact, r.name AS relationship_type, r.valid_at AS valid_at, "
             "r.invalid_at AS invalid_at, r.expired_at AS expired_at, r.group_id AS group_id, "
+            "r.episodes AS episodes, "
             "startNode(r).uuid AS source_node_uuid, endNode(r).uuid AS target_node_uuid",
             {"uuid": uuid},
         )
+        kept_rows = [
+            row for row in rows
+            if visible_uuids is None
+            or row["source_node_uuid"] in visible_uuids
+            or row["target_node_uuid"] in visible_uuids
+        ]
+        sources_by_row = self._resolve_episode_sources([row["episodes"] for row in kept_rows])
         facts = []
-        for row in rows:
-            if (
-                visible_uuids is not None
-                and row["source_node_uuid"] not in visible_uuids
-                and row["target_node_uuid"] not in visible_uuids
-            ):
-                continue
+        for row, sources in zip(kept_rows, sources_by_row):
             expired_at = self._to_native(row["expired_at"])
             invalid_at = self._to_native(row["invalid_at"])
             facts.append({
@@ -359,23 +389,38 @@ class GraphRepository:
                 # Real provenance, not a guess: this is the same group_id
                 # every other part of this app already scopes queries by.
                 "group_id": row["group_id"],
+                # The actual document/row this fact was extracted from --
+                # e.g. "orders.csv (Order)" -- resolved from Graphiti's own
+                # edge.episodes property, not a guess (see
+                # _resolve_episode_sources above).
+                "sources": sources,
                 "is_valid": expired_at is None and _not_yet_invalidated(invalid_at),
             })
         return facts
 
     def _relationship_path_facts(
         self, uuid_a: str, uuid_b: str, visible_uuids: Optional[set[str]]
-    ) -> Optional[list[str]]:
+    ) -> Optional[list[dict[str, Any]]]:
         """Finds the shortest chain of facts connecting two resolved entities, so
         "How is X connected to Y?" answers the actual question asked instead of
         just describing one of the two entities. Bounded to 4 hops -- beyond that
         a "connection" is really just everything-connects-to-everything noise,
         not a meaningful answer. Returns None if no such path exists (or none of
-        its nodes are visible to this caller)."""
+        its nodes are visible to this caller). Returns full fact dicts (with
+        group_id and sources, same shape as _entity_own_facts) rather than bare
+        strings, so this path's evidence is traceable to its actual source
+        document(s) too -- not just the two-entity causal path
+        (_relationship_path_full_facts) below."""
         rows = self.execute_cypher(
             "MATCH p = shortestPath((a:Entity {uuid: $uuid_a})-[:RELATES_TO*1..4]-(b:Entity {uuid: $uuid_b})) "
             "WHERE NONE(node IN nodes(p) WHERE node:Decision) "
             "RETURN [rel IN relationships(p) | rel.fact] AS facts, "
+            "[rel IN relationships(p) | rel.name] AS relationship_types, "
+            "[rel IN relationships(p) | rel.group_id] AS rel_group_ids, "
+            "[rel IN relationships(p) | rel.episodes] AS rel_episodes, "
+            "[rel IN relationships(p) | rel.valid_at] AS valid_ats, "
+            "[rel IN relationships(p) | rel.invalid_at] AS invalid_ats, "
+            "[rel IN relationships(p) | rel.expired_at] AS expired_ats, "
             "[n IN nodes(p) | n.uuid] AS path_uuids",
             {"uuid_a": uuid_a, "uuid_b": uuid_b},
         )
@@ -384,7 +429,24 @@ class GraphRepository:
         row = rows[0]
         if visible_uuids is not None and not all(u in visible_uuids for u in row["path_uuids"]):
             return None
-        return row["facts"]
+        sources_by_hop = self._resolve_episode_sources(row["rel_episodes"])
+        facts = []
+        for i, fact in enumerate(row["facts"]):
+            expired_at = self._to_native(row["expired_ats"][i])
+            invalid_at = self._to_native(row["invalid_ats"][i])
+            facts.append({
+                "fact": fact,
+                "relationship_type": row["relationship_types"][i],
+                "source_node_uuid": "",
+                "target_node_uuid": "",
+                "valid_at": self._to_native(row["valid_ats"][i]),
+                "invalid_at": invalid_at,
+                "expired_at": expired_at,
+                "group_id": row["rel_group_ids"][i],
+                "sources": sources_by_hop[i],
+                "is_valid": expired_at is None and _not_yet_invalidated(invalid_at),
+            })
+        return facts
 
     def _relationship_path_full_facts(
         self, uuid_a: str, uuid_b: str, group_ids: list[str], visible_uuids: Optional[set[str]]
@@ -414,7 +476,7 @@ class GraphRepository:
             WITH rels[hop] AS rel, hop, path_uuids
             RETURN rel.fact AS fact, rel.name AS relationship_type, hop,
                    rel.valid_at AS valid_at, rel.invalid_at AS invalid_at, rel.expired_at AS expired_at,
-                   rel.group_id AS group_id, startNode(rel).uuid AS source_node_uuid,
+                   rel.group_id AS group_id, rel.episodes AS episodes, startNode(rel).uuid AS source_node_uuid,
                    endNode(rel).uuid AS target_node_uuid, path_uuids
             ORDER BY hop
             """,
@@ -424,8 +486,9 @@ class GraphRepository:
             return None
         if visible_uuids is not None and not all(u in visible_uuids for u in rows[0]["path_uuids"]):
             return None
+        sources_by_row = self._resolve_episode_sources([row["episodes"] for row in rows])
         facts: list[dict[str, Any]] = []
-        for row in rows:
+        for row, sources in zip(rows, sources_by_row):
             expired_at = self._to_native(row["expired_at"])
             invalid_at = self._to_native(row["invalid_at"])
             facts.append({
@@ -438,6 +501,7 @@ class GraphRepository:
                 "invalid_at": invalid_at,
                 "expired_at": expired_at,
                 "group_id": row["group_id"],
+                "sources": sources,
                 "is_valid": expired_at is None and _not_yet_invalidated(invalid_at),
             })
         return facts
@@ -513,14 +577,14 @@ class GraphRepository:
             WITH rels[hop] AS rel, hop, path_length, path_nodes
             RETURN DISTINCT rel.fact AS fact, rel.name AS relationship_type, hop, path_length,
                    rel.valid_at AS valid_at, rel.invalid_at AS invalid_at, rel.expired_at AS expired_at,
-                   rel.group_id AS group_id, startNode(rel).uuid AS source_node_uuid,
+                   rel.group_id AS group_id, rel.episodes AS episodes, startNode(rel).uuid AS source_node_uuid,
                    endNode(rel).uuid AS target_node_uuid, [x IN path_nodes | x.uuid] AS path_uuids
             ORDER BY path_length, hop
             LIMIT {self._CAUSAL_FACT_LIMIT}
             """,
             {"uuid": uuid, "group_ids": group_ids, "causal_types": self._CAUSAL_RELATIONSHIP_TYPES},
         )
-        facts: list[dict[str, Any]] = []
+        kept_rows = []
         seen: set[tuple] = set()
         for row in rows:
             if visible_uuids is not None and not all(u in visible_uuids for u in row["path_uuids"]):
@@ -529,6 +593,10 @@ class GraphRepository:
             if key in seen:
                 continue
             seen.add(key)
+            kept_rows.append(row)
+        sources_by_row = self._resolve_episode_sources([row["episodes"] for row in kept_rows])
+        facts: list[dict[str, Any]] = []
+        for row, sources in zip(kept_rows, sources_by_row):
             expired_at = self._to_native(row["expired_at"])
             invalid_at = self._to_native(row["invalid_at"])
             facts.append({
@@ -541,6 +609,7 @@ class GraphRepository:
                 "invalid_at": invalid_at,
                 "expired_at": expired_at,
                 "group_id": row["group_id"],
+                "sources": sources,
                 "is_valid": expired_at is None and _not_yet_invalidated(invalid_at),
             })
         return facts
@@ -664,15 +733,7 @@ class GraphRepository:
             a, b = a_group[0], b_group[0]
             path_facts = self._relationship_path_facts(a["uuid"], b["uuid"], visible_uuids)
             if path_facts:
-                return [{
-                    "fact": fact,
-                    "source_node_uuid": "",
-                    "target_node_uuid": "",
-                    "valid_at": None,
-                    "invalid_at": None,
-                    "expired_at": None,
-                    "is_valid": True,
-                } for fact in path_facts]
+                return path_facts
             return [{
                 "fact": f'No connection found between "{a["name"]}" and "{b["name"]}" in this knowledge base.',
                 "source_node_uuid": "",
@@ -727,21 +788,28 @@ class GraphRepository:
         # for more on a broad question via a "see more results" follow-up,
         # rather than everyone paying for a bigger default every time.
         results = await self.graphiti.search(query_text, group_ids=group_ids, num_results=num_results)
+        kept = [
+            r for r in results
+            if visible_uuids is None
+            or getattr(r, "source_node_uuid", "") in visible_uuids
+            or getattr(r, "target_node_uuid", "") in visible_uuids
+        ]
+        # Graphiti's own EntityEdge already carries `episodes` (the same
+        # property the raw-Cypher branches above read directly) -- no extra
+        # round trip needed to get at it here, just to resolve it to source_description.
+        sources_by_row = self._resolve_episode_sources([getattr(r, "episodes", []) for r in kept])
         facts = []
-        for r in results:
-            source_uuid = getattr(r, "source_node_uuid", "")
-            target_uuid = getattr(r, "target_node_uuid", "")
-            if visible_uuids is not None and source_uuid not in visible_uuids and target_uuid not in visible_uuids:
-                continue
+        for r, sources in zip(kept, sources_by_row):
             facts.append({
                 "fact": r.fact,
                 "relationship_type": getattr(r, "name", None),
-                "source_node_uuid": source_uuid,
-                "target_node_uuid": target_uuid,
+                "source_node_uuid": getattr(r, "source_node_uuid", ""),
+                "target_node_uuid": getattr(r, "target_node_uuid", ""),
                 "valid_at": getattr(r, "valid_at", None),
                 "invalid_at": getattr(r, "invalid_at", None),
                 "expired_at": getattr(r, "expired_at", None),
                 "group_id": getattr(r, "group_id", None),
+                "sources": sources,
                 "is_valid": getattr(r, "expired_at", None) is None and _not_yet_invalidated(getattr(r, "invalid_at", None)),
                 # Distinguishes these from the entity-resolution branches above
                 # (whose facts carry no "kind", or "entity_summary") -- the
