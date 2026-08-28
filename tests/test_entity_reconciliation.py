@@ -9,7 +9,7 @@
 # not just whichever node happened to be picked first.
 import asyncio
 import uuid
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -156,6 +156,66 @@ def test_normalization_does_not_merge_genuinely_different_entities(repo):
         rows = repo._match_entities_by_name("Rhodes Furniture", [group_id])
         names = {r["name"] for r in rows}
         assert "Rhodes Furnishings Inc" not in names
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+# --- Lowercase/casual entity names still resolve precisely instead of
+# falling through to unconstrained semantic search -- found for real in
+# production: "what do we know about diego" pulled in several unrelated
+# orders/shipments/quality events as "context" alongside the two real Diego
+# Alvarez facts, while the identical question typed as "Diego Alvarez"
+# resolved cleanly. See _extract_lowercase_word_candidates's docstring.
+
+
+def test_lowercase_query_still_resolves_precisely_not_via_semantic_search(repo):
+    group_id = f"test_reconcile_lowercase_{uuid.uuid4().hex[:8]}"
+    try:
+        anchor = _make_node(repo, group_id, "Diego Reconciliation Alvarez")
+        other = _make_node(repo, group_id, "Brightpeak Reconciliation Automation")
+        _make_edge(repo, anchor, other, "Diego Reconciliation Alvarez is the account manager for Brightpeak Reconciliation Automation.")
+        # An unrelated entity in the same group_id -- must NOT show up in the
+        # answer just because a broad semantic search would have padded it
+        # in (the exact behavior this fix replaces).
+        unrelated_a = _make_node(repo, group_id, "Reconciliation Order SO-1")
+        unrelated_b = _make_node(repo, group_id, "Reconciliation Plant 1")
+        _make_edge(repo, unrelated_a, unrelated_b, "Reconciliation Order SO-1 is being produced at Reconciliation Plant 1.")
+
+        facts = asyncio.run(
+            repo.search_graphiti_facts(
+                "what do we know about diego reconciliation alvarez",
+                group_ids=[group_id],
+                visible_uuids=None,
+            )
+        )
+        fact_texts = {f["fact"] for f in facts}
+        assert "Diego Reconciliation Alvarez is the account manager for Brightpeak Reconciliation Automation." in fact_texts
+        assert not any(f.get("kind") == "semantic_search" for f in facts)
+        assert "Reconciliation Order SO-1 is being produced at Reconciliation Plant 1." not in fact_texts
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+def test_generic_lowercase_query_with_no_real_entity_still_falls_through_to_search(repo):
+    # No proper noun, no matching lowercase word either -- this must NOT
+    # short-circuit to a false "not found" (the lenient candidates never set
+    # saw_unresolved), it should just fall through to normal search like any
+    # other open-ended question. graphiti.search itself is stubbed (this repo
+    # fixture's graphiti_instance is a plain Mock, not a real Graphiti/LLM
+    # client) purely to prove that code path was actually reached, not to
+    # test search's own behavior.
+    group_id = f"test_reconcile_generic_{uuid.uuid4().hex[:8]}"
+    repo.graphiti.search = AsyncMock(return_value=[])
+    try:
+        facts = asyncio.run(
+            repo.search_graphiti_facts(
+                "what has changed recently",
+                group_ids=[group_id],
+                visible_uuids=None,
+            )
+        )
+        assert facts == []
+        repo.graphiti.search.assert_awaited_once()
     finally:
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
 

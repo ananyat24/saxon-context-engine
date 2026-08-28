@@ -88,6 +88,50 @@ _LEGAL_SUFFIX_WORDS = {
 _NAME_PUNCT_RE = re.compile(r"[.,]")
 _NAME_WS_RE = re.compile(r"\s+")
 
+# Ordinary English filler words that show up in almost every question and
+# would otherwise become spurious single-word candidates below -- excluding
+# them keeps that fallback aimed at words that might actually be someone's
+# name, not "what"/"the"/"about".
+_STOPWORDS = frozenset({
+    "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for",
+    "with", "about", "is", "are", "was", "were", "be", "been", "being",
+    "do", "does", "did", "what", "who", "when", "where", "why", "how",
+    "which", "this", "that", "these", "those", "we", "you", "i", "it",
+    "he", "she", "they", "them", "us", "our", "your", "his", "her",
+    "its", "their", "know", "tell", "me", "recently", "changed",
+    "status", "affected", "relevant", "connected", "between", "going",
+    "on", "up", "not", "any", "all", "can", "will",
+})
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]{2,}")
+
+
+def _extract_lowercase_word_candidates(query_text: str) -> list[str]:
+    """Lenient, single-word fallback for a query that names someone/something
+    casually, without capitalizing it -- "what do we know about diego"
+    instead of "...Diego Alvarez?". _PROPER_NOUN_RE above requires
+    capitalized, multi-word phrases, so a plain lowercase name never becomes
+    a candidate at all, and the query falls straight through to Graphiti's
+    own unconstrained semantic search -- which, per its own documented lack
+    of a relevance threshold, pads the answer out with unrelated facts that
+    merely score similarly. Found for real: a lowercase "diego" query
+    returned Diego Alvarez's own facts mixed in with several unrelated
+    orders/shipments/quality events, while the identical question typed as
+    "Diego Alvarez" resolved precisely.
+
+    Every word here still goes through the exact same resolution pipeline
+    proper nouns use (_match_entities_by_name's exact/normalized/CONTAINS
+    chain), so it only ever resolves to a name that's actually in the graph
+    -- this doesn't loosen matching, only which words get a chance to try
+    it. And, like the existing id-phrase candidates, a word here can never
+    trigger the hard "not found" short-circuit on its own (see
+    _resolve_named_entities: only a candidate in proper_noun_set can set
+    saw_unresolved) -- most words in an ordinary sentence obviously won't
+    name anything, and that must fall through to normal search, not a false
+    "not found".
+    """
+    words = {w.lower() for w in _WORD_RE.findall(query_text)}
+    return sorted(words - _STOPWORDS, key=len, reverse=True)
+
 
 def _normalize_entity_name(name: str) -> str:
     """A name equality check that isn't defeated by a legal suffix, "&" vs.
@@ -271,6 +315,14 @@ class GraphRepository:
         """
         proper_nouns = _extract_candidate_entities(query_text)
         all_candidates = proper_nouns + _extract_id_candidates(query_text)
+        # Only when the query has no capitalized-phrase candidate at all --
+        # a properly-capitalized "Diego Alvarez" (or a two-entity "X and Y")
+        # already resolves precisely via proper_nouns above and shouldn't
+        # pay for this broader, per-word scan too. See
+        # _extract_lowercase_word_candidates's docstring for the bug this
+        # covers (a casually-typed, uncapitalized name).
+        if not proper_nouns:
+            all_candidates += _extract_lowercase_word_candidates(query_text)
         if not all_candidates:
             return [], False
 

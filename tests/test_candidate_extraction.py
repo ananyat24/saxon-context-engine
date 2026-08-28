@@ -1,7 +1,7 @@
 # Tests _extract_candidate_entities (the proper-noun regex used for named-
 # entity resolution -- see graph_repository.py's module comment). No
 # database needed, pure regex.
-from app.graph.graph_repository import _extract_candidate_entities
+from app.graph.graph_repository import _extract_candidate_entities, _extract_lowercase_word_candidates
 
 
 def test_extracts_a_name_joined_by_ampersand():
@@ -35,3 +35,33 @@ def test_does_not_extend_past_a_lowercase_word_that_is_not_a_connector():
     # the rest of the sentence.
     result = _extract_candidate_entities("Fenwick Legal was marked at risk recently")
     assert result == ["Fenwick Legal"]
+
+
+# --- _extract_lowercase_word_candidates -- the lenient, single-word
+# fallback for a casually-typed, uncapitalized name (e.g. "what do we know
+# about diego" instead of "...Diego Alvarez?"), which _extract_candidate_entities
+# above never matches at all (it requires capitalized, multi-word phrases).
+
+
+def test_extracts_a_bare_lowercase_name_from_a_normal_sentence():
+    result = _extract_lowercase_word_candidates("what do we know about diego")
+    assert "diego" in result
+
+
+def test_excludes_ordinary_filler_words():
+    result = _extract_lowercase_word_candidates("what do we know about diego")
+    for filler in ("what", "do", "we", "know", "about"):
+        assert filler not in result
+
+
+def test_excludes_short_words():
+    # Below the 3-char floor -- these show up in almost every sentence
+    # ("is", "at", "up") and would just be noise as query candidates.
+    result = _extract_lowercase_word_candidates("is he at risk up here")
+    assert "is" not in result
+    assert "up" not in result
+
+
+def test_dedupes_and_is_case_insensitive():
+    result = _extract_lowercase_word_candidates("Diego said diego was fine")
+    assert result.count("diego") == 1

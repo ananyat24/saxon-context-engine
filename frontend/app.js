@@ -1356,20 +1356,19 @@ async function runCausalQuery() {
         const disclaimer =
           data.metadata?.retrieval_path === "causal_path_between_entities"
             ? "No single causal chain explains this -- here's the actual connection between them instead (not an inference, not a recommendation):"
-            : "No causal chain connects this to anything else -- here's the most directly relevant fact instead (not an inference, not a recommendation):";
+            : "No causal chain connects this to anything else -- here's the most directly relevant fact(s) instead (not an inference, not a recommendation):";
         const factsHost = document.createElement("div");
         renderFacts(factsHost, facts);
-        // With exactly one fact, the backend's summary IS that fact's own
-        // text verbatim (see orchestrator.py's _fact_only_causal_packet --
-        // "lines[0] if len(lines) == 1"), not a synthesized sentence -- so
-        // restating it in its own paragraph above the evidence list just
-        // said the same sentence twice with zero new information. The
-        // evidence list below (now carrying each fact's real source
-        // document, not just the bare text) is the informative part; only
-        // show the summary paragraph when it's actually a synthesis across
-        // more than one fact.
-        recEl.innerHTML = `<p class="fact-list-label">${disclaimer}</p>` +
-          (facts.length > 1 ? `<p>${escapeXml(summary)}</p>` : "");
+        // Deliberately never shows metadata.summary here (unlike the API
+        // response, which keeps it -- see the MCP tool's documented
+        // "summary" field). With a handful of facts, a synthesized sentence
+        // stitched from them reads as a near-restatement of the same list
+        // right below it -- real information density is low on a dataset
+        // this size, so the paragraph consistently added noise rather than
+        // insight. The evidence list (each line now carrying its own real
+        // source document, not just bare text) already says everything a
+        // person asking "why" actually needs from a fact-only answer.
+        recEl.innerHTML = `<p class="fact-list-label">${disclaimer}</p>`;
         recEl.appendChild(factsHost);
       } else {
         recEl.innerHTML = `<p class="muted">${escapeXml(summary)}</p>`;
