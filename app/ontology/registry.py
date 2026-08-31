@@ -88,6 +88,25 @@ class OntologyRegistry:
     def relationship_types(self) -> list[str]:
         return sorted(self._ontology["relationships"].keys())
 
+    def causal_relationship_types(self) -> list[str]:
+        """Every relationship type any registered ontology file flagged
+        `causal: true` -- see ontology/core.yaml's DEPENDS_ON/CAUSED_BY/
+        AFFECTS/RESULTED_IN/SOURCED_FROM for the generic set, and a domain
+        pack (e.g. supply_chain.yaml's SUPPLIES/COMPOSED_OF/FLAGGED_BY/
+        QUALITY_ISSUE_ON) for a domain-specific one. This is what
+        GraphRepository's causal-chain walker treats as "explains why," so
+        a domain pack that wants its own relationship types to participate
+        in causal reasoning marks them here rather than needing a code
+        change in graph_repository.py -- found the hard way: supply_chain.yaml
+        was written specifically to represent the reference architecture's
+        own Order -> Product -> Component -> Supplier -> QualityEvent
+        example, but none of its relationship types were in the walker's
+        old hardcoded list, so that exact example could never actually
+        produce a causal answer even with perfectly-extracted data."""
+        return sorted(
+            name for name, rel in self._ontology["relationships"].items() if isinstance(rel, dict) and rel.get("causal")
+        )
+
     def snapshot(self) -> dict[str, Any]:
         """Return a deep copy of the full merged ontology, safe for a caller to inspect
         or serialize without risking a mutation to the registry's internal state."""

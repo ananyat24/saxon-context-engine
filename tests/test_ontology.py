@@ -161,3 +161,35 @@ def test_edge_types_and_map_cover_domain_relationships():
 
     assert "MEASURED_ON" in edge_types
     assert edge_map[("SensorReading", "Machine")] == ["MEASURED_ON"]
+
+
+# --- causal_relationship_types (drives GraphRepository's causal-chain
+# walker -- see that module's own _CAUSAL_RELATIONSHIP_TYPES docstring) ----
+
+
+def test_causal_relationship_types_includes_core_generic_types():
+    registry = OntologyRegistry()
+    registry.register(OntologyLoader.load("ontology/core.yaml"))
+    causal = registry.causal_relationship_types()
+    for name in ("AFFECTS", "DEPENDS_ON", "CAUSED_BY", "RESULTED_IN", "SOURCED_FROM"):
+        assert name in causal
+    # A relationship with no causal flag at all must not show up just
+    # because it's defined -- RELATED_TO is core's generic catch-all.
+    assert "RELATED_TO" not in causal
+
+
+def test_causal_relationship_types_includes_a_flagged_domain_specific_type():
+    # This is the real bug this test pins: supply_chain.yaml was written
+    # specifically to represent the reference architecture's own worked
+    # example (Order -> Product -> Component -> Supplier -> QualityEvent),
+    # but GraphRepository's causal walker used to only recognize core's 5
+    # generic types -- none of supply_chain's own relationship names -- so
+    # that exact example could never produce a causal answer even with
+    # perfectly-extracted data. See CLAUDE.md's v5/v2 follow-up notes.
+    registry = build_scoped_registry(["supply_chain"])
+    causal = registry.causal_relationship_types()
+    for name in ("SUPPLIES", "COMPOSED_OF", "FLAGGED_BY", "QUALITY_ISSUE_ON"):
+        assert name in causal
+    # A real, non-causal supply_chain relationship (plain logistics
+    # tracking, not "why did this happen") must still be excluded.
+    assert "DELIVERED_TO" not in causal

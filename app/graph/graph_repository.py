@@ -9,6 +9,7 @@ from graphiti_core import Graphiti
 from app.graph.entity_resolution import match_entities_by_name, resolve_named_entities
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.reconciliation import expand_same_as
+from app.ontology.bootstrap import registry as ontology_registry
 
 logger = logging.getLogger(__name__)
 
@@ -318,13 +319,20 @@ class GraphRepository:
             })
         return facts
 
-    # The ontology's own causal relationship types (see ontology/core.yaml) --
-    # the causal-chain retriever below only ever walks edges typed one of
-    # these, so it can't wander off into an unrelated part of the graph just
-    # because a path happens to exist. Deliberately not "any relationship":
-    # a generic BELONGS_TO/LOCATED_AT hop doesn't explain why something
-    # happened, only that two things are related.
-    _CAUSAL_RELATIONSHIP_TYPES = ["DEPENDS_ON", "CAUSED_BY", "AFFECTS", "RESULTED_IN", "SOURCED_FROM"]
+    # Every relationship type any registered ontology file (core.yaml plus
+    # every domain pack under ontology/domains/) flags `causal: true` -- see
+    # OntologyRegistry.causal_relationship_types(). The causal-chain
+    # retriever below only ever walks edges typed one of these, so it can't
+    # wander off into an unrelated part of the graph just because a path
+    # happens to exist. Deliberately not "any relationship": a generic
+    # BELONGS_TO/LOCATED_AT hop doesn't explain why something happened, only
+    # that two things are related. Computed once at import time (same
+    # "ontology doesn't change while the app is running" assumption
+    # app/ontology/bootstrap.py's own module docstring already makes), not
+    # a hardcoded list -- a domain pack now controls whether its own
+    # relationship types participate in causal reasoning by flagging them
+    # in its own YAML file, not by someone editing this class.
+    _CAUSAL_RELATIONSHIP_TYPES = ontology_registry.causal_relationship_types()
     # "A few hops," not an open-ended traversal -- matches the shape of the
     # spec's own example (Order -> Product -> Component -> Supplier ->
     # QualityEvent is 4 hops) without risking a combinatorial blow-up on a

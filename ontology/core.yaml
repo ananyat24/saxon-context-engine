@@ -231,10 +231,12 @@ relationships:
   AFFECTS:
     source: Entity
     target: Entity
+    causal: true
 
   DEPENDS_ON:
     source: Entity
     target: Entity
+    causal: true
 
   USES:
     source: Entity
@@ -295,10 +297,12 @@ relationships:
   CAUSED_BY:
     source: Entity
     target: Entity
+    causal: true
 
   RESULTED_IN:
     source: Entity
     target: Entity
+    causal: true
 
   PRECEDED_BY:
     source: Event
@@ -356,6 +360,7 @@ relationships:
   SOURCED_FROM:
     source: Entity
     target: Entity
+    causal: true
 
 event_types:
 

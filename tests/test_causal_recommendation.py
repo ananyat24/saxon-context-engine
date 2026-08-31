@@ -261,6 +261,40 @@ def test_two_entity_path_entirely_causal_gets_a_real_recommendation(monkeypatch)
     assert recorded["anchor_uuid"] == "component-1"
 
 
+def test_domain_specific_causal_types_produce_a_real_recommendation_too(monkeypatch):
+    # Pins the real bug this session's review found: supply_chain.yaml was
+    # written specifically to represent the reference architecture's own
+    # worked example (Order -> Product -> Component -> Supplier ->
+    # QualityEvent), using its own relationship names (SUPPLIES/COMPOSED_OF/
+    # FLAGGED_BY) rather than core.yaml's 5 generic causal types -- so even
+    # a perfectly-extracted version of that exact example used to fall
+    # through to the fact-only path (is_entirely_causal saw none of these
+    # names as "causal" and rejected the chain), never producing the rich
+    # what-happened/why/impact/recommendation answer the spec describes.
+    # See ontology/domains/supply_chain.yaml's `causal: true` flags and
+    # OntologyRegistry.causal_relationship_types().
+    recorded = {}
+    monkeypatch.setattr(
+        "app.context.orchestrator.record_decision",
+        lambda repo, **kw: recorded.update(kw) or "decision-supply-chain",
+    )
+    anchor = {"uuid": "order-1", "name": "Order 45821"}
+    facts = [
+        {"fact": "Product P-440 is composed of Component C-17.", "is_valid": True, "relationship_type": "COMPOSED_OF"},
+        {"fact": "Component C-17 is supplied by Supplier S-14.", "is_valid": True, "relationship_type": "SUPPLIES"},
+        {"fact": "Supplier S-14 is flagged by QualityEvent QE-9.", "is_valid": True, "relationship_type": "FLAGGED_BY"},
+    ]
+    orchestrator = _orchestrator(anchor, facts)
+
+    packet = asyncio.run(
+        orchestrator.get_causal_context_packet("Why is Order 45821 at risk?", group_ids=["kb1"], tenant_id="t1")
+    )
+
+    assert packet.metadata["recommendation"] == _LLM_RESPONSE
+    assert packet.metadata["decision_id"] == "decision-supply-chain"
+    assert packet.metadata["retrieval_path"] == "causal_chain"
+
+
 def test_two_entity_path_not_entirely_causal_is_fact_only_with_full_evidence(monkeypatch):
     called = []
     monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
