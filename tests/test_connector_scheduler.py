@@ -179,6 +179,38 @@ def test_renew_extends_a_connector_close_to_expiring(monkeypatch):
     assert set_calls == [("t1", "c1", "sub-1", new_expiry)]
 
 
+# --- Multi-replica lock (app/graph/scheduler_lock.py) ----------------------
+
+
+def test_tick_skips_real_work_when_the_lock_is_not_acquired(monkeypatch):
+    monkeypatch.setattr("app.graph.connector_scheduler.try_acquire_lock", lambda *a, **kw: False)
+
+    async def _fail_if_called(neo4j_client):
+        raise AssertionError("should not have run -- another replica holds the lock")
+
+    monkeypatch.setattr(connector_scheduler, "_sync_all_connectors", _fail_if_called)
+    monkeypatch.setattr(connector_scheduler, "_renew_expiring_push_subscriptions", _fail_if_called)
+
+    asyncio.run(connector_scheduler._tick(neo4j_client=None))
+
+
+def test_tick_runs_real_work_when_the_lock_is_acquired(monkeypatch):
+    monkeypatch.setattr("app.graph.connector_scheduler.try_acquire_lock", lambda *a, **kw: True)
+
+    calls = []
+    async def fake_sync(neo4j_client):
+        calls.append("sync")
+    async def fake_renew(neo4j_client):
+        calls.append("renew")
+
+    monkeypatch.setattr(connector_scheduler, "_sync_all_connectors", fake_sync)
+    monkeypatch.setattr(connector_scheduler, "_renew_expiring_push_subscriptions", fake_renew)
+
+    asyncio.run(connector_scheduler._tick(neo4j_client=None))
+
+    assert calls == ["sync", "renew"]
+
+
 def test_renew_clears_the_subscription_when_graph_rejects_the_renewal(monkeypatch):
     from app.ingestion.connector_base import ConnectorFetchError
     from app.ingestion.graph_subscriptions import RENEW_WHEN_WITHIN

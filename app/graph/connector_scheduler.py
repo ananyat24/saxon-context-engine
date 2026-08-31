@@ -5,17 +5,22 @@
 # event loop uvicorn already owns -- no separate process/worker needed at
 # this scale. Started/stopped from app/main.py's lifespan.
 #
-# Runs in-process, once per running container instance. That's fine for a
-# single-replica deployment (this app's current default is min/max replicas
-# 0-3, but a demo/pilot workload realistically runs one instance at a time);
-# if this ever runs with more than one replica actually serving traffic
-# concurrently, each instance would independently try to sync the same
-# connectors on its own schedule -- redundant but not unsafe, since the
-# content-hash dedup guard in run_connector_sync() still prevents duplicate
-# ingestion, just wasted fetch calls. A real multi-instance deployment
-# should move this to a single dedicated worker (see CLAUDE.md's v2 "worker
-# pool" step) rather than running it on every instance.
+# Runs in-process, once per running container instance -- this app's Azure
+# Container Apps config scales 0-3 replicas (see scripts/deploy_azure.sh),
+# so under real concurrent load more than one instance really can be
+# running this scheduler at once. Without a lock, each would independently
+# try to sync the same connectors on its own schedule: redundant, not
+# unsafe (the content-hash dedup guard in run_connector_sync() still
+# prevents duplicate ingestion), but N replicas means N times the outbound
+# calls to whatever each connector reads from, and N redundant
+# reconciliation passes. _tick acquires app/graph/scheduler_lock.py's
+# distributed lease lock before doing any real work -- only whichever
+# replica wins it for this tick actually runs; the rest skip and try again
+# next tick. See that module's docstring for why a Neo4j-backed lease
+# (rather than moving this to a separate dedicated worker process) was the
+# right-sized fix here.
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -24,10 +29,16 @@ from app.config import settings
 from app.graph import connectors
 from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
+from app.graph.scheduler_lock import try_acquire_lock
 
 logger = logging.getLogger(__name__)
 
 _JOB_ID = "connector_sync"
+# One id per process, generated once at import time -- stable for this
+# replica's whole lifetime, so try_acquire_lock's "same holder renews its
+# own lease" branch actually recognizes repeated calls from this replica
+# across ticks, not just within one.
+_HOLDER_ID = f"scheduler-{uuid.uuid4().hex[:12]}"
 
 
 async def _sync_all_connectors(neo4j_client: Neo4jClient) -> None:
@@ -101,6 +112,17 @@ async def _renew_expiring_push_subscriptions(neo4j_client: Neo4jClient) -> None:
 
 
 async def _tick(neo4j_client: Neo4jClient) -> None:
+    repo = GraphRepository(neo4j_client=neo4j_client)
+    # Lease = one full sync interval: a replica that dies mid-tick can only
+    # strand the lock for at most one missed cycle before another replica's
+    # next tick is able to acquire it, and a replica that's still alive and
+    # ticking on schedule renews (not re-acquires) its own lease every time,
+    # since try_acquire_lock treats "same holder" as always allowed.
+    if not try_acquire_lock(
+        repo.execute_cypher, _JOB_ID, _HOLDER_ID, lease_seconds=settings.connector_sync_interval_minutes * 60
+    ):
+        logger.debug(f"Skipping this tick -- another replica already holds the '{_JOB_ID}' scheduler lock.")
+        return
     await _sync_all_connectors(neo4j_client)
     await _renew_expiring_push_subscriptions(neo4j_client)
 

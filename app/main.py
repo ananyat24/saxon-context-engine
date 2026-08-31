@@ -17,6 +17,7 @@ from app.graph.graph_repository import GraphRepository
 from app.graph.ingestion_queue import IngestionQueue
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.reconciliation import ensure_reconciliation_indexes
+from app.graph.scheduler_lock import ensure_scheduler_lock_indexes
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
 from app.mcp import server as mcp_server_module
 
@@ -66,6 +67,7 @@ async def lifespan(app: FastAPI):
     tenants.ensure_tenant_indexes(repo=repo)
     ensure_decision_indexes(repo=repo)
     ensure_reconciliation_indexes(repo.execute_cypher)
+    ensure_scheduler_lock_indexes(repo.execute_cypher)
     # Periodically syncs every tenant's connectors in the background -- see
     # app/graph/connector_scheduler.py. Returns None (and starts nothing) if
     # disabled via settings.connector_sync_enabled.
