@@ -1,7 +1,7 @@
 # Tests _extract_candidate_entities (the proper-noun regex used for named-
-# entity resolution -- see graph_repository.py's module comment). No
+# entity resolution -- see entity_resolution.py's module docstring). No
 # database needed, pure regex.
-from app.graph.graph_repository import _extract_candidate_entities, _extract_lowercase_word_candidates
+from app.graph.entity_resolution import _extract_candidate_entities, _extract_lowercase_word_candidates
 
 
 def test_extracts_a_name_joined_by_ampersand():

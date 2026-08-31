@@ -13,7 +13,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from app.graph.graph_repository import GraphRepository, _normalize_entity_name
+from app.graph.entity_resolution import _normalize_entity_name
+from app.graph.graph_repository import GraphRepository
 
 
 @pytest.fixture

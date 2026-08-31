@@ -23,6 +23,44 @@ from typing import Optional
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector, hash_records
 from app.ingestion.file_source import FileSourceSpec, SourceRecord, read_csv_records
 
+# A column an auto-inferred spec should treat as this row's "as-of" date --
+# without this, every auto-inferred episode gets reference_time=now() at
+# ingestion time regardless of what the CSV's own date fields say, which
+# loses a re-synced dataset's real calendar semantics (a day1/day2_update
+# pair collapses to "whichever minute each sync happened to run" instead of
+# the actual days the data represents -- see CLAUDE.md's v1 status note on
+# the Solandra transition-tracking gap this contributes to). Deliberately
+# conservative in two ways: (1) a column whose name literally contains
+# "date" (OrderDate, DueDate, ShipDate) is always preferred when one exists;
+# (2) the fallback only matches a known temporal-event prefix immediately
+# before "At"/"On" (CreatedAt, UpdatedOn, ResolvedAt), not just any column
+# ending in those two letters -- "Location" also ends in "on", and a naive
+# suffix-only check would wrongly pick it. A wrong guess here degrades
+# gracefully, never dangerously: read_csv_records' parse_date() already
+# returns None for a value it can't parse as a date, which the caller
+# already treats the same as "no date column" (falls back to ingestion
+# time) -- this can only ever recover a real date it previously missed, not
+# fabricate a wrong one.
+_DATE_COLUMN_PREFIXES = (
+    "created", "updated", "modified", "opened", "closed", "resolved",
+    "shipped", "ordered", "due", "started", "completed", "expired",
+    "delivered", "received",
+)
+
+
+def _infer_date_column(header: list[str]) -> Optional[str]:
+    date_named = [c for c in header if "date" in c.strip().lower()]
+    if date_named:
+        return date_named[0]
+    for c in header:
+        lowered = c.strip().lower().replace("_", "").replace(" ", "")
+        if not (lowered.endswith("at") or lowered.endswith("on")):
+            continue
+        stem = lowered[:-2]
+        if any(stem == prefix or stem.startswith(prefix) for prefix in _DATE_COLUMN_PREFIXES):
+            return c
+    return None
+
 _MOCK_CRM_DIR = Path("data/samples/mock_crm")
 UPLOADS_ROOT = Path("data/uploads")
 
@@ -62,15 +100,18 @@ def _infer_spec(filename: str, header: list[str]) -> FileSourceSpec:
     """Best-effort FileSourceSpec for a CSV with no hand-picked spec: the
     record type comes from the filename (accounts.csv -> Account), the id
     column is whichever header cell looks like an id (ending in "id", or
-    just "id"), falling back to the first column, and the name column is
-    whichever header cell mentions "name", if any."""
+    just "id"), falling back to the first column, the name column is
+    whichever header cell mentions "name" if any, and the date column (see
+    _infer_date_column) is whichever header cell looks like this row's
+    as-of date, if any."""
     stem = Path(filename).stem.replace("-", " ").replace("_", " ").title().replace(" ", "")
     record_type = stem[:-1] if stem.lower().endswith("s") and not stem.lower().endswith("ss") else stem
     id_column = next(
         (c for c in header if c.strip().lower() == "id" or c.strip().lower().endswith("id")), header[0]
     )
     name_column = next((c for c in header if "name" in c.strip().lower()), None)
-    return FileSourceSpec(filename, record_type or "Record", id_column, name_column=name_column)
+    date_column = _infer_date_column(header)
+    return FileSourceSpec(filename, record_type or "Record", id_column, name_column=name_column, date_column=date_column)
 
 
 def _load_accounts() -> list[SourceRecord]:

@@ -25,6 +25,10 @@ dependencies = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-m 'not real_llm'"
+markers = [
+    "real_llm: needs a real Neo4j AND a real LLM (costs money, can be slow/flaky) -- excluded from the default run, opt in with `pytest -m real_llm`.",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
