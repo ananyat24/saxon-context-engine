@@ -277,6 +277,28 @@
             </details>
         </section>
 
+        <section id="reconciliationCard" class="card" hidden>
+            <h2>Entity matches to review</h2>
+            <p class="muted">The same real-world entity, mentioned in two different connectors,
+                with names close enough to be the same thing but not close enough to link
+                automatically. Approve to treat them as one entity everywhere (pools facts from
+                both); reject to leave them separate.</p>
+            <div class="table-scroll">
+                <table class="doc-sets-table">
+                    <thead>
+                        <tr>
+                            <th>Entity A</th>
+                            <th>Entity B</th>
+                            <th>Similarity</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="reconciliationBody"></tbody>
+                </table>
+            </div>
+            <p id="reconciliationEmpty" class="muted" style="display:none">No pending matches to review right now.</p>
+        </section>
+
         <section id="docSetsCard" class="card" hidden>
             <h2>Document sets</h2>
             <p class="muted">Group your connectors into a named bundle, then use it to control

@@ -689,10 +689,94 @@ async function syncConnector(id) {
 
 async function pollUntilSyncSettles(id, attempt = 0) {
   const current = connectorDirectory.find((c) => c.id === id);
-  if (!current || current.status !== "queued" || attempt >= SYNC_POLL_MAX_ATTEMPTS) return;
+  if (!current || current.status !== "queued" || attempt >= SYNC_POLL_MAX_ATTEMPTS) {
+    // A settled sync may have just run reconciliation server-side (see
+    // app/ingestion/connector_sync.py) -- refresh the review queue so a new
+    // proposal shows up without a manual page reload.
+    await loadReconciliation();
+    return;
+  }
   await new Promise((resolve) => setTimeout(resolve, SYNC_POLL_INTERVAL_MS));
   await loadConnectors();
   pollUntilSyncSettles(id, attempt + 1);
+}
+
+// --- Reconciliation review queue ---------------------------------------------
+// The Reconcile stage's uncertain (fuzzy-name) cross-connector matches -- see
+// app/graph/reconciliation.py. Confident matches (exact/normalized name)
+// merge automatically and never show up here; this panel is only for the
+// ones a human has to decide.
+function connectorLabelFor(groupId) {
+  return knowledgeBaseDirectory.find((kb) => kb.id === groupId)?.label || groupId;
+}
+
+function renderReconciliationTable(proposals) {
+  const body = document.getElementById("reconciliationBody");
+  const empty = document.getElementById("reconciliationEmpty");
+  if (proposals.length === 0) {
+    body.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  body.innerHTML = proposals
+    .map(
+      (p) => `<tr data-id="${escapeXml(p.id)}">
+        <td>${escapeXml(p.entity_a_name)} <span class="muted" style="font-size:0.8rem">(${escapeXml(connectorLabelFor(p.entity_a_group_id))})</span></td>
+        <td>${escapeXml(p.entity_b_name)} <span class="muted" style="font-size:0.8rem">(${escapeXml(connectorLabelFor(p.entity_b_group_id))})</span></td>
+        <td>${Math.round(p.similarity * 100)}%</td>
+        <td>
+          <button class="delete-btn" type="button" data-approve-id="${escapeXml(p.id)}">Approve</button>
+          <button class="delete-btn" type="button" data-reject-id="${escapeXml(p.id)}">Reject</button>
+        </td>
+      </tr>`
+    )
+    .join("");
+  body.querySelectorAll("[data-approve-id]").forEach((btn) => {
+    btn.addEventListener("click", () => decideReconciliationProposal(btn.dataset.approveId, "approve"));
+  });
+  body.querySelectorAll("[data-reject-id]").forEach((btn) => {
+    btn.addEventListener("click", () => decideReconciliationProposal(btn.dataset.rejectId, "reject"));
+  });
+}
+
+async function loadReconciliation() {
+  const card = document.getElementById("reconciliationCard");
+  if (!getApiKey()) {
+    card.hidden = true;
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/reconciliation?status_filter=pending`, { headers: authHeaders() });
+    if (!res.ok) {
+      card.hidden = true;
+      return;
+    }
+    const proposals = await res.json();
+    // Only worth showing at all once there's something to decide -- an
+    // empty review queue isn't news the way an empty connectors/document
+    // sets table still is (those are things you'd set up).
+    card.hidden = proposals.length === 0;
+    renderReconciliationTable(proposals);
+  } catch (err) {
+    card.hidden = true;
+  }
+}
+
+async function decideReconciliationProposal(id, action) {
+  const row = document.querySelector(`#reconciliationBody tr[data-id="${CSS.escape(id)}"]`);
+  row?.querySelectorAll("button").forEach((btn) => (btn.disabled = true));
+  try {
+    await fetch(`${API}/reconciliation/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+  } catch (err) {
+    // Falls through to the reload below either way -- loadReconciliation
+    // re-fetching the real pending list is the source of truth, not this
+    // request's own success/failure.
+  }
+  await loadReconciliation();
 }
 
 // "Easily droppable CSV": a Database/CRM connector accepts a CSV upload
@@ -1552,6 +1636,7 @@ async function loadTenantData() {
   await loadKnowledgeBases();
   await loadUsers();
   await loadConnectors();
+  await loadReconciliation();
   await loadDocumentSets();
   renderMcpCard();
   loadGraph();

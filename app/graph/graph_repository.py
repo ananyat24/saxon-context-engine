@@ -8,6 +8,7 @@ from typing import Any, Optional
 from graphiti_core import Graphiti
 from app.graph.entity_resolution import match_entities_by_name, resolve_named_entities
 from app.graph.neo4j_client import Neo4jClient
+from app.graph.reconciliation import expand_same_as
 
 logger = logging.getLogger(__name__)
 
@@ -80,15 +81,34 @@ class GraphRepository:
         directly) so this stays the one place that knows how to talk to
         Neo4j, and so every existing caller (including tests exercising this
         exact method) keeps working unchanged. See that module for the real
-        docstring and logic."""
-        return match_entities_by_name(self.execute_cypher, name, group_ids)
+        docstring and logic.
+
+        Also expands the result via app.graph.reconciliation.expand_same_as
+        -- the Reconcile stage's persisted merges (approved fuzzy matches,
+        and exact/normalized matches from the last reconciliation pass) on
+        top of this stage's own live name matching, so a caller sees every
+        row Reconcile has already confirmed refers to the same real-world
+        entity, not just what name equality alone finds this call."""
+        rows = match_entities_by_name(self.execute_cypher, name, group_ids)
+        return expand_same_as(self.execute_cypher, rows, group_ids)
 
     async def _resolve_named_entities(
         self, query_text: str, group_ids: list[str], visible_uuids: Optional[set[str]]
     ) -> tuple[list[list[dict[str, Any]]], bool]:
         """Thin wrapper over entity_resolution.resolve_named_entities -- see
-        that module for the real docstring and logic."""
-        return await resolve_named_entities(self.execute_cypher, query_text, group_ids, visible_uuids)
+        that module for the real docstring and logic. Each resolved group is
+        also expanded via reconciliation.expand_same_as, same as
+        _match_entities_by_name above -- re-applying the visible_uuids filter
+        afterward, since an expanded row can name a uuid this caller hasn't
+        already had a chance to check against it."""
+        groups, saw_unresolved = await resolve_named_entities(self.execute_cypher, query_text, group_ids, visible_uuids)
+        expanded = []
+        for group in groups:
+            rows = expand_same_as(self.execute_cypher, group, group_ids)
+            if visible_uuids is not None:
+                rows = [r for r in rows if r["uuid"] in visible_uuids]
+            expanded.append(rows)
+        return expanded, saw_unresolved
 
     @staticmethod
     def fact_is_valid(expired_at, invalid_at) -> bool:

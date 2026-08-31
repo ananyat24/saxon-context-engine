@@ -8,6 +8,7 @@ from app.api.context import router as context_router
 from app.api.graph import router as graph_router
 from app.api.document_sets import router as document_sets_router
 from app.api.connectors import router as connectors_router
+from app.api.reconciliation import router as reconciliation_router
 from app.api.admin import router as admin_router
 from app.api.webhooks import router as webhooks_router
 from app.api.odata import router as odata_router
@@ -21,6 +22,8 @@ api_router.include_router(context_router, prefix="/context", tags=["Context"])
 api_router.include_router(graph_router, prefix="/graph", tags=["Graph"])
 api_router.include_router(document_sets_router, prefix="/document-sets", tags=["Document Sets"])
 api_router.include_router(connectors_router, prefix="/connectors", tags=["Connectors"])
+# The Reconcile stage's human review queue -- see app/graph/reconciliation.py.
+api_router.include_router(reconciliation_router, prefix="/reconciliation", tags=["Reconciliation"])
 # Operator-only (ADMIN_API_KEY, not a tenant's own key) -- see app/api/admin.py.
 api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
 # Unauthenticated (Microsoft Graph calls this directly, with no API key) --

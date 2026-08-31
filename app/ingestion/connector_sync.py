@@ -12,6 +12,7 @@ from app.context.response_cache import get_response_cache
 from app.graph import connectors
 from app.graph.graph_repository import GraphRepository
 from app.graph.graphiti_adapter import build_graphiti
+from app.graph.reconciliation import reconcile_tenant
 from app.graph.spend_limiter import SpendLimitExceeded
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector
 from app.ingestion.pipeline import IngestionPipeline
@@ -99,4 +100,21 @@ async def run_connector_sync(
     # information found" (or an outdated answer) sitting in the response
     # cache for however long its TTL has left. See app/context/response_cache.py.
     get_response_cache().invalidate_group(tenant.tenant_id, connector["group_id"])
+
+    # The Reconcile stage (app/graph/reconciliation.py): a newly-ingested
+    # entity in THIS connector's group_id might be the same real-world thing
+    # as one already sitting in another of this tenant's group_ids, so this
+    # runs across every group_id the tenant has, not just the one that just
+    # synced. Best-effort -- a reconciliation failure shouldn't turn an
+    # otherwise-successful sync into a reported error; the next sync (of any
+    # of this tenant's connectors) will just try again.
+    try:
+        result = reconcile_tenant(repo.execute_cypher, tenant.tenant_id, sorted(tenant.knowledge_base_ids()))
+        logger.info(
+            f"Reconciliation after '{connector_id}' sync: "
+            f"{result['same_as_created']} same_as, {result['proposals_created']} proposal(s) created"
+        )
+    except Exception as e:
+        logger.error(f"Reconciliation failed after connector sync for '{connector_id}': {e}")
+
     return {"synced": True, "skipped_unchanged": False, "error": None, "spend_limit_exceeded": False}
