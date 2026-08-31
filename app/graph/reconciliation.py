@@ -63,8 +63,16 @@ class ReconcileResult(TypedDict):
 
 def ensure_reconciliation_indexes(execute_cypher: ExecuteCypher) -> None:
     """Idempotent, safe to call on every startup -- same pattern as
-    app/graph/connectors.py's ensure_connector_indexes."""
+    app/graph/connectors.py's ensure_connector_indexes. The uniqueness
+    constraint on pair_key is what makes _create_proposal's MERGE safe under
+    real concurrency (two different connectors of the same tenant syncing
+    close together, each running reconcile_tenant) -- same reasoning as
+    app/graph/scheduler_lock.py's own constraint on :SchedulerLock.id."""
     execute_cypher("CREATE INDEX proposed_merge_tenant_id IF NOT EXISTS FOR (p:ProposedMerge) ON (p.tenant_id)", None)
+    execute_cypher(
+        "CREATE CONSTRAINT proposed_merge_pair_key_unique IF NOT EXISTS FOR (p:ProposedMerge) REQUIRE p.pair_key IS UNIQUE",
+        None,
+    )
 
 
 def _similarity(a: str, b: str) -> float:
@@ -166,22 +174,44 @@ def reconcile_tenant(execute_cypher: ExecuteCypher, tenant_id: str, group_ids: l
 
 
 def _create_same_as(execute_cypher: ExecuteCypher, a_uuid: str, b_uuid: str, confidence: str) -> None:
+    # MERGE on the relationship pattern itself, not CREATE -- two different
+    # connectors' syncs finishing close together could each run
+    # reconcile_tenant concurrently and both decide this exact pair needs a
+    # :SAME_AS edge (the already_paired check in reconcile_tenant is only an
+    # in-memory snapshot from when that particular call started, so it
+    # can't see what a concurrent call is doing). CREATE would happily make
+    # two edges between the same two nodes; Neo4j's MERGE on a full
+    # relationship pattern finds-or-creates exactly one, same guarantee
+    # _create_proposal's pair_key constraint gives the ProposedMerge side.
     execute_cypher(
         "MATCH (a:Entity {uuid: $a}), (b:Entity {uuid: $b}) "
-        "CREATE (a)-[:SAME_AS {confidence: $confidence, created_at: datetime()}]->(b)",
+        "MERGE (a)-[r:SAME_AS]->(b) "
+        "ON CREATE SET r.confidence = $confidence, r.created_at = datetime()",
         {"a": a_uuid, "b": b_uuid, "confidence": confidence},
     )
 
 
 def _create_proposal(execute_cypher: ExecuteCypher, tenant_id: str, a: dict, b: dict, score: float) -> None:
+    # MERGE on a deterministic pair_key (order-independent -- sorted so
+    # (a,b) and (b,a) always land on the same node), not CREATE: the
+    # already_paired check in reconcile_tenant's caller is an in-memory
+    # snapshot taken once at the start of that run, so it can't see a
+    # proposal a DIFFERENT concurrent reconcile_tenant call (a different
+    # connector's sync finishing at nearly the same moment) creates for the
+    # same pair in between. The pair_key uniqueness constraint (see
+    # ensure_reconciliation_indexes) makes this MERGE the real, database-
+    # enforced guard against that race -- ON MATCH intentionally sets
+    # nothing, so a concurrent duplicate attempt never overwrites an
+    # already-pending (or already-decided) proposal's real state.
+    pair_key = "|".join(sorted((a["uuid"], b["uuid"])))
     execute_cypher(
-        "CREATE (p:ProposedMerge {"
-        "id: $id, tenant_id: $tenant_id, "
-        "entity_a_uuid: $a_uuid, entity_a_name: $a_name, entity_a_group_id: $a_group_id, "
-        "entity_b_uuid: $b_uuid, entity_b_name: $b_name, entity_b_group_id: $b_group_id, "
-        "similarity: $score, status: 'pending', created_at: datetime(), decided_at: null"
-        "})",
+        "MERGE (p:ProposedMerge {pair_key: $pair_key}) "
+        "ON CREATE SET p.id = $id, p.tenant_id = $tenant_id, "
+        "p.entity_a_uuid = $a_uuid, p.entity_a_name = $a_name, p.entity_a_group_id = $a_group_id, "
+        "p.entity_b_uuid = $b_uuid, p.entity_b_name = $b_name, p.entity_b_group_id = $b_group_id, "
+        "p.similarity = $score, p.status = 'pending', p.created_at = datetime(), p.decided_at = null",
         {
+            "pair_key": pair_key,
             "id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
             "a_uuid": a["uuid"], "a_name": a["name"], "a_group_id": a["group_id"],
@@ -260,18 +290,25 @@ def list_proposals(execute_cypher: ExecuteCypher, tenant_id: str, status: Option
 def approve_proposal(execute_cypher: ExecuteCypher, tenant_id: str, proposal_id: str) -> bool:
     """Approves a pending proposal: writes the :SAME_AS edge it proposed and
     marks it decided. Returns False (no-op) if the id doesn't belong to this
-    tenant or isn't pending -- the same boundary/idempotency shape as
-    app/graph/document_sets.py's delete_document_set."""
+    tenant, isn't pending, or -- the case this must not silently mismark --
+    either entity it names has since been deleted (the connector it came
+    from was removed, or its data re-synced away the node entirely). One
+    Cypher statement, not "check pending, set approved, then separately try
+    to create the edge": splitting those steps let a deleted entity's MATCH
+    quietly find nothing while the earlier SET had already committed
+    'approved', leaving a proposal marked approved with no edge ever
+    created -- a real, found-in-review bug, not a hypothetical one. Matching
+    both entities in the same statement that sets status means either the
+    whole thing commits together or none of it does."""
     rows = execute_cypher(
         "MATCH (p:ProposedMerge {id: $id, tenant_id: $tenant_id, status: 'pending'}) "
+        "MATCH (a:Entity {uuid: p.entity_a_uuid}), (b:Entity {uuid: p.entity_b_uuid}) "
         "SET p.status = 'approved', p.decided_at = datetime() "
-        "RETURN p.entity_a_uuid AS a, p.entity_b_uuid AS b",
+        "CREATE (a)-[:SAME_AS {confidence: 'fuzzy_approved', created_at: datetime()}]->(b) "
+        "RETURN p.id AS id",
         {"id": proposal_id, "tenant_id": tenant_id},
     )
-    if not rows:
-        return False
-    _create_same_as(execute_cypher, rows[0]["a"], rows[0]["b"], "fuzzy_approved")
-    return True
+    return bool(rows)
 
 
 def reject_proposal(execute_cypher: ExecuteCypher, tenant_id: str, proposal_id: str) -> bool:

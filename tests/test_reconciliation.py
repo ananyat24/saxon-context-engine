@@ -13,13 +13,25 @@ import uuid
 import pytest
 
 from app.graph.graph_repository import GraphRepository
-from app.graph.reconciliation import approve_proposal, expand_same_as, list_proposals, reconcile_tenant, reject_proposal
+from app.graph.reconciliation import (
+    approve_proposal,
+    ensure_reconciliation_indexes,
+    expand_same_as,
+    list_proposals,
+    reconcile_tenant,
+    reject_proposal,
+)
 
 
 @pytest.fixture
 def repo():
     from unittest.mock import Mock
-    return GraphRepository(graphiti_instance=Mock())
+    repo = GraphRepository(graphiti_instance=Mock())
+    # Idempotent -- the concurrent-reconcile test below specifically depends
+    # on the pair_key uniqueness constraint this creates (see
+    # _create_proposal's docstring).
+    ensure_reconciliation_indexes(repo.execute_cypher)
+    return repo
 
 
 def _node(repo, group_id, name):
@@ -179,6 +191,81 @@ def test_approve_proposal_creates_same_as_and_marks_approved(repo):
         # Already decided -- approving (or rejecting) again is a no-op, not a
         # second edge.
         assert approve_proposal(repo.execute_cypher, tenant_id, proposal_id) is False
+    finally:
+        repo.execute_cypher("MATCH (p:ProposedMerge {tenant_id: $t}) DETACH DELETE p", {"t": tenant_id})
+        repo.execute_cypher("MATCH (n:Entity) WHERE n.group_id IN $g DETACH DELETE n", {"g": [group_a, group_b]})
+
+
+def test_approve_proposal_fails_cleanly_if_an_entity_was_deleted_first(repo):
+    # A real bug found in review: approve_proposal used to SET status =
+    # 'approved' and only THEN try to create the :SAME_AS edge as a second,
+    # separate query -- if either entity had since been deleted (its
+    # connector removed, its data re-synced away), that second query
+    # silently matched nothing and created no edge, while the proposal was
+    # already marked 'approved'. Now both are one statement: either the
+    # whole thing commits together, or the proposal is untouched and stays
+    # 'pending' so approving it again (once the data's back) can still work.
+    tenant_id = f"test_reconcile_tenant_{uuid.uuid4().hex[:8]}"
+    group_a = f"{tenant_id}_a"
+    group_b = f"{tenant_id}_b"
+    try:
+        a = _node(repo, group_a, "Reconcile Deleted Trading Co")
+        b = _node(repo, group_b, "Reconcile Deleted Tradnig Co")
+        reconcile_tenant(repo.execute_cypher, tenant_id, [group_a, group_b])
+        proposal_id = list_proposals(repo.execute_cypher, tenant_id)[0]["id"]
+
+        repo.execute_cypher("MATCH (n:Entity {uuid: $uuid}) DETACH DELETE n", {"uuid": a})
+
+        assert approve_proposal(repo.execute_cypher, tenant_id, proposal_id) is False
+        pending = list_proposals(repo.execute_cypher, tenant_id, status="pending")
+        assert len(pending) == 1 and pending[0]["id"] == proposal_id
+
+        same_as_rows = repo.execute_cypher(
+            "MATCH (:Entity {uuid: $b})-[r:SAME_AS]-() RETURN r", {"b": b}
+        )
+        assert same_as_rows == []
+    finally:
+        repo.execute_cypher("MATCH (p:ProposedMerge {tenant_id: $t}) DETACH DELETE p", {"t": tenant_id})
+        repo.execute_cypher("MATCH (n:Entity) WHERE n.group_id IN $g DETACH DELETE n", {"g": [group_a, group_b]})
+
+
+def test_concurrent_reconcile_runs_never_duplicate_a_same_as_edge_or_proposal(repo):
+    # The race this session's review flagged: two different connectors of
+    # the SAME tenant syncing close together each run reconcile_tenant
+    # independently -- the in-memory already_paired snapshot each call
+    # starts with can't see what the OTHER concurrent call is doing, so the
+    # real guard has to be at the database level (MERGE, not CREATE) -- see
+    # _create_same_as's and _create_proposal's docstrings. Real threads
+    # against the real driver, not sequential calls that only look
+    # concurrent.
+    import threading
+    from app.graph.neo4j_client import Neo4jClient
+
+    tenant_id = f"test_reconcile_tenant_{uuid.uuid4().hex[:8]}"
+    group_a = f"{tenant_id}_a"
+    group_b = f"{tenant_id}_b"
+    try:
+        _node(repo, group_a, "Reconcile Race Exact Co")
+        _node(repo, group_b, "Reconcile Race Exact Co")
+        _node(repo, group_a, "Reconcile Race Fuzzy Trading Co")
+        _node(repo, group_b, "Reconcile Race Fuzzy Tradnig Co")
+
+        def run_once():
+            thread_repo = GraphRepository(neo4j_client=Neo4jClient())
+            reconcile_tenant(thread_repo.execute_cypher, tenant_id, [group_a, group_b])
+
+        threads = [threading.Thread(target=run_once) for _ in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        same_as_count = repo.execute_cypher(
+            "MATCH (:Entity {group_id: $a})-[r:SAME_AS]-(:Entity {group_id: $b}) RETURN count(r) AS c",
+            {"a": group_a, "b": group_b},
+        )[0]["c"]
+        assert same_as_count == 1
+        assert len(list_proposals(repo.execute_cypher, tenant_id)) == 1
     finally:
         repo.execute_cypher("MATCH (p:ProposedMerge {tenant_id: $t}) DETACH DELETE p", {"t": tenant_id})
         repo.execute_cypher("MATCH (n:Entity) WHERE n.group_id IN $g DETACH DELETE n", {"g": [group_a, group_b]})
