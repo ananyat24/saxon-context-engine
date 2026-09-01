@@ -575,13 +575,26 @@ async function openConnectorPreview(connectorId) {
   }
   if (nodes.length === 0 && rels.length === 0) {
     // Per-connector tracking (the connector_id filter above) only tags
-    // episodes from a sync run after that tracking was added -- a
-    // connector last synced before then really did add facts, they're
-    // just not attributable to it specifically. Distinguishing this from
-    // "genuinely found nothing" avoids it reading as a fresh bug.
-    subtitle.textContent =
-      "Nothing tracked specifically for this connector yet -- if it synced before per-connector " +
-      'tracking was added, click "Sync now" to re-sync and it\'ll show up here.';
+    // episodes from a sync that actually re-ingested content -- a
+    // connector whose last sync found nothing *changed* (the common case
+    // for a connector synced before this tracking existed) never got a
+    // chance to tag its already-ingested facts, and a plain "Sync now"
+    // won't fix that either: content-hash dedup means it'll just detect
+    // "unchanged" again and skip re-ingesting, forever. Fixing this for
+    // real means forcing a real re-ingestion -- offered directly below
+    // rather than pointing at a "Sync now" that would silently do nothing.
+    subtitle.textContent = "Nothing tracked specifically for this connector yet.";
+    bodyEl.innerHTML = `
+      <p class="preview-empty">
+        This can happen if the connector's last sync found nothing new to ingest -- its facts are
+        still in the graph and answerable by every query, just not attributable to this connector
+        specifically here. Fixing that means re-ingesting its content for real (a small real cost,
+        not just a status check).
+      </p>
+      <button type="button" class="btn btn-outline" id="fixAttributionBtn">Fix attribution (re-sync for real)</button>
+      <p id="fixAttributionStatus" class="status-line"></p>
+    `;
+    document.getElementById("fixAttributionBtn").addEventListener("click", () => fixConnectorAttribution(connectorId));
     return;
   }
   subtitle.textContent = `${nodes.length} thing${nodes.length === 1 ? "" : "s"} and ${rels.length} fact${rels.length === 1 ? "" : "s"} found from this source so far.`;
@@ -597,6 +610,50 @@ async function openConnectorPreview(connectorId) {
     <div class="preview-section"><h3>Entities</h3>${entitiesHtml}</div>
     <div class="preview-section"><h3>Facts</h3>${factsHtml}</div>
   `;
+}
+
+// Forces a connector's content to be re-ingested for real, so its facts get
+// tagged with connector_id this time -- see app/api/connectors.py's
+// purge_connector_data (clears this connector's own already-tagged data, a
+// no-op here since there isn't any, but critically also resets its stored
+// content_hash) followed by a real sync. Resetting content_hash is the
+// actual fix: without it, "Sync now" alone would just detect "unchanged"
+// again and skip re-ingesting, same as what caused this in the first
+// place. This does spend real money (genuine re-extraction), so it's an
+// explicit opt-in click, never automatic.
+async function fixConnectorAttribution(connectorId) {
+  const btn = document.getElementById("fixAttributionBtn");
+  const statusEl = document.getElementById("fixAttributionStatus");
+  btn.disabled = true;
+  statusEl.textContent = "Clearing old sync state…";
+  statusEl.className = "status-line";
+  try {
+    const purgeRes = await fetch(`${API}/connectors/${encodeURIComponent(connectorId)}/data`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!purgeRes.ok) {
+      const body = await purgeRes.json().catch(() => ({}));
+      statusEl.textContent = body.detail || "Could not clear this connector's sync state.";
+      statusEl.className = "status-line bad";
+      btn.disabled = false;
+      return;
+    }
+    statusEl.textContent = "Re-syncing for real…";
+    await fetch(`${API}/connectors/${encodeURIComponent(connectorId)}/sync`, {
+      method: "POST",
+      headers: authHeaders(),
+    });
+    statusEl.textContent =
+      'Queued. This re-ingests the connector\'s content for real, so give it a minute, then reopen ' +
+      "this preview (or check its row's status) to see it tracked.";
+    statusEl.className = "status-line ok";
+    await loadConnectors(); // picks up the "queued" status on its row, and starts polling it
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+    statusEl.className = "status-line bad";
+    btn.disabled = false;
+  }
 }
 
 function closeConnectorPreview() {

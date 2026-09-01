@@ -4,6 +4,7 @@
 # (app/graph/connector_scheduler.py). Both call this; neither reimplements
 # the fetch -> dedup-check -> ingest -> record-result sequence on its own,
 # so there's no way for the two paths to quietly drift apart.
+import asyncio
 import logging
 from typing import Callable, TypedDict
 
@@ -93,24 +94,41 @@ async def run_connector_sync(
             # the whole knowledge base. A knowledge base can have more than
             # one connector feeding it (group_id alone doesn't distinguish
             # them), which is exactly what made the un-tagged version wrong.
-            # Best-effort: a tagging failure shouldn't fail an otherwise-
-            # successful sync -- it just means this one episode's facts
-            # won't show up in that connector's own preview (they're still
-            # in the graph and answerable by every other query path, which
-            # is scoped by group_id, not connector_id).
+            #
+            # Retried, not just best-effort on the first attempt: a
+            # real-world failure here was observed to be a transient Neo4j
+            # blip (a few seconds of ServiceUnavailable, recovering on its
+            # own) -- and because this write happens *after* the content
+            # this episode represents is already durably ingested, a
+            # transient failure here is uniquely sticky: content_hash gets
+            # recorded as "already synced" regardless (correctly -- the
+            # content really was ingested), which means an *unchanged*
+            # future sync will keep skipping re-ingestion forever and never
+            # get another chance to tag this episode. A short retry absorbs
+            # exactly the transient case that would otherwise create a
+            # permanently untagged episode with no natural way to recover
+            # short of a manual purge_connector_data + forced re-sync.
             try:
                 episode_uuid = result.episode.uuid
-                repo.execute_cypher(
-                    "MATCH (e:Episodic {uuid: $uuid}) SET e.connector_id = $connector_id",
-                    {"uuid": episode_uuid, "connector_id": connector_id},
-                )
             except Exception as e:
-                # Deliberately doesn't reference `result` here -- the failure
-                # this guards against includes result.episode not existing at
-                # all (an unexpected return shape from a monkeypatched/future
-                # ingest_episode), so the log message can't assume it does
-                # either.
                 logger.warning(f"Could not tag episode '{record.name}' with connector '{connector_id}': {e}")
+                continue
+            for attempt in range(3):
+                try:
+                    repo.execute_cypher(
+                        "MATCH (e:Episodic {uuid: $uuid}) SET e.connector_id = $connector_id",
+                        {"uuid": episode_uuid, "connector_id": connector_id},
+                    )
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        logger.warning(
+                            f"Could not tag episode '{episode_uuid}' ({record.name}) with connector "
+                            f"'{connector_id}' after 3 attempts -- it won't show up in this connector's "
+                            f"own preview until a forced re-sync (see purge_connector_data): {e}"
+                        )
+                    else:
+                        await asyncio.sleep(0.5 * (attempt + 1))
     except SpendLimitExceeded as e:
         connectors.record_sync_result(tenant.tenant_id, connector_id, status="error", last_error=str(e), repo=repo)
         return {"synced": False, "skipped_unchanged": False, "error": str(e), "spend_limit_exceeded": True}

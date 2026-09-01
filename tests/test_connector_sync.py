@@ -236,6 +236,57 @@ def test_successful_sync_tags_each_episode_with_the_connector_id(monkeypatch):
     assert all(p["connector_id"] == "connector-42" for _, p in tag_calls)
 
 
+def test_tagging_retries_and_recovers_from_a_transient_failure(monkeypatch):
+    # Pins the actual production incident this retry was added for: a
+    # transient Neo4j blip (a few seconds of ServiceUnavailable) hit the
+    # tag-write specifically, and because content_hash still gets recorded
+    # regardless (the episode really was ingested), an unchanged future
+    # sync would skip re-ingestion forever and never get another chance to
+    # tag it -- a permanent gap from a momentary blip. The retry has to
+    # actually succeed on a later attempt, not just not-crash.
+    _no_op_record_sync_result(monkeypatch)
+
+    async def _noop_sleep(*a):
+        return None
+
+    monkeypatch.setattr("app.ingestion.connector_sync.asyncio.sleep", _noop_sleep)
+
+    async def fake_ingest(**kwargs):
+        return _FakeIngestResult(uuid="episode-flaky")
+
+    _patch_ingestion(monkeypatch, fake_ingest)
+    monkeypatch.setattr(
+        "app.ingestion.connector_sync.get_response_cache",
+        lambda: type("_Fake", (), {"invalidate_group": staticmethod(lambda t, g: None)})(),
+    )
+
+    class _FlakyThenRecoveringRepo:
+        def __init__(self):
+            self.attempts = 0
+            self.succeeded = False
+
+        def execute_cypher(self, query, params=None):
+            if "SET e.connector_id" in query:
+                self.attempts += 1
+                if self.attempts < 3:
+                    raise RuntimeError("transient Neo4j blip")
+                self.succeeded = True
+            return []
+
+    repo = _FlakyThenRecoveringRepo()
+    tenant = _tenant()
+    connector = {"id": "c1", "group_id": "kb1", "content_hash": None}
+    records = [SourceRecord(name="a", body="x", source_description="d")]
+
+    result = asyncio.run(
+        run_connector_sync(tenant, connector, lambda c: _StaticConnector(records, hash_value="new-hash"), repo=repo)
+    )
+
+    assert result["synced"] is True
+    assert repo.attempts == 3
+    assert repo.succeeded is True
+
+
 def test_a_tagging_failure_does_not_fail_an_otherwise_successful_sync(monkeypatch):
     _no_op_record_sync_result(monkeypatch)
 
