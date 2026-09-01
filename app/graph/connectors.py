@@ -27,6 +27,12 @@ def ensure_connector_indexes(repo: Optional[GraphRepository] = None) -> None:
     repo.execute_cypher(
         "CREATE INDEX connector_tenant_id IF NOT EXISTS FOR (c:Connector) ON (c.tenant_id)"
     )
+    # Backs the connector-scoped queries in app/api/graph.py (GET /graph/nodes
+    # and /graph/relationships with ?connector_id=) -- see
+    # app/ingestion/connector_sync.py's episode-tagging for what sets this.
+    repo.execute_cypher(
+        "CREATE INDEX episodic_connector_id IF NOT EXISTS FOR (e:Episodic) ON (e.connector_id)"
+    )
 
 
 _FIELDS = (

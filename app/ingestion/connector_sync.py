@@ -79,12 +79,38 @@ async def run_connector_sync(
         entity_types, edge_types, edge_type_map = build_graphiti_schema(scoped)
         pipeline = IngestionPipeline(graphiti, entity_types=entity_types, edge_types=edge_types, edge_type_map=edge_type_map)
         for record in records:
-            await pipeline.ingest_episode(
+            result = await pipeline.ingest_episode(
                 name=record.name,
                 body=record.body,
                 source_description=record.source_description,
                 group_id=connector["group_id"],
             )
+            # Tags the Episodic node this record produced with which
+            # connector wrote it -- see app/api/graph.py's ?connector_id=
+            # filter, which is what makes the connector preview modal
+            # ("what's been pulled into the graph from this connector")
+            # show only this connector's own facts instead of everything in
+            # the whole knowledge base. A knowledge base can have more than
+            # one connector feeding it (group_id alone doesn't distinguish
+            # them), which is exactly what made the un-tagged version wrong.
+            # Best-effort: a tagging failure shouldn't fail an otherwise-
+            # successful sync -- it just means this one episode's facts
+            # won't show up in that connector's own preview (they're still
+            # in the graph and answerable by every other query path, which
+            # is scoped by group_id, not connector_id).
+            try:
+                episode_uuid = result.episode.uuid
+                repo.execute_cypher(
+                    "MATCH (e:Episodic {uuid: $uuid}) SET e.connector_id = $connector_id",
+                    {"uuid": episode_uuid, "connector_id": connector_id},
+                )
+            except Exception as e:
+                # Deliberately doesn't reference `result` here -- the failure
+                # this guards against includes result.episode not existing at
+                # all (an unexpected return shape from a monkeypatched/future
+                # ingest_episode), so the log message can't assume it does
+                # either.
+                logger.warning(f"Could not tag episode '{record.name}' with connector '{connector_id}': {e}")
     except SpendLimitExceeded as e:
         connectors.record_sync_result(tenant.tenant_id, connector_id, status="error", last_error=str(e), repo=repo)
         return {"synced": False, "skipped_unchanged": False, "error": str(e), "spend_limit_exceeded": True}

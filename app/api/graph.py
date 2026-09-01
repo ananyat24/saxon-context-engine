@@ -97,15 +97,22 @@ def get_nodes(
     limit: int = 50,
     knowledge_base: str | None = None,
     as_user: str | None = None,
+    connector_id: str | None = None,
     tenant: TenantConfig = Depends(require_tenant),
 ):
     """This knowledge base's nodes, most recently created first, scoped to
-    as_user's visibility when given."""
+    as_user's visibility when given. ?connector_id= narrows further to only
+    entities an episode from that one connector actually mentioned -- see
+    connector_id's own docstring below for why that's a separate filter
+    from knowledge_base."""
     group_id = resolve_knowledge_base(tenant, knowledge_base)
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
-    user_id = authorization.resolve_as_user(group_id, as_user, repo=repo)
     limit = max(1, min(limit, 200))  # keep an unbounded ?limit= from becoming a full graph dump
 
+    if connector_id is not None:
+        return _get_nodes_for_connector(repo, group_id, connector_id, limit)
+
+    user_id = authorization.resolve_as_user(group_id, as_user, repo=repo)
     if user_id is not None:
         return authorization.get_visible_nodes(group_id, user_id, limit=limit, repo=repo)
 
@@ -120,21 +127,50 @@ def get_nodes(
     )
 
 
+def _get_nodes_for_connector(repo: GraphRepository, group_id: str, connector_id: str, limit: int):
+    """Entities mentioned by an episode this specific connector produced
+    (see app/ingestion/connector_sync.py's Episodic.connector_id tagging) --
+    not "everything in this connector's knowledge base", which is what the
+    plain group_id filter above gives, and which is wrong here: a knowledge
+    base commonly has more than one connector feeding it, so that used to
+    show a connector's preview padded out with every OTHER connector's
+    facts too. Deliberately not combined with as_user -- this is "what did
+    this source add", an operator/creator view, not a role-scoped
+    end-user query."""
+    return repo.execute_cypher(
+        """
+        MATCH (ep:Episodic {group_id: $group_id, connector_id: $connector_id})-[:MENTIONS]->(n:Entity)
+        WHERE NOT n:Decision
+        WITH DISTINCT n
+        RETURN n.uuid AS id, n.name AS name, labels(n) AS labels, n.summary AS summary
+        ORDER BY n.created_at DESC
+        LIMIT $limit
+        """,
+        {"group_id": group_id, "connector_id": connector_id, "limit": limit},
+    )
+
+
 @router.get("/relationships")
 def get_relationships(
     request: Request,
     limit: int = 50,
     knowledge_base: str | None = None,
     as_user: str | None = None,
+    connector_id: str | None = None,
     tenant: TenantConfig = Depends(require_tenant),
 ):
     """This knowledge base's relationships, most recently created first,
-    scoped to as_user's visibility when given."""
+    scoped to as_user's visibility when given. ?connector_id= narrows
+    further -- see get_nodes' matching parameter and
+    _get_relationships_for_connector below."""
     group_id = resolve_knowledge_base(tenant, knowledge_base)
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
-    user_id = authorization.resolve_as_user(group_id, as_user, repo=repo)
     limit = max(1, min(limit, 200))
 
+    if connector_id is not None:
+        return _get_relationships_for_connector(repo, group_id, connector_id, limit)
+
+    user_id = authorization.resolve_as_user(group_id, as_user, repo=repo)
     if user_id is not None:
         return authorization.get_visible_relationships(group_id, user_id, limit=limit, repo=repo)
 
@@ -147,4 +183,27 @@ def get_relationships(
         LIMIT $limit
         """,
         {"group_id": group_id, "limit": limit},
+    )
+
+
+def _get_relationships_for_connector(repo: GraphRepository, group_id: str, connector_id: str, limit: int):
+    """A RELATES_TO edge's own `episodes` property (already used by
+    GraphRepository._resolve_episode_sources for per-fact source tags)
+    lists which Episodic node(s) produced/last touched it -- a fact counts
+    as this connector's own when any of those episodes is one this
+    connector wrote. Collecting this connector's episode uuids first (one
+    small query) rather than joining per-episode avoids returning the same
+    fact once per episode that touched it."""
+    return repo.execute_cypher(
+        """
+        MATCH (ep:Episodic {group_id: $group_id, connector_id: $connector_id})
+        WITH collect(ep.uuid) AS connector_episode_uuids
+        MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id})
+        WHERE NOT a:Decision AND NOT b:Decision
+          AND ANY(ep_uuid IN r.episodes WHERE ep_uuid IN connector_episode_uuids)
+        RETURN a.name AS source, r.name AS type, b.name AS target, r.fact AS fact
+        ORDER BY r.created_at DESC
+        LIMIT $limit
+        """,
+        {"group_id": group_id, "connector_id": connector_id, "limit": limit},
     )

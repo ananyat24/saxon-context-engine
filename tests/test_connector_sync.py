@@ -178,6 +178,91 @@ def test_successful_sync_invalidates_the_response_cache_for_its_group(monkeypatc
     assert invalidated == [("t1", "kb1")]
 
 
+class _FakeEpisode:
+    def __init__(self, uuid):
+        self.uuid = uuid
+
+
+class _FakeIngestResult:
+    def __init__(self, uuid):
+        self.episode = _FakeEpisode(uuid)
+
+
+class _RecordingRepo:
+    """Only implements execute_cypher -- enough to prove which episodes get
+    tagged with which connector_id, without needing a real Neo4j."""
+
+    def __init__(self):
+        self.calls = []
+
+    def execute_cypher(self, query, params=None):
+        self.calls.append((query, params))
+        return []
+
+
+def test_successful_sync_tags_each_episode_with_the_connector_id(monkeypatch):
+    # The real bug this pins: app/api/graph.py's connector preview filters
+    # entities/facts by which connector's episode produced them (see that
+    # module's ?connector_id= handling) -- so every episode a sync creates
+    # has to actually get tagged, or the preview silently shows nothing for
+    # a connector that really did sync data.
+    _no_op_record_sync_result(monkeypatch)
+
+    async def fake_ingest(**kwargs):
+        return _FakeIngestResult(uuid=f"episode-for-{kwargs['name']}")
+
+    _patch_ingestion(monkeypatch, fake_ingest)
+    monkeypatch.setattr(
+        "app.ingestion.connector_sync.get_response_cache",
+        lambda: type("_Fake", (), {"invalidate_group": staticmethod(lambda t, g: None)})(),
+    )
+
+    tenant = _tenant()
+    connector = {"id": "connector-42", "group_id": "kb1", "content_hash": None}
+    records = [
+        SourceRecord(name="rec-a", body="x", source_description="d"),
+        SourceRecord(name="rec-b", body="y", source_description="d"),
+    ]
+    repo = _RecordingRepo()
+
+    result = asyncio.run(
+        run_connector_sync(tenant, connector, lambda c: _StaticConnector(records, hash_value="new-hash"), repo=repo)
+    )
+
+    assert result["synced"] is True
+    tag_calls = [(q, p) for q, p in repo.calls if "SET e.connector_id" in q]
+    assert len(tag_calls) == 2
+    assert {p["uuid"] for _, p in tag_calls} == {"episode-for-rec-a", "episode-for-rec-b"}
+    assert all(p["connector_id"] == "connector-42" for _, p in tag_calls)
+
+
+def test_a_tagging_failure_does_not_fail_an_otherwise_successful_sync(monkeypatch):
+    _no_op_record_sync_result(monkeypatch)
+
+    async def fake_ingest(**kwargs):
+        return _FakeIngestResult(uuid="episode-1")
+
+    _patch_ingestion(monkeypatch, fake_ingest)
+    monkeypatch.setattr(
+        "app.ingestion.connector_sync.get_response_cache",
+        lambda: type("_Fake", (), {"invalidate_group": staticmethod(lambda t, g: None)})(),
+    )
+
+    class _BrokenRepo:
+        def execute_cypher(self, query, params=None):
+            raise RuntimeError("Neo4j hiccup")
+
+    tenant = _tenant()
+    connector = {"id": "c1", "group_id": "kb1", "content_hash": None}
+    records = [SourceRecord(name="a", body="x", source_description="d")]
+
+    result = asyncio.run(
+        run_connector_sync(tenant, connector, lambda c: _StaticConnector(records, hash_value="new-hash"), repo=_BrokenRepo())
+    )
+
+    assert result == {"synced": True, "skipped_unchanged": False, "error": None, "spend_limit_exceeded": False}
+
+
 def test_unchanged_sync_does_not_touch_the_response_cache(monkeypatch):
     _no_op_record_sync_result(monkeypatch)
 

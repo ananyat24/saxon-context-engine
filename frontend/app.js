@@ -521,10 +521,16 @@ function renderConnectorsTable() {
 // independent of whatever the header's kbSelect is currently set to -- used
 // by the connector data preview and the doc-set-aware suggested questions
 // below, both of which need a specific scope rather than "whatever's
-// selected right now".
-async function fetchGraphSliceFor(groupId, { nodesLimit = 30, relsLimit = 40 } = {}) {
+// selected right now". Pass connectorId to narrow further to just that one
+// connector's own facts (see app/api/graph.py's ?connector_id= filter) --
+// without it, this returns everything in the whole knowledge base, which is
+// correct for the doc-set case below but was the actual bug in the
+// connector preview (a knowledge base commonly has more than one connector
+// feeding it).
+async function fetchGraphSliceFor(groupId, { nodesLimit = 30, relsLimit = 40, connectorId = null } = {}) {
   try {
-    const qs = (extra) => `?knowledge_base=${encodeURIComponent(groupId)}${extra}`;
+    const connectorParam = connectorId ? `&connector_id=${encodeURIComponent(connectorId)}` : "";
+    const qs = (extra) => `?knowledge_base=${encodeURIComponent(groupId)}${connectorParam}${extra}`;
     const [nodesRes, relsRes] = await Promise.all([
       fetch(`${API}/graph/nodes${qs(`&limit=${nodesLimit}`)}`, { headers: authHeaders() }),
       fetch(`${API}/graph/relationships${qs(`&limit=${relsLimit}`)}`, { headers: authHeaders() }),
@@ -551,10 +557,21 @@ async function openConnectorPreview(connectorId) {
   bodyEl.innerHTML = "";
   overlay.hidden = false;
 
-  const { nodes, rels } = await fetchGraphSliceFor(connector.group_id);
+  const { nodes, rels } = await fetchGraphSliceFor(connector.group_id, { connectorId: connector.id });
 
   if (connector.status === "never_synced") {
     subtitle.textContent = "This connector hasn't been synced yet, so there's nothing to show here.";
+    return;
+  }
+  if (nodes.length === 0 && rels.length === 0) {
+    // Per-connector tracking (the connector_id filter above) only tags
+    // episodes from a sync run after that tracking was added -- a
+    // connector last synced before then really did add facts, they're
+    // just not attributable to it specifically. Distinguishing this from
+    // "genuinely found nothing" avoids it reading as a fresh bug.
+    subtitle.textContent =
+      "Nothing tracked specifically for this connector yet -- if it synced before per-connector " +
+      'tracking was added, click "Sync now" to re-sync and it\'ll show up here.';
     return;
   }
   subtitle.textContent = `${nodes.length} thing${nodes.length === 1 ? "" : "s"} and ${rels.length} fact${rels.length === 1 ? "" : "s"} found from this source so far.`;
