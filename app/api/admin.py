@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.config import KnowledgeBase, settings
-from app.graph import tenants
+from app.graph import connectors, tenants
 from app.graph.graph_repository import GraphRepository
 from app.graph.spend_limiter import get_limiter
 from app.security import require_admin
@@ -78,3 +78,23 @@ def delete_tenant(tenant_id: str, request: Request):
     deleted = tenants.delete_tenant(tenant_id, repo=repo)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found.")
+
+
+class ReassignConnectorTenantRequest(BaseModel):
+    tenant_id: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/connectors/{connector_id}/reassign-tenant")
+def reassign_connector_tenant(connector_id: str, req: ReassignConnectorTenantRequest, request: Request):
+    """Moves an existing connector's management ownership to a different
+    tenant -- see app/graph/connectors.py's reassign_tenant for exactly
+    what does and doesn't change. Typical use: a connector was created
+    under a throwaway tenant to unblock ingestion into a knowledge base
+    before the real tenant had that knowledge base in its own list;
+    consolidate it into the real tenant once that's fixed, without
+    re-ingesting (which would cost real money for no new information)."""
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    moved = connectors.reassign_tenant(connector_id, req.tenant_id, repo=repo)
+    if not moved:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
+    return {"connector_id": connector_id, "tenant_id": req.tenant_id}

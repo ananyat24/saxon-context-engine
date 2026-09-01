@@ -83,6 +83,29 @@ def get_connector(tenant_id: str, connector_id: str, repo: Optional[GraphReposit
     return rows[0]
 
 
+def reassign_tenant(connector_id: str, new_tenant_id: str, repo: Optional[GraphRepository] = None) -> bool:
+    """Moves an existing connector's *management* ownership to a different
+    tenant -- for consolidating a connector created under a throwaway/
+    temporary tenant (e.g. one stood up just to get a knowledge base's
+    first ingestion done before the real tenant had that knowledge base in
+    its own list) into the tenant that should actually own it going
+    forward. Doesn't touch anything else: the connector's id, group_id,
+    url/name, sync state, and -- critically -- the already-ingested graph
+    data (Entity/RELATES_TO/Episodic nodes, scoped by group_id, not
+    tenant_id) are all unaffected. Operator-only in practice (see
+    app/api/admin.py's require_admin) -- there's no tenant-facing route for
+    this, since a tenant reassigning its own connector to itself is
+    meaningless and reassigning it to a DIFFERENT tenant is exactly the
+    kind of cross-tenant action only an operator should be able to do.
+    Returns False if no connector with that id exists."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        "MATCH (c:Connector {id: $id}) SET c.tenant_id = $new_tenant_id RETURN count(c) AS updated",
+        {"id": connector_id, "new_tenant_id": new_tenant_id},
+    )
+    return bool(rows) and rows[0]["updated"] > 0
+
+
 def create_connector(
     tenant_id: str,
     name: str,
