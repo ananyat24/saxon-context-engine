@@ -77,6 +77,16 @@ SHAREPOINT_CLIENT_SECRET="${SHAREPOINT_CLIENT_SECRET:-}"
 # redeploy. Leave unset to deploy without it (those routes 500 with a clear
 # "not configured" message rather than accepting no credential at all).
 ADMIN_API_KEY="${ADMIN_API_KEY:-}"
+# Only needed to enable the "google_drive_oauth" connector type -- the
+# one-click "Connect Google Drive" button (see app/config.py and
+# .env.example for how to get a client id/secret and generate an encryption
+# key). GOOGLE_OAUTH_CLIENT_ID isn't a secret (the frontend embeds it
+# directly), so it's a plain env var below, not a Container Apps secret --
+# unlike GOOGLE_OAUTH_CLIENT_SECRET and TOKEN_ENCRYPTION_KEY. All three or
+# none; leave unset to deploy without the connector type.
+GOOGLE_OAUTH_CLIENT_ID="${GOOGLE_OAUTH_CLIENT_ID:-}"
+GOOGLE_OAUTH_CLIENT_SECRET="${GOOGLE_OAUTH_CLIENT_SECRET:-}"
+TOKEN_ENCRYPTION_KEY="${TOKEN_ENCRYPTION_KEY:-}"
 
 echo "=== 1. Selecting subscription ==="
 az account set --subscription "$SUBSCRIPTION"
@@ -161,6 +171,8 @@ SECRET_ARGS=(
 [ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && SECRET_ARGS+=(google-drive-service-account-json="$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
 [ -n "$SHAREPOINT_CLIENT_SECRET" ] && SECRET_ARGS+=(sharepoint-client-secret="$SHAREPOINT_CLIENT_SECRET")
 [ -n "$ADMIN_API_KEY" ] && SECRET_ARGS+=(admin-api-key="$ADMIN_API_KEY")
+[ -n "$GOOGLE_OAUTH_CLIENT_SECRET" ] && SECRET_ARGS+=(google-oauth-client-secret="$GOOGLE_OAUTH_CLIENT_SECRET")
+[ -n "$TOKEN_ENCRYPTION_KEY" ] && SECRET_ARGS+=(token-encryption-key="$TOKEN_ENCRYPTION_KEY")
 
 ENV_ARGS=(
   NEO4J_URI="$NEO4J_URI"
@@ -185,6 +197,9 @@ ENV_ARGS=(
 [ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && ENV_ARGS+=(GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json)
 [ -n "$SHAREPOINT_CLIENT_SECRET" ] && ENV_ARGS+=(SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret)
 [ -n "$ADMIN_API_KEY" ] && ENV_ARGS+=(ADMIN_API_KEY=secretref:admin-api-key)
+[ -n "$GOOGLE_OAUTH_CLIENT_ID" ] && ENV_ARGS+=(GOOGLE_OAUTH_CLIENT_ID="$GOOGLE_OAUTH_CLIENT_ID")
+[ -n "$GOOGLE_OAUTH_CLIENT_SECRET" ] && ENV_ARGS+=(GOOGLE_OAUTH_CLIENT_SECRET=secretref:google-oauth-client-secret)
+[ -n "$TOKEN_ENCRYPTION_KEY" ] && ENV_ARGS+=(TOKEN_ENCRYPTION_KEY=secretref:token-encryption-key)
 
 if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
   echo "App exists, updating image, secrets, and env vars..."
