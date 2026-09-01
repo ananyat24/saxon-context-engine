@@ -233,6 +233,78 @@ def authority_by_group_id(tenant_id: str, repo: Optional[GraphRepository] = None
     return {row["group_id"]: row["authority"] for row in rows}
 
 
+def purge_connector_data(connector_id: str, group_id: str, repo: Optional[GraphRepository] = None) -> dict:
+    """Removes everything a *specific connector's own syncs* wrote -- not
+    the connector row itself (see delete_connector for that) -- using the
+    same Episodic.connector_id tag app/ingestion/connector_sync.py writes and
+    app/api/graph.py's ?connector_id= filter reads. Exists for recovering
+    from a bad sync (wrong data uploaded, a sync that partially completed
+    before an error, content that shouldn't have landed) without wiping the
+    whole knowledge base or leaving the connector permanently tainted --
+    the connector keeps its config (url/name/group_id) and can be synced
+    again immediately after this, clean.
+
+    A RELATES_TO fact is only ever fully deleted when *every* episode that
+    touched it belongs to this connector -- a fact another sync (this
+    connector's own earlier run, or a different connector entirely) also
+    contributed to keeps existing, just with this connector's episode
+    uuid(s) stripped from its `episodes` list. An Entity is only deleted if
+    it ends up with zero remaining RELATES_TO edges once that's done --
+    never one still backing a fact from elsewhere. This mirrors
+    app/context/orchestrator.py's own "never hide or filter a fact that's
+    still real" posture, applied to deletion instead of ranking."""
+    repo = repo or GraphRepository()
+    edge_result = repo.execute_cypher(
+        """
+        MATCH (ep:Episodic {group_id: $group_id, connector_id: $connector_id})
+        WITH collect(ep.uuid) AS connector_episode_uuids
+        MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id})
+        WHERE ANY(e IN r.episodes WHERE e IN connector_episode_uuids)
+        WITH r, connector_episode_uuids, [e IN r.episodes WHERE NOT e IN connector_episode_uuids] AS remaining
+        WITH r, remaining, size(remaining) = 0 AS fully_owned
+        FOREACH (_ IN CASE WHEN fully_owned THEN [1] ELSE [] END | DELETE r)
+        FOREACH (_ IN CASE WHEN NOT fully_owned THEN [1] ELSE [] END | SET r.episodes = remaining)
+        RETURN count(r) AS touched, sum(CASE WHEN fully_owned THEN 1 ELSE 0 END) AS deleted
+        """,
+        {"group_id": group_id, "connector_id": connector_id},
+    )
+    node_result = repo.execute_cypher(
+        """
+        MATCH (ep:Episodic {group_id: $group_id, connector_id: $connector_id})-[:MENTIONS]->(n:Entity)
+        WHERE NOT (n)-[:RELATES_TO]-()
+        WITH DISTINCT n
+        DETACH DELETE n
+        RETURN count(n) AS deleted
+        """,
+        {"group_id": group_id, "connector_id": connector_id},
+    )
+    episode_result = repo.execute_cypher(
+        "MATCH (ep:Episodic {group_id: $group_id, connector_id: $connector_id}) "
+        "DETACH DELETE ep RETURN count(ep) AS deleted",
+        {"group_id": group_id, "connector_id": connector_id},
+    )
+    # Also resets the connector's own sync bookkeeping -- content_hash in
+    # particular has to go back to null, or the next sync sees "identical
+    # content to last time" (the hash was computed over the exact files
+    # this purge just undid) and skips re-ingesting via
+    # run_connector_sync's own dedup check, silently leaving the connector
+    # empty even after a real "Sync now". record_sync_result() (above)
+    # deliberately doesn't do this -- it only ever *sets* a hash on an
+    # actual synced outcome, never clears one -- so this is a direct SET
+    # rather than reusing it with a fabricated status.
+    repo.execute_cypher(
+        "MATCH (c:Connector {id: $connector_id}) "
+        "SET c.status = 'never_synced', c.content_hash = null, c.last_error = null, c.last_synced_at = null",
+        {"connector_id": connector_id},
+    )
+    return {
+        "facts_deleted": (edge_result[0]["deleted"] if edge_result else 0) or 0,
+        "facts_detached": (edge_result[0]["touched"] - (edge_result[0]["deleted"] or 0)) if edge_result else 0,
+        "entities_deleted": node_result[0]["deleted"] if node_result else 0,
+        "episodes_deleted": episode_result[0]["deleted"] if episode_result else 0,
+    }
+
+
 def delete_connector(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> bool:
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(

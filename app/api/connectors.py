@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, stat
 from pydantic import BaseModel, Field
 
 from app.config import TenantConfig, settings
+from app.context.response_cache import get_response_cache
 from app.graph import connectors
 from app.graph.graph_repository import GraphRepository
 from app.graph.token_crypto import TokenEncryptionNotConfigured, decrypt_token, encrypt_token
@@ -302,6 +303,27 @@ async def delete_connector(connector_id: str, request: Request, tenant: TenantCo
                     f"Could not revoke Google Drive grant for connector '{connector_id}' ({tenant.tenant_id}): {e}"
                 )
     connectors.delete_connector(tenant.tenant_id, connector_id, repo=repo)
+
+
+@router.delete("/{connector_id}/data")
+def purge_connector_data(connector_id: str, request: Request, tenant: TenantConfig = Depends(require_tenant)):
+    """Undoes what this connector's own syncs wrote to the graph -- not the
+    connector itself, which keeps its config and can be synced again right
+    after this, clean (see app/graph/connectors.py's purge_connector_data
+    for the exact fact/entity/episode semantics). For recovering from a bad
+    sync: wrong data uploaded before a fix, a sync that partially completed
+    before erroring out, content that shouldn't have landed -- without
+    wiping the rest of the knowledge base or leaving the connector
+    permanently unable to produce a clean sync again."""
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
+    if connector is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
+    result = connectors.purge_connector_data(connector_id, connector["group_id"], repo=repo)
+    # A purge invalidates whatever the response cache last knew about this
+    # group -- same reasoning as a real sync (see connector_sync.py).
+    get_response_cache().invalidate_group(tenant.tenant_id, connector["group_id"])
+    return result
 
 
 # Generous enough for a real CSV export, small enough that an upload can't
