@@ -391,6 +391,16 @@ function formatSyncStatus(c) {
   return `<span class="badge ${cls}">${escapeXml(label)}</span>`;
 }
 
+// Connector types that read from their own uploaded file(s) -- see
+// app/api/connectors.py's upload_connector_file (extension per type) and
+// app/ingestion/database_source.py/email_source.py's own-folder-first
+// fallback-to-demo-data pattern. Kept in one place so the creation form,
+// the table row's own upload control, and the actual upload call all agree.
+const CONNECTOR_UPLOAD_TYPES = {
+  database: { ext: ".csv", buttonLabel: "Upload CSV" },
+  email: { ext: ".json", buttonLabel: "Upload JSON" },
+};
+
 const CONNECTOR_TYPE_LABELS = {
   web: "Web page",
   google_drive: "Google Drive",
@@ -470,10 +480,10 @@ function renderConnectorsTable() {
           }
           <button class="delete-btn" type="button" data-delete-connector-id="${escapeXml(c.id)}">Delete</button>
           ${
-            c.type === "database"
+            CONNECTOR_UPLOAD_TYPES[c.type]
               ? `<br /><label class="upload-csv-label">
-                   Upload CSV
-                   <input type="file" accept=".csv" hidden data-upload-csv-id="${escapeXml(c.id)}" />
+                   ${CONNECTOR_UPLOAD_TYPES[c.type].buttonLabel}
+                   <input type="file" accept="${CONNECTOR_UPLOAD_TYPES[c.type].ext}" hidden data-upload-csv-id="${escapeXml(c.id)}" />
                  </label>`
               : ""
           }
@@ -837,14 +847,18 @@ function updateConnectorUrlVisibility() {
   const type = document.getElementById("connectorType").value;
   document.getElementById("connectorUrlRow").hidden = !CONNECTOR_TYPES_REQUIRING_URL.has(type);
   document.getElementById("connectorUrl").placeholder = CONNECTOR_URL_PLACEHOLDERS[type] || "";
-  // The CSV picker only makes sense for a "database"-type connector -- see
-  // app/api/connectors.py's upload_connector_file, which rejects any other
-  // type. Previously this option was only discoverable *after* creating a
-  // database connector (the upload control lives on its table row) -- easy
-  // to miss if you're looking for "upload a CSV" up front in the form.
-  const showCsv = type === "database";
-  document.getElementById("connectorCsvRow").hidden = !showCsv;
-  document.getElementById("connectorCsvHint").hidden = !showCsv;
+  // The file picker only makes sense for a type with its own upload
+  // endpoint support -- see app/api/connectors.py's upload_connector_file
+  // (CONNECTOR_UPLOAD_TYPES above mirrors its per-type extension check).
+  // Previously "upload a CSV" was only discoverable *after* creating a
+  // database connector (the upload control lived on its table row) -- easy
+  // to miss if you're looking for it up front in the form.
+  const uploadInfo = CONNECTOR_UPLOAD_TYPES[type];
+  document.getElementById("connectorCsvRow").hidden = !uploadInfo;
+  document.getElementById("connectorCsvHint").hidden = !uploadInfo;
+  document.getElementById("connectorCsvHintDatabase").hidden = type !== "database";
+  document.getElementById("connectorCsvHintEmail").hidden = type !== "email";
+  if (uploadInfo) document.getElementById("connectorCsvFile").accept = uploadInfo.ext;
 }
 document.getElementById("connectorType").addEventListener("change", updateConnectorUrlVisibility);
 updateConnectorUrlVisibility();
@@ -889,7 +903,7 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
     document.getElementById("connectorUrl").value = "";
 
     const csvInput = document.getElementById("connectorCsvFile");
-    const csvFiles = type === "database" ? Array.from(csvInput.files || []) : [];
+    const csvFiles = CONNECTOR_UPLOAD_TYPES[type] ? Array.from(csvInput.files || []) : [];
     if (csvFiles.length > 0) {
       statusEl.textContent = `Added. Uploading ${csvFiles.length} file(s)…`;
       statusEl.className = "status-line";

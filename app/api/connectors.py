@@ -55,7 +55,9 @@ _CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
     "web": lambda connector: WebConnector(connector["url"]),
     "database": lambda connector: DatabaseConnector(connector.get("id", "")),
     "documents": lambda connector: DocumentConnector(),
-    "email": lambda connector: EmailConnector(),
+    "email": lambda connector: EmailConnector(
+        connector.get("id", ""), source_label=connector.get("name") or "Email"
+    ),
     "google_drive": lambda connector: GoogleDriveConnector(connector["url"]),
     "google_drive_oauth": lambda connector: GoogleDriveOAuthConnector(
         connector.get("oauth_file_ids") or [], connector["tenant_id"], connector["id"]
@@ -312,11 +314,15 @@ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 async def upload_connector_file(
     connector_id: str, file: UploadFile, request: Request, tenant: TenantConfig = Depends(require_tenant)
 ):
-    """Drops a CSV into this connector's own upload folder (see
-    app/ingestion/database_source.py's DatabaseConnector) -- a plain "Sync
-    now" afterward ingests it, the same as any other connector type. Only
-    for "database"-type connectors today; "documents"/"email" are still the
-    bundled-mock-data placeholders CLAUDE.md's v1 note describes.
+    """Drops a file into this connector's own upload folder (see
+    app/ingestion/database_source.py's DatabaseConnector and
+    app/ingestion/email_source.py's EmailConnector) -- a plain "Sync now"
+    afterward ingests it, the same as any other connector type. "database"
+    accepts a .csv (one file per record type); "email" accepts a .json
+    array export ({from, to, subject, date, body} objects -- what a Gmail/
+    Outlook data export or a small script hitting either API would
+    reasonably produce); every other type is still the bundled-mock-data
+    placeholder CLAUDE.md's v1 note describes.
 
     The uploaded filename never becomes a filesystem path as given -- only
     its basename (Path(...).name, which drops any "../" or directory
@@ -327,15 +333,18 @@ async def upload_connector_file(
     connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
     if connector is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
-    if connector["type"] != "database":
+    allowed_extension = {"database": ".csv", "email": ".json"}.get(connector["type"])
+    if allowed_extension is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File upload is only supported for Database/CRM connectors.",
+            detail="File upload is only supported for Database/CRM and Email connectors.",
         )
 
     filename = Path(file.filename or "").name
-    if not filename or filename in (".", "..") or not filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only a named .csv file is accepted.")
+    if not filename or filename in (".", "..") or not filename.lower().endswith(allowed_extension):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Only a named {allowed_extension} file is accepted."
+        )
 
     body = await file.read(_MAX_UPLOAD_BYTES + 1)
     if len(body) > _MAX_UPLOAD_BYTES:

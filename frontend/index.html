@@ -253,7 +253,7 @@
                         <option value="outlook_mail">Outlook mailbox</option>
                         <option value="database">Database / CRM (upload your own CSVs)</option>
                         <option value="documents">Documents (demo data)</option>
-                        <option value="email">Email inbox (demo data)</option>
+                        <option value="email">Email inbox (upload a JSON export)</option>
                     </select>
                 </div>
                 <div class="row" id="connectorUrlRow">
@@ -263,10 +263,15 @@
                     <input id="connectorCsvFile" type="file" accept=".csv" multiple />
                 </div>
                 <p id="connectorCsvHint" class="muted" style="font-size:0.8rem" hidden>
-                    Select one or more CSVs (one file per record type, e.g. a "customers.csv" and an
-                    "orders.csv") -- each is uploaded right after the connector is created. No CSV?
-                    It starts out reading a small bundled demo dataset instead; you can upload real
-                    files any time later from the connector's own row below.
+                    <span id="connectorCsvHintDatabase">Select one or more CSVs (one file per record type,
+                    e.g. a "customers.csv" and an "orders.csv") -- each is uploaded right after the
+                    connector is created.</span>
+                    <span id="connectorCsvHintEmail" hidden>Select one or more JSON exports (a plain array
+                    of {from, to, subject, date, body} objects, the shape a Gmail/Outlook data export or a
+                    small script hitting either API would produce) -- each is uploaded right after the
+                    connector is created.</span>
+                    Nothing to upload yet? It starts out reading a small bundled demo dataset instead; you
+                    can upload real files any time later from the connector's own row below.
                 </p>
                 <div class="row">
                     <select id="connectorKbSelect" class="kb-select connector-kb-select"></select>
