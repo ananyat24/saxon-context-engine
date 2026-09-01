@@ -31,7 +31,7 @@ def ensure_connector_indexes(repo: Optional[GraphRepository] = None) -> None:
 
 _FIELDS = (
     "id, tenant_id, name, type, group_id, url, status, last_synced_at, "
-    "last_error, content_hash, source_authority"
+    "last_error, content_hash, source_authority, oauth_file_ids"
 )
 # Real-time push (see app/ingestion/graph_subscriptions.py, app/api/webhooks.py)
 # -- kept as separate optional fields rather than folded into _FIELDS above
@@ -118,6 +118,96 @@ def create_connector(
         "group_id": group_id, "url": url, "status": "never_synced", "last_synced_at": None,
         "last_error": None, "content_hash": None, "source_authority": source_authority,
     }
+
+
+def create_oauth_pending_connector(
+    tenant_id: str,
+    name: str,
+    group_id: str,
+    oauth_refresh_token_enc: str,
+    repo: Optional[GraphRepository] = None,
+) -> dict:
+    """Creates a "google_drive_oauth" connector immediately after the OAuth
+    code exchange succeeds (see app/api/connectors.py's oauth/exchange
+    route), before the user has actually picked which files to read --
+    status 'authorized_needs_files' distinguishes this from every other
+    connector's 'never_synced', so the frontend knows to resume the picker
+    rather than offer "Sync now" on a connector with nothing to sync yet.
+    oauth_refresh_token_enc must already be Fernet-encrypted (see
+    app/graph/token_crypto.py) -- this function stores exactly what it's
+    given, it doesn't encrypt on your behalf."""
+    repo = repo or GraphRepository()
+    connector_id = str(uuid.uuid4())
+    repo.execute_cypher(
+        """
+        CREATE (c:Connector {
+            id: $id, tenant_id: $tenant_id, name: $name, type: 'google_drive_oauth',
+            group_id: $group_id, url: null, status: 'authorized_needs_files',
+            last_synced_at: null, last_error: null, content_hash: null,
+            source_authority: 0, oauth_file_ids: [],
+            oauth_refresh_token_enc: $oauth_refresh_token_enc, created_at: datetime()
+        })
+        """,
+        {
+            "id": connector_id,
+            "tenant_id": tenant_id,
+            "name": name,
+            "group_id": group_id,
+            "oauth_refresh_token_enc": oauth_refresh_token_enc,
+        },
+    )
+    return {
+        "id": connector_id, "tenant_id": tenant_id, "name": name, "type": "google_drive_oauth",
+        "group_id": group_id, "url": None, "status": "authorized_needs_files", "last_synced_at": None,
+        "last_error": None, "content_hash": None, "source_authority": 0, "oauth_file_ids": [],
+    }
+
+
+def finalize_oauth_files(
+    tenant_id: str,
+    connector_id: str,
+    file_ids: list[str],
+    description: str,
+    repo: Optional[GraphRepository] = None,
+) -> bool:
+    """Called once the user has picked files in the Google Picker (see
+    app/api/connectors.py's oauth/files route) -- moves the connector out
+    of 'authorized_needs_files' and into the normal 'never_synced' state
+    every other connector starts in, so from here on it's indistinguishable
+    from any other connector type to the sync path. Only ever moves a
+    connector OUT of 'authorized_needs_files', never re-targets an
+    already-active one -- picking files again means reconnecting (see that
+    route's own docstring for why). Returns False if no matching pending
+    connector was found (wrong tenant, wrong id, or already finalized),
+    so the caller can 404/409 instead of silently no-op'ing."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        """
+        MATCH (c:Connector {id: $id, tenant_id: $tenant_id, type: 'google_drive_oauth',
+                             status: 'authorized_needs_files'})
+        SET c.oauth_file_ids = $file_ids, c.url = $description, c.status = 'never_synced'
+        RETURN count(c) AS updated
+        """,
+        {"id": connector_id, "tenant_id": tenant_id, "file_ids": file_ids, "description": description},
+    )
+    return bool(rows) and rows[0]["updated"] > 0
+
+
+def get_oauth_refresh_token(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> Optional[str]:
+    """Returns the connector's still-encrypted refresh token (see
+    app/graph/token_crypto.py for decrypting it) -- deliberately a separate
+    query from get_connector()/list_connectors() above rather than a field
+    in _FIELDS, so a live credential never flows through the same code path
+    that builds an HTTP API response, even by accident in a future change
+    to _serialize()."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) RETURN c.oauth_refresh_token_enc AS token",
+        {"id": connector_id, "tenant_id": tenant_id},
+    )
+    if not rows:
+        return None
+    return rows[0]["token"]
 
 
 def authority_by_group_id(tenant_id: str, repo: Optional[GraphRepository] = None) -> dict[str, int]:

@@ -342,16 +342,19 @@ async function deleteDocumentSet(id) {
 let connectorDirectory = [];
 
 function renderConnectorKbSelect() {
-  const select = document.getElementById("connectorKbSelect");
-  select.innerHTML = knowledgeBaseDirectory
-    .map((kb) => `<option value="${escapeXml(kb.id)}">${escapeXml(kb.label)}</option>`)
-    .join("");
-  // Default a new connector to whichever knowledge base is currently
-  // selected, rather than always defaulting to the first option -- still
-  // changeable, just a sensible starting point for "add one below" right
-  // after seeing this knowledge base has none.
-  const current = getSelectedKnowledgeBase();
-  if (current) select.value = current;
+  ["connectorKbSelect", "oauthConnectKbSelect"].forEach((id) => {
+    const select = document.getElementById(id);
+    if (!select) return;
+    select.innerHTML = knowledgeBaseDirectory
+      .map((kb) => `<option value="${escapeXml(kb.id)}">${escapeXml(kb.label)}</option>`)
+      .join("");
+    // Default a new connector to whichever knowledge base is currently
+    // selected, rather than always defaulting to the first option -- still
+    // changeable, just a sensible starting point for "add one below" right
+    // after seeing this knowledge base has none.
+    const current = getSelectedKnowledgeBase();
+    if (current) select.value = current;
+  });
 }
 
 function formatSyncStatus(c) {
@@ -362,6 +365,9 @@ function formatSyncStatus(c) {
   // background scheduler may have stopped running for it.
   if (c.status === "queued") {
     return `<span class="badge badge-neutral" title="Accepted and waiting for a worker to pick it up -- see app/graph/ingestion_queue.py.">Queued…</span>`;
+  }
+  if (c.health === "authorized_needs_files") {
+    return `<span class="badge badge-warn" title="Signed in, but no files were picked yet -- click Finish connecting.">Needs files</span>`;
   }
   if (c.health === "stale") {
     return `<span class="badge badge-warn" title="Hasn't synced successfully in a while -- check that background syncing is still running for this connector.">Stale</span>`;
@@ -388,6 +394,7 @@ function formatSyncStatus(c) {
 const CONNECTOR_TYPE_LABELS = {
   web: "Web page",
   google_drive: "Google Drive",
+  google_drive_oauth: "Google Drive (connected)",
   sharepoint: "SharePoint",
   gmail: "Gmail",
   outlook_mail: "Outlook mail",
@@ -456,7 +463,11 @@ function renderConnectorsTable() {
         <td>${formatSyncStatus(c)}</td>
         <td><span class="muted" style="font-size:0.8rem">${escapeXml(lastSynced)}</span></td>
         <td>
-          <button class="sync-btn" type="button" data-sync-id="${escapeXml(c.id)}">Sync now</button>
+          ${
+            c.health === "authorized_needs_files"
+              ? `<button class="sync-btn" type="button" data-finish-drive-connect-id="${escapeXml(c.id)}">Finish connecting</button>`
+              : `<button class="sync-btn" type="button" data-sync-id="${escapeXml(c.id)}">Sync now</button>`
+          }
           <button class="delete-btn" type="button" data-delete-connector-id="${escapeXml(c.id)}">Delete</button>
           ${
             c.type === "database"
@@ -475,6 +486,9 @@ function renderConnectorsTable() {
   });
   body.querySelectorAll("[data-sync-id]").forEach((btn) => {
     btn.addEventListener("click", () => syncConnector(btn.dataset.syncId));
+  });
+  body.querySelectorAll("[data-finish-drive-connect-id]").forEach((btn) => {
+    btn.addEventListener("click", () => resumeGoogleDrivePicker(btn.dataset.finishDriveConnectId));
   });
   body.querySelectorAll("[data-sync-error-id]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -583,10 +597,189 @@ async function loadConnectors() {
     card.hidden = false;
     renderConnectorKbSelect();
     renderConnectorsTable();
+    loadOAuthProviders(); // independent of the connector list itself; doesn't block rendering it
   } catch (err) {
     card.hidden = true;
   }
 }
+
+// --- Google Drive one-click connect -----------------------------------------
+// See app/api/connectors.py's oauth/exchange + oauth/files routes and
+// app/ingestion/google_drive_source.py's GoogleDriveOAuthConnector. Three
+// steps, feeling like one click: (1) Google's own consent popup (Identity
+// Services), (2) trade the resulting code for tokens server-side, get back a
+// short-lived access token, (3) open the Google Picker with that token so the
+// user picks exactly which files to share -- no folder-sharing step, no admin.
+let googleOAuthClientId = null;
+let googlePickerLoading = null;
+
+async function loadOAuthProviders() {
+  try {
+    const res = await fetch(`${API}/connectors/oauth/providers`, { headers: authHeaders() });
+    if (!res.ok) return;
+    const body = await res.json();
+    const drive = body.google_drive || {};
+    googleOAuthClientId = drive.available ? drive.client_id : null;
+    document.getElementById("oauthConnectRow").hidden = !drive.available;
+    document.getElementById("oauthConnectHint").hidden = !drive.available;
+  } catch (err) {
+    // Leave the connect row hidden -- same as "not configured".
+  }
+}
+
+function ensureGooglePickerLoaded() {
+  if (googlePickerLoading) return googlePickerLoading;
+  googlePickerLoading = new Promise((resolve, reject) => {
+    if (typeof gapi === "undefined") {
+      reject(new Error("Google's Picker script hasn't loaded yet -- check your connection and try again."));
+      return;
+    }
+    gapi.load("picker", { callback: resolve, onerror: () => reject(new Error("Could not load Google Picker.")) });
+  });
+  return googlePickerLoading;
+}
+
+function setOAuthConnectStatus(text, cls) {
+  const el = document.getElementById("oauthConnectStatus");
+  el.textContent = text;
+  el.className = `status-line${cls ? " " + cls : ""}`;
+}
+
+// Opens the Picker restricted to individual file selection (no folders --
+// see google_drive_source.py's module docstring for why: the drive.file
+// scope this app requests doesn't grant access to a folder's contents, only
+// to files the user explicitly opens/picks one at a time).
+function openGoogleDrivePicker(accessToken) {
+  return new Promise((resolve) => {
+    const view = new google.picker.DocsView()
+      .setIncludeFolders(false)
+      .setSelectFolderEnabled(false)
+      .setMode(google.picker.DocsViewMode.LIST);
+    const picker = new google.picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(accessToken)
+      .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+      .setCallback((data) => {
+        if (data.action === google.picker.Action.PICKED) {
+          resolve({
+            picked: true,
+            fileIds: data.docs.map((d) => d.id),
+            fileNames: data.docs.map((d) => d.name),
+          });
+        } else if (data.action === google.picker.Action.CANCEL) {
+          resolve({ picked: false });
+        }
+      })
+      .build();
+    picker.setVisible(true);
+  });
+}
+
+async function finishGoogleDriveFileSelection(connectorId, accessToken) {
+  let result;
+  try {
+    await ensureGooglePickerLoaded();
+    result = await openGoogleDrivePicker(accessToken);
+  } catch (err) {
+    setOAuthConnectStatus(`Error: ${err.message}`, "bad");
+    return;
+  }
+  if (!result.picked) {
+    // No files chosen -- don't leave a half-connected, unused Google grant
+    // sitting around (holding a live OAuth grant nobody's using is exactly
+    // the kind of thing worth cleaning up automatically, not leaving for
+    // someone to notice later). This also revokes it at Google's end (see
+    // the DELETE route).
+    setOAuthConnectStatus("Cancelled -- disconnecting…", "");
+    await deleteConnector(connectorId);
+    setOAuthConnectStatus("", "");
+    return;
+  }
+  setOAuthConnectStatus("Finishing…", "");
+  try {
+    const res = await fetch(`${API}/connectors/${encodeURIComponent(connectorId)}/oauth/files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ file_ids: result.fileIds, file_names: result.fileNames }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setOAuthConnectStatus(body.detail || "Could not finish connecting.", "bad");
+      return;
+    }
+    setOAuthConnectStatus(`Connected -- pulling in ${result.fileIds.length} file(s)…`, "ok");
+  } catch (err) {
+    setOAuthConnectStatus(`Error: ${err.message}`, "bad");
+  }
+  await loadConnectors();
+}
+
+// Resumes a connector left in "authorized_needs_files" (the consent step
+// finished, but the file picker never did -- e.g. the tab was closed) --
+// mints a fresh access token from the already-stored refresh token instead
+// of asking the user to sign into Google again.
+async function resumeGoogleDrivePicker(connectorId) {
+  setOAuthConnectStatus("Reopening file picker…", "");
+  try {
+    const res = await fetch(`${API}/connectors/${encodeURIComponent(connectorId)}/oauth/access-token`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setOAuthConnectStatus(body.detail || "Could not resume this connection.", "bad");
+      return;
+    }
+    const { access_token } = await res.json();
+    await finishGoogleDriveFileSelection(connectorId, access_token);
+  } catch (err) {
+    setOAuthConnectStatus(`Error: ${err.message}`, "bad");
+  }
+}
+
+document.getElementById("connectGoogleDriveBtn").addEventListener("click", () => {
+  if (!googleOAuthClientId || typeof google === "undefined" || !google.accounts?.oauth2) {
+    setOAuthConnectStatus("Google sign-in hasn't finished loading yet -- try again in a moment.", "bad");
+    return;
+  }
+  const groupId = document.getElementById("oauthConnectKbSelect").value;
+  const kbLabel = knowledgeBaseDirectory.find((kb) => kb.id === groupId)?.label || groupId;
+  const btn = document.getElementById("connectGoogleDriveBtn");
+  btn.disabled = true;
+  setOAuthConnectStatus("Opening Google sign-in…", "");
+
+  const client = google.accounts.oauth2.initCodeClient({
+    client_id: googleOAuthClientId,
+    scope: "https://www.googleapis.com/auth/drive.file",
+    ux_mode: "popup",
+    callback: async (response) => {
+      btn.disabled = false;
+      if (!response.code) {
+        setOAuthConnectStatus("Sign-in was cancelled.", "");
+        return;
+      }
+      setOAuthConnectStatus("Connecting…", "");
+      try {
+        const res = await fetch(`${API}/connectors/google/oauth/exchange`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ name: `Google Drive (${kbLabel})`, group_id: groupId, code: response.code }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setOAuthConnectStatus(body.detail || "Could not connect Google Drive.", "bad");
+          return;
+        }
+        const created = await res.json();
+        await loadConnectors();
+        setOAuthConnectStatus("Signed in -- pick the files to bring in…", "");
+        await finishGoogleDriveFileSelection(created.id, created.access_token);
+      } catch (err) {
+        setOAuthConnectStatus(`Error: ${err.message}`, "bad");
+      }
+    },
+  });
+  client.requestCode();
+});
 
 // Types that need a tenant-supplied address -- kept in sync with
 // app/api/connectors.py's own _TYPES_REQUIRING_URL. The demo data types
@@ -605,6 +798,14 @@ function updateConnectorUrlVisibility() {
   const type = document.getElementById("connectorType").value;
   document.getElementById("connectorUrlRow").hidden = !CONNECTOR_TYPES_REQUIRING_URL.has(type);
   document.getElementById("connectorUrl").placeholder = CONNECTOR_URL_PLACEHOLDERS[type] || "";
+  // The CSV picker only makes sense for a "database"-type connector -- see
+  // app/api/connectors.py's upload_connector_file, which rejects any other
+  // type. Previously this option was only discoverable *after* creating a
+  // database connector (the upload control lives on its table row) -- easy
+  // to miss if you're looking for "upload a CSV" up front in the form.
+  const showCsv = type === "database";
+  document.getElementById("connectorCsvRow").hidden = !showCsv;
+  document.getElementById("connectorCsvHint").hidden = !showCsv;
 }
 document.getElementById("connectorType").addEventListener("change", updateConnectorUrlVisibility);
 updateConnectorUrlVisibility();
@@ -644,10 +845,26 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
       statusEl.className = "status-line bad";
       return;
     }
+    const created = await res.json();
     document.getElementById("connectorName").value = "";
     document.getElementById("connectorUrl").value = "";
-    statusEl.textContent = "Added. Click \"Sync now\" on it below to pull its content in.";
-    statusEl.className = "status-line ok";
+
+    const csvInput = document.getElementById("connectorCsvFile");
+    const csvFiles = type === "database" ? Array.from(csvInput.files || []) : [];
+    if (csvFiles.length > 0) {
+      statusEl.textContent = `Added. Uploading ${csvFiles.length} file(s)…`;
+      statusEl.className = "status-line";
+      await loadConnectors(); // the row has to exist before uploadConnectorCsv can find it
+      for (const file of csvFiles) {
+        await uploadConnectorCsv(created.id, file);
+      }
+      csvInput.value = "";
+      statusEl.textContent = 'Added and uploaded. Click "Sync now" on it below to pull its content in.';
+      statusEl.className = "status-line ok";
+    } else {
+      statusEl.textContent = "Added. Click \"Sync now\" on it below to pull its content in.";
+      statusEl.className = "status-line ok";
+    }
     await loadConnectors();
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;

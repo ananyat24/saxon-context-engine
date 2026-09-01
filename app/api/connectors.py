@@ -14,19 +14,26 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
+from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from app.config import TenantConfig, settings
 from app.graph import connectors
 from app.graph.graph_repository import GraphRepository
+from app.graph.token_crypto import TokenEncryptionNotConfigured, decrypt_token, encrypt_token
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector
 from app.ingestion.connector_sync import run_connector_sync
 from app.ingestion.database_source import DatabaseConnector, connector_upload_dir
 from app.ingestion.document_source import DocumentConnector
 from app.ingestion.email_source import EmailConnector
 from app.ingestion.gmail_source import GmailConnector
-from app.ingestion.google_drive_source import GoogleDriveConnector
+# Reused as the Picker's own selection cap (GoogleOAuthFilesRequest below) --
+# picking more than google_drive_source.py will actually read per sync would
+# just be silently ignored later, so it's rejected up front with a clear reason.
+from app.ingestion.google_drive_source import _MAX_FILES as _MAX_FILES_PER_OAUTH_CONNECTOR
+from app.ingestion.google_drive_source import GoogleDriveConnector, GoogleDriveOAuthConnector
+from app.ingestion.google_oauth import exchange_code, refresh_access_token, revoke_token
 from app.ingestion.outlook_mail_source import OutlookMailConnector
 from app.ingestion.sharepoint_source import SharePointConnector
 from app.ingestion.web_source import WebConnector
@@ -50,6 +57,9 @@ _CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
     "documents": lambda connector: DocumentConnector(),
     "email": lambda connector: EmailConnector(),
     "google_drive": lambda connector: GoogleDriveConnector(connector["url"]),
+    "google_drive_oauth": lambda connector: GoogleDriveOAuthConnector(
+        connector.get("oauth_file_ids") or [], connector["tenant_id"], connector["id"]
+    ),
     "sharepoint": lambda connector: SharePointConnector(connector["url"]),
     "gmail": lambda connector: GmailConnector(connector["url"]),
     "outlook_mail": lambda connector: OutlookMailConnector(connector["url"]),
@@ -58,7 +68,19 @@ _CONNECTOR_FACTORIES: dict[str, Callable[[dict], SourceConnector]] = {
 # Which types read from a tenant-supplied address (a URL/site link/mailbox)
 # vs. a fixed bundled sample with nothing to collect (see _CONNECTOR_FACTORIES
 # above) or an operator-wide credential with no per-connector address at all.
+# "google_drive_oauth" isn't here either -- it's never created through the
+# generic POST /connectors route below at all (see _OAUTH_ONLY_TYPES), so it
+# has no "supply a URL up front" step to require.
 _TYPES_REQUIRING_URL = {"web", "google_drive", "sharepoint", "gmail", "outlook_mail"}
+
+# Created only via the dedicated OAuth connect flow (oauth/exchange +
+# oauth/files below), never via the generic "New source connector" form --
+# there's no URL/credential for a tenant to type in, the whole point is that
+# the consent popup + file picker replace that. Rejected explicitly in the
+# generic create route with a message pointing at the real flow, rather than
+# just failing _TYPES_REQUIRING_URL's "needs a URL" check with a confusing
+# error.
+_OAUTH_ONLY_TYPES = {"google_drive_oauth"}
 
 # Real live connector types need an operator-wide credential configured
 # before a tenant can even create one -- checked here so that's a clear 400
@@ -71,6 +93,9 @@ _TYPES_REQUIRING_URL = {"web", "google_drive", "sharepoint", "gmail", "outlook_m
 # shared credential can't be checked from here, only at sync time.
 _OPERATOR_CONFIG_CHECKS: dict[str, Callable[[], bool]] = {
     "google_drive": lambda: bool(settings.google_drive_service_account_json),
+    "google_drive_oauth": lambda: bool(
+        settings.google_oauth_client_id and settings.google_oauth_client_secret and settings.token_encryption_key
+    ),
     "gmail": lambda: bool(settings.google_drive_service_account_json),
     "sharepoint": lambda: bool(
         settings.sharepoint_tenant_id and settings.sharepoint_client_id and settings.sharepoint_client_secret
@@ -106,9 +131,17 @@ _STALE_AFTER_INTERVAL_MULTIPLE = 3
 
 
 def _connector_health(c: dict) -> str:
-    """"error" | "never_synced" | "queued" | "stale" | "ok" -- a coarse
-    freshness signal computed server-side so the staleness threshold lives
-    in one place rather than being duplicated in the frontend."""
+    """"error" | "never_synced" | "queued" | "stale" | "ok" |
+    "authorized_needs_files" -- a coarse freshness signal computed
+    server-side so the staleness threshold lives in one place rather than
+    being duplicated in the frontend."""
+    if c["status"] == "authorized_needs_files":
+        # A google_drive_oauth connector whose consent popup succeeded but
+        # whose file picker was never finished (closed early, or the tab
+        # was closed) -- distinct from "never_synced" so the frontend can
+        # offer "finish connecting" instead of a "Sync now" that has
+        # nothing to sync yet.
+        return "authorized_needs_files"
     if c["status"] == "error":
         return "error"
     if c["status"] == "queued":
@@ -129,6 +162,12 @@ def _connector_health(c: dict) -> str:
 
 
 def _serialize(c: dict) -> dict:
+    # Deliberately never includes oauth_refresh_token_enc or the raw
+    # oauth_file_ids list -- see app/graph/connectors.py's
+    # get_oauth_refresh_token docstring for why the encrypted token has its
+    # own query path instead of living in _FIELDS at all. file_ids aren't
+    # secret, just not needed by the UI once picked (the connector's own
+    # name/status already reflect them).
     return {
         "id": c["id"],
         "name": c["name"],
@@ -190,6 +229,11 @@ async def create_connector(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported connector type '{req.type}'. Supported: {', '.join(sorted(_CONNECTOR_FACTORIES))}.",
         )
+    if req.type in _OAUTH_ONLY_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{req.type}' connectors are created by clicking its \"Connect\" button, not this form.",
+        )
     if req.group_id not in tenant.knowledge_base_ids():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -239,6 +283,22 @@ async def delete_connector(connector_id: str, request: Request, tenant: TenantCo
         from app.ingestion.graph_subscriptions import delete_subscription
 
         await delete_subscription(connector["push_subscription_id"])
+    if connector["type"] == "google_drive_oauth":
+        # Deleting the connector here should also mean "and Saxon can no
+        # longer read anything in your Drive" at Google's end, not just
+        # "Saxon stopped keeping its own pointer to it" -- otherwise the
+        # grant would sit live in the user's Google Account forever with
+        # nothing in this app referencing it. Best-effort: an unreachable
+        # or already-invalid token shouldn't block deleting the connector
+        # itself (see revoke_token's own docstring).
+        encrypted = connectors.get_oauth_refresh_token(tenant.tenant_id, connector_id, repo=repo)
+        if encrypted:
+            try:
+                await revoke_token(decrypt_token(encrypted))
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    f"Could not revoke Google Drive grant for connector '{connector_id}' ({tenant.tenant_id}): {e}"
+                )
     connectors.delete_connector(tenant.tenant_id, connector_id, repo=repo)
 
 
@@ -312,10 +372,19 @@ async def sync_connector(connector_id: str, request: Request, tenant: TenantConf
     if connector is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
 
-    # _CONNECTOR_FACTORIES is the one dispatch point -- every type from here
-    # down is handled generically via the SourceConnector interface.
+    await _enqueue_sync(tenant, connector, request, repo)
+    return {"queued": True}
+
+
+async def _enqueue_sync(tenant: TenantConfig, connector: dict, request: Request, repo: GraphRepository) -> None:
+    """The actual "accept this connector's sync onto the ingestion queue"
+    logic -- shared by the manual /sync route above and the OAuth
+    oauth/files route below, which also wants to kick off a first sync the
+    moment a user finishes picking files, without duplicating the queue
+    plumbing. _CONNECTOR_FACTORIES is the one dispatch point -- every type
+    from here down is handled generically via the SourceConnector interface."""
     factory = _CONNECTOR_FACTORIES[connector["type"]]
-    connectors.mark_sync_queued(tenant.tenant_id, connector_id, repo=repo)
+    connectors.mark_sync_queued(tenant.tenant_id, connector["id"], repo=repo)
 
     async def _job() -> None:
         # A fresh GraphRepository, not the request-scoped `repo` above --
@@ -325,4 +394,153 @@ async def sync_connector(connector_id: str, request: Request, tenant: TenantConf
         await run_connector_sync(tenant, connector, factory, repo=GraphRepository(neo4j_client=request.app.state.neo4j_client))
 
     await request.app.state.ingestion_queue.enqueue(_job)
-    return {"queued": True}
+
+
+# --- Google Drive one-click connect (see app/ingestion/google_oauth.py and
+# app/ingestion/google_drive_source.py's GoogleDriveOAuthConnector) ---------
+
+
+class GoogleOAuthExchangeRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    group_id: str
+    # The one-time authorization code from the browser's Google Identity
+    # Services popup (see frontend/app.js) -- never a token of any kind
+    # itself, so there's nothing sensitive in this request body beyond what
+    # the browser already had to send Google to get it.
+    code: str = Field(min_length=1, max_length=2000)
+
+
+class GoogleOAuthFilesRequest(BaseModel):
+    # What the user picked in the Google Picker -- file ids only carry
+    # meaning inside that one Drive account's own OAuth grant, not a secret
+    # on their own.
+    file_ids: list[str] = Field(min_length=1, max_length=_MAX_FILES_PER_OAUTH_CONNECTOR)
+    file_names: list[str] = Field(default_factory=list, max_length=_MAX_FILES_PER_OAUTH_CONNECTOR)
+
+
+@router.get("/oauth/providers")
+def oauth_providers(tenant: TenantConfig = Depends(require_tenant)):
+    """Tells the frontend whether the one-click Drive button should even be
+    shown, and hands it the OAuth client id it needs to launch Google's
+    consent popup -- a client id is meant to be public (it identifies the
+    app, not a secret; see Google's own OAuth docs), unlike client_secret,
+    which never leaves this module."""
+    available = bool(settings.google_oauth_client_id and settings.google_oauth_client_secret and settings.token_encryption_key)
+    return {
+        "google_drive": {
+            "available": available,
+            "client_id": settings.google_oauth_client_id if available else None,
+        }
+    }
+
+
+@router.post("/google/oauth/exchange", status_code=status.HTTP_201_CREATED)
+async def google_oauth_exchange(
+    req: GoogleOAuthExchangeRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)
+):
+    """Step 1 of the one-click connect: the browser already ran Google's
+    consent popup and got back a one-time authorization code (see
+    frontend/app.js) -- this trades it server-side for real tokens, stores
+    the refresh token encrypted, and creates the connector in
+    'authorized_needs_files' state. Returns a short-lived access_token
+    too, but only so the *same* browser can open the Google Picker
+    immediately afterward (step 2, oauth/files below) -- it's handed back
+    once, never persisted or logged, and expires on its own within the
+    hour even if the picker step is never finished."""
+    if not _OPERATOR_CONFIG_CHECKS["google_drive_oauth"]():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google Drive one-click connect isn't configured on this server yet.",
+        )
+    if req.group_id not in tenant.knowledge_base_ids():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown knowledge base '{req.group_id}' for this tenant.",
+        )
+
+    try:
+        tokens = await exchange_code(req.code)
+    except ConnectorFetchError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    try:
+        encrypted_refresh_token = encrypt_token(tokens["refresh_token"])
+    except TokenEncryptionNotConfigured as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    created = connectors.create_oauth_pending_connector(
+        tenant.tenant_id, req.name.strip(), req.group_id, encrypted_refresh_token, repo=repo
+    )
+    return {**_serialize(created), "access_token": tokens["access_token"]}
+
+
+@router.get("/{connector_id}/oauth/access-token")
+async def google_oauth_resume_access_token(
+    connector_id: str, request: Request, tenant: TenantConfig = Depends(require_tenant)
+):
+    """Lets the frontend resume a connect flow that was interrupted before
+    the Picker step finished (the browser tab closed, the popup was
+    dismissed) without asking the user to sign into Google again -- mints a
+    fresh, short-lived access token from the refresh token already stored
+    from step 1. Only works while the connector is still
+    'authorized_needs_files'; once files are picked, re-picking means
+    reconnecting from scratch (see finalize_oauth_files's own docstring),
+    so this deliberately doesn't offer a "change my files" path for an
+    already-active connector."""
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
+    if connector is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
+    if connector["type"] != "google_drive_oauth" or connector["status"] != "authorized_needs_files":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This connector isn't awaiting file selection.",
+        )
+    encrypted = connectors.get_oauth_refresh_token(tenant.tenant_id, connector_id, repo=repo)
+    if not encrypted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No stored Drive connection found.")
+    try:
+        refresh_token = decrypt_token(encrypted)
+    except TokenEncryptionNotConfigured as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except InvalidToken:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This Drive connection can't be decrypted -- delete it and connect again.",
+        )
+    try:
+        access_token = await refresh_access_token(refresh_token)
+    except ConnectorFetchError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"access_token": access_token}
+
+
+@router.post("/{connector_id}/oauth/files", status_code=status.HTTP_200_OK)
+async def google_oauth_finalize_files(
+    connector_id: str, req: GoogleOAuthFilesRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)
+):
+    """Step 2: the user picked files in the Google Picker (see
+    frontend/app.js) -- records which ones, flips the connector out of
+    'authorized_needs_files', and immediately queues its first sync so
+    "Connect Google Drive" feels like one action rather than two."""
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
+    if connector is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Connector not found.")
+    if connector["type"] != "google_drive_oauth":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a Google Drive connect-flow connector.")
+
+    names = req.file_names or [f"file {i + 1}" for i in range(len(req.file_ids))]
+    description = f"Google Drive ({', '.join(names[:5])}{', …' if len(names) > 5 else ''})"
+    updated = connectors.finalize_oauth_files(tenant.tenant_id, connector_id, req.file_ids, description, repo=repo)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This connection has already been finished or wasn't awaiting file selection. "
+            "Reconnect Google Drive to pick files again.",
+        )
+
+    connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
+    await _enqueue_sync(tenant, connector, request, repo)
+    return _serialize(connector)

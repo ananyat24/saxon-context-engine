@@ -20,6 +20,9 @@ dependencies = [
     "pypdf>=5.0.0",
     "python-docx>=1.1.0",
     "apscheduler>=3.10.0",
+    # Encrypts OAuth refresh tokens at rest for the "google_drive_oauth"
+    # connector type -- see app/graph/token_crypto.py.
+    "cryptography>=42.0.0",
 ]
 
 [tool.pytest.ini_options]

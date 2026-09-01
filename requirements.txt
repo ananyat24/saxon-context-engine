@@ -21,6 +21,10 @@ pypdf
 python-docx
 # Runs periodic connector syncs in-process -- see app/graph/connector_scheduler.py.
 apscheduler
+# Encrypts OAuth refresh tokens at rest for the "google_drive_oauth"
+# connector type (the one-click "Connect Google Drive" button) -- see
+# app/graph/token_crypto.py.
+cryptography
 # Official MCP Python SDK -- app/mcp/server.py exposes the context graph as
 # MCP tools, mounted into this same FastAPI app/process. Pinned to the 2.x
 # line (FastMCP was renamed to MCPServer in 2.0 -- see

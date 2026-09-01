@@ -246,6 +246,41 @@ class Settings(BaseSettings):
     sharepoint_client_id: str = ""
     sharepoint_client_secret: str = ""
 
+    # OAuth client for the "google_drive_oauth" connector type (see
+    # app/ingestion/google_drive_source.py's GoogleDriveOAuthConnector) --
+    # the one-click "Connect Google Drive" button, as opposed to the
+    # operator-configured service account above. This is a real, separate
+    # per-user OAuth consent flow: each connector authorizes as whichever
+    # Google account clicked "Connect", scoped to drive.file (Google's
+    # narrowest Drive scope -- the app can only ever read files that user
+    # explicitly picked via the Google Picker, nothing else in their Drive,
+    # and it needs no Google app-verification/security-audit process,
+    # unlike the broader drive.readonly scope). client_id is not a secret
+    # (the frontend embeds it directly to launch Google's own consent
+    # popup, via GET /api/v1/connectors/oauth/providers) -- client_secret
+    # is, and never leaves this server. Get both from Google Cloud Console
+    # -> APIs & Services -> Credentials -> Create Credentials -> OAuth
+    # client ID -> Web application (Authorized JavaScript origin: this
+    # deployment's own URL; no redirect URI needed -- the exchange uses
+    # Google Identity Services' postMessage code flow, not a server
+    # redirect). Leave either blank to disable the connector type.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+
+    # Symmetric key (Fernet, url-safe base64, 32 bytes) this server uses to
+    # encrypt every OAuth refresh token before it's written to Neo4j (see
+    # app/graph/token_crypto.py) -- a Drive refresh token is a live
+    # credential that can read a real person's files, so it's never stored
+    # in plaintext, the same way this app would never log or store a
+    # tenant's own API key in plaintext. Required for "google_drive_oauth"
+    # to be offered at all -- there's no plaintext fallback. Generate one:
+    # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    # Rotating this key invalidates every already-stored refresh token
+    # (those connectors will need to be reconnected) -- there's no
+    # re-encryption migration today, since this is a new, low-volume
+    # credential store.
+    token_encryption_key: str = ""
+
     # This deployment's own public HTTPS URL (no trailing slash), e.g.
     # "https://saxon-context-engine.example.azurecontainerapps.io" -- used
     # to build the notificationUrl a Microsoft Graph push subscription

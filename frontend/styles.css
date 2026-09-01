@@ -280,6 +280,32 @@ input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent)
 }
 .btn-outline[hidden] { display: none; }
 
+.oauth-connect-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0.9rem 0 0.3rem;
+}
+.oauth-connect-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: #fff;
+  color: #3c4043;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: box-shadow 0.15s, background 0.15s;
+}
+.oauth-connect-btn:hover { box-shadow: 0 1px 4px rgba(0,0,0,0.18); }
+.oauth-connect-btn:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
+.oauth-connect-row .connector-kb-select { max-width: 220px; }
+
 .status-line { margin-top: 0.5rem; font-size: 0.85rem; }
 .status-line.ok { color: var(--status-normal); }
 .status-line.bad { color: var(--status-critical); }
