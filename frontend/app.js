@@ -598,8 +598,30 @@ async function loadConnectors() {
     renderConnectorKbSelect();
     renderConnectorsTable();
     loadOAuthProviders(); // independent of the connector list itself; doesn't block rendering it
+    pollWhileConnectorsAreBusy();
   } catch (err) {
     card.hidden = true;
+  }
+}
+
+// A sync accepted onto the background ingestion queue (see
+// app/graph/ingestion_queue.py) really does finish on its own -- usually
+// within a minute, since it's running real extraction/embedding calls --
+// but nothing was re-checking this list after the initial "queued"
+// response, so the row just sat on "Queued…" until something else
+// happened to reload it (switching knowledge bases, clicking another
+// button). Not stuck, just never re-checked. This polls every few seconds
+// for as long as anything here is still "queued", and stops itself once
+// nothing is -- so idle viewing costs nothing.
+let connectorsPollTimer = null;
+
+function pollWhileConnectorsAreBusy() {
+  const stillBusy = connectorDirectory.some((c) => c.status === "queued");
+  if (stillBusy && !connectorsPollTimer) {
+    connectorsPollTimer = setInterval(loadConnectors, 4000);
+  } else if (!stillBusy && connectorsPollTimer) {
+    clearInterval(connectorsPollTimer);
+    connectorsPollTimer = null;
   }
 }
 
