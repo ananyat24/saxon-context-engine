@@ -212,7 +212,8 @@ ExecuteCypher = Callable[[str, Optional[dict[str, Any]]], list[dict[str, Any]]]
 
 
 def match_entities_by_name(
-    execute_cypher: ExecuteCypher, name: str, group_ids: list[str]
+    execute_cypher: ExecuteCypher, name: str, group_ids: list[str],
+    restrict_to_named_entities: bool = False,
 ) -> list[dict[str, Any]]:
     """Matches `name` against real node names across every connector in
     group_ids -- a multi-connector document set (see
@@ -259,6 +260,33 @@ def match_entities_by_name(
     # tier compares the raw candidate, and the final CONTAINS fallback
     # (below) also used the raw, un-normalized `name` unchanged.
     name = _POSSESSIVE_RE.sub("", name)
+    # `restrict_to_named_entities` (set only for a lowercase single-word
+    # candidate -- see resolve_named_entities) additionally excludes
+    # Task/Event/Activity/Process/Transaction/Interaction/Observation-typed
+    # nodes from the two CONTAINS-based tiers below. Those ontology types
+    # (ontology/core.yaml) get auto-generated, sentence-shaped names
+    # describing an action ("expedited qualification lot", "Reviewed Q3
+    # supplier risk register") -- exactly the kind of name a common English
+    # word is likely to appear inside as an ordinary part of speech, not
+    # because the query is actually about that logged action. A real named
+    # business entity (a person, company, order, component) doesn't have
+    # this problem; this fallback was built for that case (a casually-typed,
+    # lowercase person/company name -- see _extract_lowercase_word_candidates)
+    # and was never meant to ground a query on an action-log entry.
+    #
+    # Found for real: "Who approved the expedited fix, and what did it
+    # cost?" CONTAINS-matched "expedited" straight into a Task node named
+    # "expedited qualification lot", silently anchoring the entire causal
+    # walk on an unrelated part of the story instead of falling through to
+    # search (which could have found the actual DEC-2026-014 approval
+    # facts). Proper-noun and id-style candidates are unaffected -- a real
+    # multi-word name or an id like "QE-2091" legitimately can and should
+    # still match an Event/Issue-typed node.
+    action_type_exclusion = (
+        " AND NOT (n:Task OR n:Event OR n:Activity OR n:Process OR n:Transaction "
+        "OR n:Interaction OR n:Observation)"
+        if restrict_to_named_entities else ""
+    )
     # NOT n:SaxonRecommendation throughout this function (and every other
     # general entity/fact query in this codebase) -- a :SaxonRecommendation
     # node is an internal audit record of a past generated recommendation
@@ -290,7 +318,8 @@ def match_entities_by_name(
     # benefit -- skip it in that case.
     if len(core_token) >= 3:
         candidate_rows = execute_cypher(
-            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS $core_token AND NOT n:SaxonRecommendation "
+            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS $core_token "
+            "AND NOT n:SaxonRecommendation" + action_type_exclusion + " "
             "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id",
             {"group_ids": group_ids, "core_token": core_token},
         )
@@ -313,7 +342,8 @@ def match_entities_by_name(
         return matched
 
     contains_rows = execute_cypher(
-        "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS toLower($name) AND NOT n:SaxonRecommendation "
+        "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS toLower($name) "
+        "AND NOT n:SaxonRecommendation" + action_type_exclusion + " "
         "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id LIMIT 1",
         {"group_ids": group_ids, "name": name},
     )
@@ -366,21 +396,32 @@ async def resolve_named_entities(
     silently falling back to an ungrounded search.
     """
     proper_nouns = _extract_candidate_entities(query_text)
-    all_candidates = proper_nouns + _extract_id_candidates(query_text)
+    id_candidates = _extract_id_candidates(query_text)
     # Only when the query has no capitalized-phrase candidate at all --
     # a properly-capitalized "Diego Alvarez" (or a two-entity "X and Y")
     # already resolves precisely via proper_nouns above and shouldn't
     # pay for this broader, per-word scan too. See
     # _extract_lowercase_word_candidates's docstring for the bug this
     # covers (a casually-typed, uncapitalized name).
-    if not proper_nouns:
-        all_candidates += _extract_lowercase_word_candidates(query_text)
+    lowercase_candidates = _extract_lowercase_word_candidates(query_text) if not proper_nouns else []
+    all_candidates = proper_nouns + id_candidates + lowercase_candidates
     if not all_candidates:
         logger.debug("resolve: no candidates extracted from query, falling through to search")
         return [], False
 
+    # Lowercase-word candidates alone get restrict_to_named_entities=True
+    # (see match_entities_by_name) -- a proper noun or id-style candidate is
+    # specific enough to legitimately match any entity type, including a
+    # real Event/Issue/Transaction; a single common English word is not.
+    lowercase_candidate_set = set(lowercase_candidates)
     rows_per_candidate = await asyncio.gather(
-        *(asyncio.to_thread(match_entities_by_name, execute_cypher, c, group_ids) for c in all_candidates)
+        *(
+            asyncio.to_thread(
+                match_entities_by_name, execute_cypher, c, group_ids,
+                restrict_to_named_entities=(c in lowercase_candidate_set),
+            )
+            for c in all_candidates
+        )
     )
 
     groups: list[list[dict[str, Any]]] = []

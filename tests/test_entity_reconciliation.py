@@ -231,6 +231,101 @@ def test_possessive_query_still_resolves_the_real_entity(repo):
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
 
 
+# --- Lowercase-word fallback must not hijack onto an action-log entity -----
+# Real bug found live: "Who approved the expedited fix, and what did it
+# cost?" has no proper-noun/id candidate at all, so every remaining word
+# ("approved", "expedited", "fix", "cost") went through the lenient
+# lowercase-word fallback -- and "expedited" happened to CONTAINS-match a
+# :Task node Graphiti had auto-named "expedited qualification lot" (from an
+# activity-log row), silently anchoring the whole causal walk on an
+# unrelated part of the story instead of falling through to search (which
+# could have found the real approval facts). A generic English word
+# coincidentally appearing inside an auto-generated, sentence-shaped
+# Task/Event/Activity/... name is expected and common; it was never a
+# reliable signal the query is actually about that logged action.
+
+
+def _make_task_node(repo, group_id, name):
+    node_uuid = str(uuid.uuid4())
+    repo.execute_cypher(
+        "CREATE (n:Entity:Task {uuid: $uuid, group_id: $group_id, name: $name, summary: $summary})",
+        {"uuid": node_uuid, "group_id": group_id, "name": name, "summary": f"{name} summary"},
+    )
+    return node_uuid
+
+
+def test_lowercase_word_does_not_hijack_onto_an_action_log_task_node(repo):
+    group_id = f"test_reconcile_action_hijack_{uuid.uuid4().hex[:8]}"
+    repo.graphiti.search = AsyncMock(return_value=[])
+    try:
+        real_entity = _make_node(repo, group_id, "Reconciliation Decision DEC-9001")
+        task_node = _make_task_node(repo, group_id, "expedited reconciliation shipment task")
+        _make_edge(repo, real_entity, task_node, "Reconciliation Decision DEC-9001 approved a $9,000 expedited reconciliation shipment task.")
+
+        facts = asyncio.run(
+            repo.search_graphiti_facts(
+                "who approved the expedited fix, and what did it cost",
+                group_ids=[group_id],
+                visible_uuids=None,
+            )
+        )
+        # The Task node's own name must NOT have grounded this query -- with
+        # the bug, its own edge fact (above) would come back as if it were
+        # the answer. Fixed, nothing resolves via name matching and this
+        # falls through to (stubbed) semantic search instead.
+        assert facts == []
+        repo.graphiti.search.assert_awaited_once()
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+def test_lowercase_word_fallback_still_matches_a_real_non_task_entity(repo):
+    # Regression guard: the existing "diego"-style lowercase fallback (a
+    # casually-typed person/company name) must keep working -- this fix only
+    # narrows matching for Task/Event/Activity/... typed nodes, nothing else.
+    group_id = f"test_reconcile_lowercase_still_works_{uuid.uuid4().hex[:8]}"
+    try:
+        anchor = _make_node(repo, group_id, "Expedited Reconciliation Logistics")
+        other = _make_node(repo, group_id, "Reconciliation Freight Partners")
+        _make_edge(repo, anchor, other, "Expedited Reconciliation Logistics partners with Reconciliation Freight Partners.")
+
+        facts = asyncio.run(
+            repo.search_graphiti_facts(
+                "what do we know about expedited reconciliation logistics",
+                group_ids=[group_id],
+                visible_uuids=None,
+            )
+        )
+        fact_texts = {f["fact"] for f in facts}
+        assert "Expedited Reconciliation Logistics partners with Reconciliation Freight Partners." in fact_texts
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+def test_proper_noun_candidate_can_still_match_a_task_node(repo):
+    # The restriction only applies to the lenient lowercase-word fallback --
+    # a real, specific multi-word proper-noun candidate must still be able
+    # to resolve to a Task/Event-typed node (e.g. a query literally naming
+    # an activity-log entry by its own generated name).
+    group_id = f"test_reconcile_proper_noun_task_{uuid.uuid4().hex[:8]}"
+    try:
+        task_node = _make_task_node(repo, group_id, "Reconciliation Quarterly Compliance Audit")
+        other = _make_node(repo, group_id, "Reconciliation Compliance Team")
+        _make_edge(repo, task_node, other, "Reconciliation Quarterly Compliance Audit was performed by Reconciliation Compliance Team.")
+
+        facts = asyncio.run(
+            repo.search_graphiti_facts(
+                "What happened with the Reconciliation Quarterly Compliance Audit?",
+                group_ids=[group_id],
+                visible_uuids=None,
+            )
+        )
+        fact_texts = {f["fact"] for f in facts}
+        assert "Reconciliation Quarterly Compliance Audit was performed by Reconciliation Compliance Team." in fact_texts
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
 def test_generic_lowercase_query_with_no_real_entity_still_falls_through_to_search(repo):
     # No proper noun, no matching lowercase word either -- this must NOT
     # short-circuit to a false "not found" (the lenient candidates never set
