@@ -109,6 +109,57 @@ def test_a_produces_and_triggered_by_chain_is_now_walked(repo):
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
 
 
+def test_redundant_duplicate_edges_do_not_crowd_out_a_deeper_real_fact(repo):
+    # Real bug found by testing against real ingested data: the LIMIT was
+    # applied to raw Cypher path-instances, before Python's own (source,
+    # type, target) dedup ever ran -- and Graphiti's extraction routinely
+    # produces several near-duplicate edges between the same two nodes
+    # (worded slightly differently). Each duplicate multiplies how many
+    # distinct multi-hop PATHS exist through that pair, so with the limit
+    # set low enough, real redundancy could consume the whole budget before
+    # a genuinely deeper, more distinct fact (the actual root cause, one
+    # hop further out) was ever reached. Reproduces that shape directly:
+    # many redundant edges between anchor and an intermediate node, then
+    # one real edge one hop further out that must still make it through.
+    group_id = f"test_causal_dedup_{uuid.uuid4().hex[:8]}"
+    try:
+        anchor = _node(repo, group_id, "Causal Dedup Anchor")
+        intermediate = _node(repo, group_id, "Causal Dedup Intermediate")
+        deep = _node(repo, group_id, "Causal Dedup Deep Root Cause")
+
+        # Several near-duplicate edges saying almost the same thing --
+        # exactly the redundancy Graphiti's own extraction produces.
+        for i in range(5):
+            _causal_edge(
+                repo, anchor, intermediate, "PRODUCES",
+                f"Causal Dedup Anchor produces Causal Dedup Intermediate (variant {i}).", group_id,
+            )
+        # The real, deeper fact this whole chain is actually about.
+        _causal_edge(
+            repo, intermediate, deep, "TRIGGERED_BY",
+            "Causal Dedup Intermediate was triggered by Causal Dedup Deep Root Cause.", group_id,
+        )
+
+        original_limit = GraphRepository._CAUSAL_FACT_LIMIT
+        GraphRepository._CAUSAL_FACT_LIMIT = 3  # small enough that pre-fix redundancy would starve the deep fact
+        try:
+            anchor_result, second_entity, facts = asyncio.run(
+                repo.causal_chain_for_query("What's going on with Causal Dedup Anchor?", [group_id], None)
+            )
+        finally:
+            GraphRepository._CAUSAL_FACT_LIMIT = original_limit
+
+        assert anchor_result["name"] == "Causal Dedup Anchor"
+        fact_texts = {f["fact"] for f in facts}
+        assert "Causal Dedup Intermediate was triggered by Causal Dedup Deep Root Cause." in fact_texts
+        # Also confirms the redundant variants really did get deduped down
+        # to at most one representative, not all five occupying the budget.
+        variant_count = sum(1 for t in fact_texts if "Causal Dedup Anchor produces Causal Dedup Intermediate" in t)
+        assert variant_count == 1
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
 def test_non_causal_relationship_types_are_not_walked(repo):
     group_id = f"test_causal_noncausal_{uuid.uuid4().hex[:8]}"
     try:

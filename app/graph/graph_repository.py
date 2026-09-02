@@ -389,6 +389,22 @@ class GraphRepository:
         Returns facts in path order (shortest paths first, then hop order
         within a path), deduped by (source, relationship type, target) so a
         fact reachable via more than one path is only listed once.
+
+        That dedup used to happen in Python, AFTER Cypher's own LIMIT --
+        which meant the limit was actually bounding raw PATH INSTANCES, not
+        distinct facts. Found for real against real ingested data: Graphiti's
+        own extraction routinely produces several genuinely separate edges
+        between the same two nodes carrying the same relationship type
+        (three separate PRODUCES/PROVIDES relationships between the same
+        supplier and component, worded slightly differently -- not the same
+        edge reached via different paths, but actually distinct relationship
+        records) -- each one is a distinct multi-hop PATH through that pair,
+        so the redundancy was crowding out a genuinely deeper, more distinct
+        fact (a root cause several hops further out) before it ever reached
+        the row set Python got to dedupe. Fixed by grouping on the exact
+        same (source, relationship_type, target) key the Python dedup below
+        already used, in Cypher, BEFORE applying the limit -- moving that
+        dedup earlier rather than changing what counts as a duplicate.
         """
         rows = self.execute_cypher(
             f"""
@@ -396,13 +412,17 @@ class GraphRepository:
             WHERE ALL(rel IN relationships(p) WHERE rel.name IN $causal_types)
               AND ALL(node IN nodes(p) WHERE node.group_id IN $group_ids)
               AND NONE(node IN nodes(p) WHERE node:SaxonRecommendation)
-            WITH p, relationships(p) AS rels, nodes(p) AS path_nodes, length(p) AS path_length
-            UNWIND range(0, size(rels) - 1) AS hop
-            WITH rels[hop] AS rel, hop, path_length, path_nodes
-            RETURN DISTINCT rel.fact AS fact, rel.name AS relationship_type, hop, path_length,
+            UNWIND range(0, size(relationships(p)) - 1) AS hop
+            WITH relationships(p)[hop] AS rel, hop, length(p) AS path_length, [x IN nodes(p) | x.uuid] AS path_uuids
+            WITH rel, startNode(rel).uuid AS source_node_uuid, rel.name AS relationship_type,
+                 endNode(rel).uuid AS target_node_uuid, hop, path_length, path_uuids
+            ORDER BY path_length, hop
+            WITH source_node_uuid, relationship_type, target_node_uuid,
+                 collect(rel)[0] AS rel, collect(hop)[0] AS hop, collect(path_length)[0] AS path_length,
+                 collect(path_uuids)[0] AS path_uuids
+            RETURN rel.fact AS fact, relationship_type, hop, path_length,
                    rel.valid_at AS valid_at, rel.invalid_at AS invalid_at, rel.expired_at AS expired_at,
-                   rel.group_id AS group_id, rel.episodes AS episodes, startNode(rel).uuid AS source_node_uuid,
-                   endNode(rel).uuid AS target_node_uuid, [x IN path_nodes | x.uuid] AS path_uuids
+                   rel.group_id AS group_id, rel.episodes AS episodes, source_node_uuid, target_node_uuid, path_uuids
             ORDER BY path_length, hop
             LIMIT {self._CAUSAL_FACT_LIMIT}
             """,
