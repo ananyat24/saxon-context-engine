@@ -272,6 +272,14 @@ class ContextOrchestrator:
         Falls back to a plain joined list on any failure (including the
         local spend cap being hit) -- a failed synthesis should degrade to
         the older, plainer behavior, not break the whole query.
+
+        The system prompt explicitly guards against one specific failure
+        mode found live: "Who approved the expedited fix, and what did it
+        cost?" answered "Grace Okafor approved..." when the only retrieved
+        fact was "Owen Whitfield requests a budget exception FROM Grace
+        Okafor" -- a request addressed to someone is not that person acting
+        on it, but the model conflated the two rather than noticing the
+        actual approval fact was simply missing from what it was given.
         """
         try:
             messages = [
@@ -279,8 +287,12 @@ class ContextOrchestrator:
                     role="system",
                     content=(
                         "You answer questions using ONLY the facts given -- never add, infer, "
-                        "or assume anything not explicitly stated. Respond with one clear, "
-                        "concise sentence."
+                        "or assume anything not explicitly stated. In particular, do not "
+                        "conflate a fact that someone requested, referenced, or addressed "
+                        "something TO a person with that person actually doing it -- a request "
+                        "made to someone is not that person's action. If the facts don't state "
+                        "an answer explicitly, say the information isn't available in the given "
+                        "facts rather than guessing. Respond with one clear, concise sentence."
                     ),
                 ),
                 Message(
