@@ -20,6 +20,7 @@ import uuid
 
 from unittest.mock import Mock
 
+from app.graph.decisions import ensure_decision_indexes
 from app.graph.entity_resolution import match_entities_by_name
 from app.graph.graph_repository import GraphRepository
 
@@ -77,6 +78,57 @@ def test_a_real_business_decisions_own_facts_are_retrievable():
 
         assert len(facts) == 1
         assert facts[0]["fact"] == "DEC-2026-099 approved the budget for Related Order."
+    finally:
+        repo.execute_cypher("MATCH (n {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+def test_a_stale_pre_fix_saxon_decision_gets_backfilled_and_stays_hidden():
+    # Real bug found live, right after deploying the label fix: a
+    # :Decision node this app itself generated *before* the
+    # :SaxonRecommendation label existed had no way to get the new label
+    # retroactively -- so it was indistinguishable from a real client
+    # Decision entity and got resolved as if it were one, on a repeat of
+    # the exact query that had generated it. ensure_decision_indexes' new
+    # backfill step (app/graph/decisions.py) is what's supposed to fix
+    # this on every startup, keyed on source_system rather than the label
+    # itself (which is exactly what's missing on a stale node).
+    repo = _fake_repo()
+    group_id = f"test_stale_decision_{uuid.uuid4().hex[:8]}"
+    try:
+        # Shaped exactly like a Decision record_decision() created BEFORE
+        # the :SaxonRecommendation label was added -- :Entity:Decision,
+        # source_system set (that was never gated on the label), no
+        # :SaxonRecommendation.
+        stale_uuid = str(uuid.uuid4())
+        repo.execute_cypher(
+            "CREATE (d:Entity:Decision {uuid: $uuid, group_id: $group_id, "
+            "name: 'Recommendation for: Why is Order SO-1 at risk?', "
+            "source_system: 'saxon.causal_engine'})",
+            {"uuid": stale_uuid, "group_id": group_id},
+        )
+
+        rows_before = match_entities_by_name(repo.execute_cypher, "SO-1", [group_id])
+        assert any(r["uuid"] == stale_uuid for r in rows_before), "test setup: must reproduce the bug first"
+
+        ensure_decision_indexes(repo=repo)
+
+        rows_after = match_entities_by_name(repo.execute_cypher, "SO-1", [group_id])
+        assert not any(r["uuid"] == stale_uuid for r in rows_after)
+
+        labels = repo.execute_cypher("MATCH (d {uuid: $uuid}) RETURN labels(d) AS labels", {"uuid": stale_uuid})[0]
+        assert "SaxonRecommendation" in labels["labels"]
+    finally:
+        repo.execute_cypher("MATCH (n {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
+def test_backfill_never_tags_a_real_business_decision_with_no_source_system():
+    repo = _fake_repo()
+    group_id = f"test_real_decision_untouched_{uuid.uuid4().hex[:8]}"
+    try:
+        real_uuid = _real_business_decision(repo, group_id, "DEC-2026-555", "Renee Kapoor", 9000)
+        ensure_decision_indexes(repo=repo)
+        labels = repo.execute_cypher("MATCH (d {uuid: $uuid}) RETURN labels(d) AS labels", {"uuid": real_uuid})[0]
+        assert "SaxonRecommendation" not in labels["labels"]
     finally:
         repo.execute_cypher("MATCH (n {group_id: $g}) DETACH DELETE n", {"g": group_id})
 

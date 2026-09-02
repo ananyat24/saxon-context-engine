@@ -42,6 +42,28 @@ def ensure_decision_indexes(repo: Optional[GraphRepository] = None) -> None:
     repo.execute_cypher(
         "CREATE INDEX saxon_recommendation_group_id IF NOT EXISTS FOR (d:SaxonRecommendation) ON (d.group_id)"
     )
+    _backfill_saxon_recommendation_label(repo)
+
+
+def _backfill_saxon_recommendation_label(repo: GraphRepository) -> None:
+    """One-time (but safe to run every startup -- idempotent) migration for
+    a :Decision node created before the :SaxonRecommendation label existed
+    (see this module's own top docstring for why that label exists at
+    all). Found for real, live, right after deploying the fix: a
+    :Decision node this app itself generated *before* the fix -- so it
+    never got the new label -- was then indistinguishable from a real
+    client Decision entity to every retrieval path, and got resolved as a
+    real answer to a repeat of the exact query that had generated it.
+
+    `source_system: 'saxon.causal_engine'` (set unconditionally by
+    record_decision below, even before the label existed) is the reliable
+    migration key: it was never set on anything but a Saxon-generated
+    node, so this can never mistakenly tag a real client's own Decision
+    entity."""
+    repo.execute_cypher(
+        "MATCH (d:Decision) WHERE d.source_system = 'saxon.causal_engine' AND NOT d:SaxonRecommendation "
+        "SET d:SaxonRecommendation"
+    )
 
 
 def record_decision(
