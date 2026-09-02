@@ -1370,10 +1370,19 @@ async function loadGraph() {
   }
 
   try {
+    // /graph/nodes and /graph/relationships are independent "most recently
+    // created" queries -- on any graph bigger than a couple dozen nodes,
+    // the 15 most-recent nodes and the 25 most-recent relationships mostly
+    // DON'T share endpoints, so renderGraph (which only draws an edge when
+    // both its endpoints are in the shown node set) ends up drawing almost
+    // nothing even though relsRes came back full. Fetching a much bigger
+    // node pool here and then picking the display set from the fetched
+    // relationships' own endpoints (below) fixes that without needing a
+    // new backend endpoint.
     const [summaryRes, nodesRes, relsRes] = await Promise.all([
       fetch(`${API}/graph/summary${buildQuery({})}`, { headers: authHeaders() }),
-      fetch(`${API}/graph/nodes${buildQuery({ limit: 15 })}`, { headers: authHeaders() }),
-      fetch(`${API}/graph/relationships${buildQuery({ limit: 25 })}`, { headers: authHeaders() }),
+      fetch(`${API}/graph/nodes${buildQuery({ limit: 150 })}`, { headers: authHeaders() }),
+      fetch(`${API}/graph/relationships${buildQuery({ limit: 40 })}`, { headers: authHeaders() }),
     ]);
 
     if (requestId !== graphRequestId) return; // a newer selection has already superseded this one
@@ -1396,9 +1405,21 @@ async function loadGraph() {
     }
 
     const summary = await summaryRes.json();
-    const nodes = await nodesRes.json();
+    const allNodes = await nodesRes.json();
     const rels = await relsRes.json();
     if (requestId !== graphRequestId) return; // superseded again while parsing the responses
+
+    // Show the nodes the fetched relationships actually connect first, so
+    // those edges have both endpoints on screen -- then pad out with other
+    // recent nodes (unconnected among the ones we fetched, but real) up to
+    // a readable cap. Without this, most edges silently fail to render
+    // because their endpoints never made the "most recent 15 nodes" cut.
+    const DISPLAY_CAP = 25;
+    const relNames = new Set();
+    rels.forEach((r) => { relNames.add(r.source); relNames.add(r.target); });
+    const referenced = allNodes.filter((n) => relNames.has(n.name));
+    const others = allNodes.filter((n) => !relNames.has(n.name));
+    const nodes = referenced.concat(others).slice(0, DISPLAY_CAP);
 
     summaryEl.innerHTML = `
       <div class="stat"><span class="num">${summary.node_count}</span><span class="label">Nodes</span></div>
