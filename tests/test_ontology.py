@@ -171,11 +171,19 @@ def test_causal_relationship_types_includes_core_generic_types():
     registry = OntologyRegistry()
     registry.register(OntologyLoader.load("ontology/core.yaml"))
     causal = registry.causal_relationship_types()
-    for name in ("AFFECTS", "DEPENDS_ON", "CAUSED_BY", "RESULTED_IN", "SOURCED_FROM"):
+    for name in ("AFFECTS", "DEPENDS_ON", "CAUSED_BY", "RESULTED_IN", "SOURCED_FROM", "PRODUCES", "TRIGGERED_BY"):
         assert name in causal
     # A relationship with no causal flag at all must not show up just
-    # because it's defined -- RELATED_TO is core's generic catch-all.
-    assert "RELATED_TO" not in causal
+    # because it's defined -- RELATED_TO is core's generic catch-all, and
+    # PROVIDES/PERFORMED_ON are administrative/classificatory rather than
+    # causal (see ontology/core.yaml's own comments on PRODUCES/
+    # TRIGGERED_BY for why those two specifically needed the flag: a real
+    # root-cause chain routinely runs through exactly them -- "supplier
+    # PRODUCES a lot, that lot PRODUCES a defective component" -- and the
+    # causal-chain walker used to dead-end one hop short of a root cause
+    # that was fully present and connected in the graph).
+    for name in ("RELATED_TO", "PROVIDES", "PERFORMED_ON"):
+        assert name not in causal
 
 
 def test_causal_relationship_types_includes_a_flagged_domain_specific_type():

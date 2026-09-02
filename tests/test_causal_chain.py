@@ -74,6 +74,41 @@ def test_walks_a_multi_hop_causal_chain_from_the_resolved_entity(repo):
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
 
 
+def test_a_produces_and_triggered_by_chain_is_now_walked(repo):
+    # Real bug found by testing against real ingested data: a root-cause
+    # chain routinely runs through PRODUCES ("supplier PRODUCES a lot,
+    # that lot PRODUCES a defective component") and TRIGGERED_BY
+    # ("corrective action TRIGGERED_BY the defect") -- neither was flagged
+    # causal in ontology/core.yaml, so the walker dead-ended one hop short
+    # of a root cause that was fully present and connected in the graph.
+    # Mirrors the actual shape found live: Order -AFFECTS-> QualityEvent
+    # (causal, already worked) but QualityEvent's own root cause needed
+    # PRODUCES/TRIGGERED_BY to keep going.
+    group_id = f"test_causal_produces_{uuid.uuid4().hex[:8]}"
+    try:
+        order = _node(repo, group_id, "Causal Produces Order")
+        defect = _node(repo, group_id, "Causal Produces Solder Defect")
+        lot = _node(repo, group_id, "Causal Produces Lot FT-6602")
+        component = _node(repo, group_id, "Causal Produces CX-17 Relay")
+        supplier = _node(repo, group_id, "Causal Produces Ferrotek")
+
+        _causal_edge(repo, defect, order, "AFFECTS", "Causal Produces Solder Defect affects Causal Produces Order.", group_id)
+        _causal_edge(repo, defect, lot, "AFFECTS", "A defect was identified in Causal Produces Lot FT-6602.", group_id)
+        _causal_edge(repo, supplier, lot, "PRODUCES", "Causal Produces Ferrotek produces Causal Produces Lot FT-6602.", group_id)
+        _causal_edge(repo, lot, component, "PRODUCES", "Causal Produces Lot FT-6602 produces Causal Produces CX-17 Relay.", group_id)
+
+        anchor, second_entity, facts = asyncio.run(
+            repo.causal_chain_for_query("Why is Causal Produces Order at risk?", [group_id], None)
+        )
+        assert anchor["name"] == "Causal Produces Order"
+        fact_texts = {f["fact"] for f in facts}
+        assert "Causal Produces Solder Defect affects Causal Produces Order." in fact_texts
+        assert "Causal Produces Ferrotek produces Causal Produces Lot FT-6602." in fact_texts
+        assert "Causal Produces Lot FT-6602 produces Causal Produces CX-17 Relay." in fact_texts
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
 def test_non_causal_relationship_types_are_not_walked(repo):
     group_id = f"test_causal_noncausal_{uuid.uuid4().hex[:8]}"
     try:

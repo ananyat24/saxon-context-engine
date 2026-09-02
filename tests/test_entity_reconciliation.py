@@ -197,6 +197,40 @@ def test_lowercase_query_still_resolves_precisely_not_via_semantic_search(repo):
         repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
 
 
+def test_possessive_query_still_resolves_the_real_entity(repo):
+    # Real bug found by testing against real ingested data: "Ferrotek's"
+    # (a natural possessive reference in a question) failed to resolve to
+    # "Ferrotek Components" at all -- and because a sentence-initial
+    # auxiliary word ("Has") glued onto it into one spurious two-word
+    # proper-noun candidate ("Has Ferrotek's"), the failure hard-short-
+    # circuited the whole query into a false "not found" rather than
+    # falling through to search. Fixed in both _extract_candidate_entities
+    # (strips a leading auxiliary/stopword) and match_entities_by_name/
+    # _normalize_entity_name (strips the possessive itself).
+    group_id = f"test_reconcile_possessive_{uuid.uuid4().hex[:8]}"
+    try:
+        anchor = _make_node(repo, group_id, "Ferrotek Reconciliation Components")
+        other = _make_node(repo, group_id, "Reconciliation CX-17 Power Relay")
+        _make_edge(
+            repo, anchor, other,
+            "Ferrotek Reconciliation Components produces Reconciliation CX-17 Power Relay.",
+        )
+
+        facts = asyncio.run(
+            repo.search_graphiti_facts(
+                "Has Ferrotek Reconciliation Components's certification been restored?",
+                group_ids=[group_id],
+                visible_uuids=None,
+            )
+        )
+        fact_texts = {f["fact"] for f in facts}
+        assert "Ferrotek Reconciliation Components produces Reconciliation CX-17 Power Relay." in fact_texts
+        # Resolved via real entity resolution, not padded-out semantic search.
+        assert not any(f.get("kind") == "semantic_search" for f in facts)
+    finally:
+        repo.execute_cypher("MATCH (n:Entity {group_id: $g}) DETACH DELETE n", {"g": group_id})
+
+
 def test_generic_lowercase_query_with_no_real_entity_still_falls_through_to_search(repo):
     # No proper noun, no matching lowercase word either -- this must NOT
     # short-circuit to a false "not found" (the lenient candidates never set

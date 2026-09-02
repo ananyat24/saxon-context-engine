@@ -106,13 +106,13 @@ def reconcile_tenant(execute_cypher: ExecuteCypher, tenant_id: str, group_ids: l
     every sync at this project's data scale; would need to narrow to
     "entities touched since the last run" before that stops being true.
 
-    NOT n:Decision, same as every other general entity query in this
+    NOT n:SaxonRecommendation, same as every other general entity query in this
     codebase (see entity_resolution.match_entities_by_name's docstring) --
     a :Decision is an internal audit record, not a business entity that
     could ever be "the same real-world thing" as another one.
     """
     rows = execute_cypher(
-        "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND NOT n:Decision "
+        "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND NOT n:SaxonRecommendation "
         "RETURN n.uuid AS uuid, n.name AS name, n.group_id AS group_id",
         {"group_ids": group_ids},
     )

@@ -245,6 +245,14 @@ relationships:
   PRODUCES:
     source: Entity
     target: Entity
+    # A defect/root-cause chain routinely runs through a production
+    # relationship ("supplier PRODUCES a lot, that lot PRODUCES a
+    # defective component") -- found for real: this caused the causal
+    # walker (GraphRepository.causal_chain_for_query) to dead-end one hop
+    # short of an actual root cause that was fully present and connected
+    # in the graph, just not reachable through only AFFECTS/DEPENDS_ON/
+    # CAUSED_BY/RESULTED_IN/SOURCED_FROM. See CLAUDE.md's v5 section.
+    causal: true
 
   CONSUMES:
     source: Entity
@@ -293,6 +301,10 @@ relationships:
   TRIGGERED_BY:
     source: Entity
     target: Entity
+    # Causal by name -- "X triggered by Y" is a direct causal claim. Was
+    # missing this flag despite that; see PRODUCES' comment above for the
+    # real bug this contributed to.
+    causal: true
 
   CAUSED_BY:
     source: Entity

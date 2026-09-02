@@ -161,16 +161,20 @@ class GraphRepository:
         Neo4j -- precise by construction, unlike semantic search, since it can
         only ever return facts that are actually about this entity.
 
-        Excludes an edge to/from a :Decision node -- that's an internal
-        audit record of a past generated recommendation (see
+        Excludes an edge to/from a :SaxonRecommendation node -- that's an
+        internal audit record of a past generated recommendation (see
         app/graph/decisions.py), not a real fact about this entity, and its
         boilerplate INVOLVES-edge text ("Saxon generated this recommendation
         while analyzing: <query>") isn't something a person asking about
-        this entity should ever see mixed in with its actual facts. See
+        this entity should ever see mixed in with its actual facts.
+        Deliberately a narrower label than the ontology's own :Decision
+        entity type, which a real client dataset can also legitimately use
+        for its own genuine decision/approval records -- those must stay
+        fully retrievable, unlike Saxon's own generated ones. See
         _match_entities_by_name's docstring for the same exclusion and why.
         """
         rows = self.execute_cypher(
-            "MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-(m) WHERE NOT m:Decision "
+            "MATCH (n:Entity {uuid: $uuid})-[r:RELATES_TO]-(m) WHERE NOT m:SaxonRecommendation "
             "RETURN r.fact AS fact, r.name AS relationship_type, r.valid_at AS valid_at, "
             "r.invalid_at AS invalid_at, r.expired_at AS expired_at, r.group_id AS group_id, "
             "r.episodes AS episodes, "
@@ -226,7 +230,7 @@ class GraphRepository:
         (_relationship_path_full_facts) below."""
         rows = self.execute_cypher(
             "MATCH p = shortestPath((a:Entity {uuid: $uuid_a})-[:RELATES_TO*1..4]-(b:Entity {uuid: $uuid_b})) "
-            "WHERE NONE(node IN nodes(p) WHERE node:Decision) "
+            "WHERE NONE(node IN nodes(p) WHERE node:SaxonRecommendation) "
             "RETURN [rel IN relationships(p) | rel.fact] AS facts, "
             "[rel IN relationships(p) | rel.name] AS relationship_types, "
             "[rel IN relationships(p) | rel.group_id] AS rel_group_ids, "
@@ -283,7 +287,7 @@ class GraphRepository:
             f"""
             MATCH p = shortestPath((a:Entity {{uuid: $uuid_a}})-[:RELATES_TO*1..{self._CAUSAL_MAX_HOPS}]-(b:Entity {{uuid: $uuid_b}}))
             WHERE ALL(node IN nodes(p) WHERE node.group_id IN $group_ids)
-              AND NONE(node IN nodes(p) WHERE node:Decision)
+              AND NONE(node IN nodes(p) WHERE node:SaxonRecommendation)
             WITH relationships(p) AS rels, [n IN nodes(p) | n.uuid] AS path_uuids
             UNWIND range(0, size(rels) - 1) AS hop
             WITH rels[hop] AS rel, hop, path_uuids
@@ -391,7 +395,7 @@ class GraphRepository:
             MATCH p = (n:Entity {{uuid: $uuid}})-[:RELATES_TO*1..{self._CAUSAL_MAX_HOPS}]-(m:Entity)
             WHERE ALL(rel IN relationships(p) WHERE rel.name IN $causal_types)
               AND ALL(node IN nodes(p) WHERE node.group_id IN $group_ids)
-              AND NONE(node IN nodes(p) WHERE node:Decision)
+              AND NONE(node IN nodes(p) WHERE node:SaxonRecommendation)
             WITH p, relationships(p) AS rels, nodes(p) AS path_nodes, length(p) AS path_length
             UNWIND range(0, size(rels) - 1) AS hop
             WITH rels[hop] AS rel, hop, path_length, path_nodes

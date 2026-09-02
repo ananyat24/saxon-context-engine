@@ -58,25 +58,29 @@ def get_summary(
         rel_count = authorization.get_visible_relationship_count(group_id, user_id, repo=repo)
         labels = authorization.get_visible_entity_types(group_id, user_id, repo=repo)
     else:
-        # NOT n:Decision (and a/b below) throughout this route -- a
-        # :Decision node is an internal audit record of a past generated
-        # recommendation (see app/graph/decisions.py), not a business entity
-        # this "what does the graph actually know" summary should count or
-        # list as a present entity type. See GraphRepository._entity_own_facts's
-        # docstring for the full story on why this exclusion exists.
+        # NOT n:SaxonRecommendation (and a/b below) throughout this route -- a
+        # :SaxonRecommendation node is Saxon's own internal audit record of a
+        # past generated causal recommendation (see app/graph/decisions.py),
+        # not a business entity this "what does the graph actually know"
+        # summary should count or list as a present entity type. Deliberately
+        # a narrower label than the ontology's own :Decision entity type --
+        # a real client dataset can have genuine Decision business entities
+        # (an approval, a rejection) that must NOT be hidden the same way.
+        # See GraphRepository._entity_own_facts's docstring for the full
+        # story on why this exclusion exists.
         node_count = repo.execute_cypher(
-            "MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:Decision RETURN count(n) AS c",
+            "MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:SaxonRecommendation RETURN count(n) AS c",
             {"group_id": group_id},
         )[0]["c"]
         rel_count = repo.execute_cypher(
             "MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id}) "
-            "WHERE NOT a:Decision AND NOT b:Decision RETURN count(r) AS c",
+            "WHERE NOT a:SaxonRecommendation AND NOT b:SaxonRecommendation RETURN count(r) AS c",
             {"group_id": group_id},
         )[0]["c"]
         labels = [
             row["labels"]
             for row in repo.execute_cypher(
-                "MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:Decision RETURN DISTINCT labels(n) AS labels",
+                "MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:SaxonRecommendation RETURN DISTINCT labels(n) AS labels",
                 {"group_id": group_id},
             )
         ]
@@ -118,7 +122,7 @@ def get_nodes(
 
     return repo.execute_cypher(
         """
-        MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:Decision
+        MATCH (n:Entity {group_id: $group_id}) WHERE NOT n:SaxonRecommendation
         RETURN n.uuid AS id, n.name AS name, labels(n) AS labels, n.summary AS summary
         ORDER BY n.created_at DESC
         LIMIT $limit
@@ -140,7 +144,7 @@ def _get_nodes_for_connector(repo: GraphRepository, group_id: str, connector_id:
     return repo.execute_cypher(
         """
         MATCH (ep:Episodic {group_id: $group_id, connector_id: $connector_id})-[:MENTIONS]->(n:Entity)
-        WHERE NOT n:Decision
+        WHERE NOT n:SaxonRecommendation
         WITH DISTINCT n
         RETURN n.uuid AS id, n.name AS name, labels(n) AS labels, n.summary AS summary
         ORDER BY n.created_at DESC
@@ -177,7 +181,7 @@ def get_relationships(
     return repo.execute_cypher(
         """
         MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id})
-        WHERE NOT a:Decision AND NOT b:Decision
+        WHERE NOT a:SaxonRecommendation AND NOT b:SaxonRecommendation
         RETURN a.name AS source, r.name AS type, b.name AS target, r.fact AS fact
         ORDER BY r.created_at DESC
         LIMIT $limit
@@ -199,7 +203,7 @@ def _get_relationships_for_connector(repo: GraphRepository, group_id: str, conne
         MATCH (ep:Episodic {group_id: $group_id, connector_id: $connector_id})
         WITH collect(ep.uuid) AS connector_episode_uuids
         MATCH (a:Entity {group_id: $group_id})-[r:RELATES_TO]->(b:Entity {group_id: $group_id})
-        WHERE NOT a:Decision AND NOT b:Decision
+        WHERE NOT a:SaxonRecommendation AND NOT b:SaxonRecommendation
           AND ANY(ep_uuid IN r.episodes WHERE ep_uuid IN connector_episode_uuids)
         RETURN a.name AS source, r.name AS type, b.name AS target, r.fact AS fact
         ORDER BY r.created_at DESC

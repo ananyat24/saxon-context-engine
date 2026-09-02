@@ -116,6 +116,54 @@ def _describe_transition(old: dict, new: dict) -> str:
     return f'This changed{when}: it used to read "{old["fact"]}" and now reads "{new["fact"]}".'
 
 
+def _build_answer_lines(facts: list[dict]) -> list[str]:
+    """Turns a raw, possibly mixed valid/invalid fact list into the plain-
+    English lines _synthesize_answer (or a single-line shortcut) should
+    see -- shared by the plain Ask path (get_context_packet) and the
+    causal path's fact-only fallbacks (_fact_only_causal_packet), which
+    used to each filter to `is_valid` facts only and silently drop
+    everything else.
+
+    Three kinds of line, in this order: a transition description for every
+    invalidated fact _find_transitions could pair with whatever replaced
+    it ("this changed on <date>: it used to read X, now reads Y"); every
+    still-current fact, as-is; and -- the actual fix -- every OTHER
+    invalidated fact, one _find_transitions couldn't pair (its
+    replacement wasn't in this particular batch), explicitly marked as no
+    longer current rather than silently dropped. Real historical
+    information a person asked about shouldn't vanish just because
+    nothing superseded it *in this retrieval* -- found for real against
+    live data: a question whose only relevant fact was exactly this kind
+    of unpaired-invalid fact got "No matching graph context found" as its
+    answer, even though metadata.facts (the raw, unfiltered response) had
+    the fact the whole time.
+
+    A fact with `is_authoritative: False` (see _apply_authority_tie_break)
+    is excluded throughout, same as before this function existed.
+    """
+    transitions, replaced_fact_ids = _find_transitions(facts)
+    transition_lines = [_describe_transition(old, new) for old, new in transitions]
+    old_fact_ids_in_transitions = {id(old) for old, _new in transitions}
+
+    plain_lines = []
+    historical_lines = []
+    for f in facts:
+        if id(f) in replaced_fact_ids or not f.get("is_authoritative", True):
+            continue
+        if f.get("is_valid", True):
+            plain_lines.append(f["fact"])
+        elif id(f) not in old_fact_ids_in_transitions:
+            historical_lines.append(f'No longer current, but real: "{f["fact"]}"')
+
+    seen: set[str] = set()
+    lines: list[str] = []
+    for line in transition_lines + plain_lines + historical_lines:
+        if line not in seen:
+            seen.add(line)
+            lines.append(line)
+    return lines
+
+
 class ContextOrchestrator:
     """Orchestrates multi-source context retrieval and packages the context response."""
 
@@ -271,21 +319,13 @@ class ContextOrchestrator:
         if tenant_id and group_ids:
             self._apply_authority_tie_break(tenant_id, edge_facts)
 
-        transitions, replaced_fact_ids = _find_transitions(edge_facts)
-        transition_lines = [_describe_transition(old, new) for old, new in transitions]
-        plain_lines = [
-            f["fact"]
-            for f in edge_facts
-            if f.get("is_valid", True) and id(f) not in replaced_fact_ids and f.get("is_authoritative", True)
-        ]
-
         # A resolved entity's summary can restate facts that are also present as
         # individual edges verbatim (Graphiti doesn't guarantee the two are
         # distinct) -- dedupe by exact text, keeping first occurrence, so the
         # same sentence never shows up twice.
         summary_lines = []
         seen = set()
-        for line in entity_summary_lines + transition_lines + plain_lines:
+        for line in entity_summary_lines + _build_answer_lines(edge_facts):
             if line not in seen:
                 seen.add(line)
                 summary_lines.append(line)
@@ -375,9 +415,15 @@ class ContextOrchestrator:
         two-entity connecting path that isn't entirely causal-typed) --
         same fact-only synthesis the plain Ask path uses (_synthesize_answer),
         never a fabricated recommendation, never a :Decision. `facts` must be
-        non-empty and pre-filtered to is_valid; retrieval_path distinguishes
-        which shape this is in telemetry."""
-        lines = [f["fact"] for f in facts]
+        non-empty; can be a mix of valid and invalidated facts -- see
+        _build_answer_lines, which turns that mix into lines without
+        silently dropping an invalidated fact that has no paired
+        replacement in this batch. retrieval_path distinguishes which
+        shape this is in telemetry."""
+        # `or` fallback: _build_answer_lines can filter everything out (every
+        # fact non-authoritative) even though `facts` itself is guaranteed
+        # non-empty by this method's contract -- never leave `lines` empty.
+        lines = _build_answer_lines(facts) or [f["fact"] for f in facts]
         summary = lines[0] if len(lines) == 1 else await self._synthesize_answer(query, lines)
         return ContextPacket(
             query=query,
@@ -456,8 +502,13 @@ class ContextOrchestrator:
                 # recommendation/Decision. The relevance nuance
                 # (_synthesize_answer answers the *question*, so an
                 # irrelevant fact never makes it into a multi-fact summary)
-                # comes for free from that shared helper.
-                direct_facts = [f for f in self._repo.direct_facts_for(anchor["uuid"], visible_uuids) if f.get("is_valid", True)]
+                # comes for free from that shared helper. Deliberately NOT
+                # filtered to is_valid here -- _fact_only_causal_packet (via
+                # _build_answer_lines) handles a mix of valid/invalidated
+                # facts correctly now; pre-filtering here would silently
+                # throw away real historical facts before they ever got that
+                # chance, the exact bug this was fixed for.
+                direct_facts = self._repo.direct_facts_for(anchor["uuid"], visible_uuids)
                 if direct_facts:
                     return await self._fact_only_causal_packet(query, group_ids, direct_facts, "causal_fallback_direct_facts")
                 summary = f'No causal chain -- or any other recorded fact -- connecting "{anchor["name"]}" to anything else in this knowledge base.'

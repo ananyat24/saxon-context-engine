@@ -157,7 +157,7 @@ def get_visible_relationship_count(group_id: str, user_id: str, repo: Optional[G
         WITH collect(n.uuid) AS visible_entity_uuids
         UNWIND visible_entity_uuids AS uuid
         MATCH (n:Entity {group_id: $group_id, uuid: uuid})-[r:RELATES_TO]-(m:Entity {group_id: $group_id})
-        WHERE NOT m:Decision
+        WHERE NOT m:SaxonRecommendation
         RETURN count(DISTINCT r) AS c
         """,
         {"group_id": group_id, "user_id": user_id},
@@ -199,7 +199,7 @@ def get_visible_relationships(
         WITH collect(n.uuid) AS visible_entity_uuids
         UNWIND visible_entity_uuids AS uuid
         MATCH (a:Entity {group_id: $group_id, uuid: uuid})-[r:RELATES_TO]-(b:Entity {group_id: $group_id})
-        WHERE NOT b:Decision
+        WHERE NOT b:SaxonRecommendation
         RETURN DISTINCT a.name AS source, r.name AS type, b.name AS target, r.fact AS fact, r.created_at AS created_at
         ORDER BY r.created_at DESC
         LIMIT $limit

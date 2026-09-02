@@ -95,6 +95,18 @@ _STOPWORDS = frozenset({
     "its", "their", "know", "tell", "me", "recently", "changed",
     "status", "affected", "relevant", "connected", "between", "going",
     "on", "up", "not", "any", "all", "can", "will",
+    # Auxiliary/modal verbs -- commonly the capitalized first word of a
+    # yes/no question ("Has X shipped?", "Should we escalate Y?"). Added
+    # after finding a real bug these words caused, not the possessive one
+    # they were originally suspected of (see _extract_candidate_entities'
+    # own comment): a sentence-initial "Has" glues onto an immediately
+    # adjacent real proper noun ("Has Ferrotek...") into one spurious
+    # two-word candidate, which then fails to resolve and, because it's
+    # still a proper-noun candidate, hard-short-circuits the whole query
+    # into a false "no entity matching that name was found" -- even though
+    # the real entity two words later resolves fine on its own.
+    "has", "have", "had", "should", "would", "could", "shall", "may",
+    "might", "must",
 })
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z'-]{2,}")
 
@@ -127,12 +139,26 @@ def _extract_lowercase_word_candidates(query_text: str) -> list[str]:
     return sorted(words - _STOPWORDS, key=len, reverse=True)
 
 
+_POSSESSIVE_RE = re.compile(r"['’]s\b|['’]\B")
+
+
 def _normalize_entity_name(name: str) -> str:
     """A name equality check that isn't defeated by a legal suffix, "&" vs.
-    "and", punctuation, or extra whitespace -- see _LEGAL_SUFFIX_WORDS above.
-    Two names that normalize the same are treated as the same real-world
-    entity; two that don't are left alone."""
-    normalized = name.lower().replace("&", " and ")
+    "and", punctuation, extra whitespace, or a possessive -- see
+    _LEGAL_SUFFIX_WORDS above. Two names that normalize the same are
+    treated as the same real-world entity; two that don't are left alone.
+
+    The possessive strip (found for real: "Ferrotek's" failed to resolve
+    to "Ferrotek Components" even via this normalized tier, because
+    _NAME_PUNCT_RE only ever stripped "." and ",", never an apostrophe)
+    has to run before the legal-suffix-word split below, or "Ferrotek's"
+    normalizes to the two words "ferrotek" + "s" and "s" gets treated as
+    a spurious trailing word rather than removed as part of the same
+    possessive token. \\u2019 is the Unicode right single quote ('), which
+    a real client's own text (an email, a web page) uses far more often
+    than a plain ASCII apostrophe.
+    """
+    normalized = _POSSESSIVE_RE.sub("", name.lower()).replace("&", " and ")
     normalized = _NAME_PUNCT_RE.sub("", normalized)
     words = _NAME_WS_RE.sub(" ", normalized).strip().split(" ")
     while words and words[-1] in _LEGAL_SUFFIX_WORDS:
@@ -141,7 +167,22 @@ def _normalize_entity_name(name: str) -> str:
 
 
 def _extract_candidate_entities(query_text: str) -> list[str]:
-    candidates = set(_PROPER_NOUN_RE.findall(query_text))
+    candidates = set()
+    for match in _PROPER_NOUN_RE.findall(query_text):
+        words = match.split()
+        # A sentence-initial word capitalized only because it starts the
+        # sentence ("Has", "Should", ...) can glue onto an immediately
+        # adjacent real proper noun and get extracted as part of the same
+        # candidate -- see _STOPWORDS' comment for the real bug this
+        # caused (a hard "not found" short-circuit on a query naming an
+        # entity that actually resolves fine). Strip one leading word if
+        # it's a stopword; a genuine multi-word proper noun never starts
+        # with a bare auxiliary verb or filler word, so this can't strip
+        # a real name down to a wrong one.
+        while len(words) > 1 and words[0].lower() in _STOPWORDS:
+            words = words[1:]
+        if words:
+            candidates.add(" ".join(words))
     return sorted(candidates, key=len, reverse=True)
 
 
@@ -205,21 +246,38 @@ def match_entities_by_name(
     name would incorrectly merge. Worth revisiting once a stronger
     signal exists in the data.
     """
-    # NOT n:Decision throughout this function (and every other general
-    # entity/fact query in this codebase) -- a :Decision node is an
-    # internal audit record of a past generated recommendation (see
-    # app/graph/decisions.py), not a business entity a person would ever
-    # be asking about. It's labeled :Entity too (the ontology models
+    # Strips a trailing possessive ("Ferrotek's" -> "Ferrotek") before any
+    # of the three tiers below run, not just the normalized-equality one
+    # (_normalize_entity_name already strips it too, but that tier alone
+    # can't bridge a possessive-truncated single-word reference to a
+    # longer real name -- "ferrotek" normalized never equals "ferrotek
+    # components"; it's this function's own CONTAINS fallback tier that
+    # actually has to run against the possessive-free candidate for that
+    # case to resolve at all). Found for real: "Ferrotek's" failed to
+    # resolve to "Ferrotek Components" through any of the three tiers,
+    # because none of them ever saw the apostrophe stripped -- the exact
+    # tier compares the raw candidate, and the final CONTAINS fallback
+    # (below) also used the raw, un-normalized `name` unchanged.
+    name = _POSSESSIVE_RE.sub("", name)
+    # NOT n:SaxonRecommendation throughout this function (and every other
+    # general entity/fact query in this codebase) -- a :SaxonRecommendation
+    # node is an internal audit record of a past generated recommendation
+    # (see app/graph/decisions.py), not a business entity a person would
+    # ever be asking about. Deliberately narrower than the ontology's own
+    # :Decision entity type (which this node also carries) -- a real
+    # client dataset can have its own genuine Decision business entities
+    # that must stay retrievable, so the exclusion can't just be "any
+    # :Decision node". It's labeled :Entity too (the ontology models
     # Decision as extending Event, which extends Entity), so without
-    # this exclusion it's indistinguishable from real data to every
-    # query in this module -- found for real in production: a Decision
-    # node's own auto-generated name ("Recommendation for: <query>") got
-    # sampled as a suggested-question topic, and its INVOLVES edge's
+    # this exclusion Saxon's own recommendations would be indistinguishable
+    # from real data to every query in this module -- found for real in
+    # production: a Decision node's own auto-generated name ("Recommendation
+    # for: <query>") got sampled as a suggested-question topic, and its INVOLVES edge's
     # boilerplate fact text ("Saxon generated this recommendation while
     # analyzing: <query>") got returned as if it were a real fact about
     # the entity the Decision was about.
     exact_rows = execute_cypher(
-        "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) = toLower($name) AND NOT n:Decision "
+        "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) = toLower($name) AND NOT n:SaxonRecommendation "
         "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id",
         {"group_ids": group_ids, "name": name},
     )
@@ -232,7 +290,7 @@ def match_entities_by_name(
     # benefit -- skip it in that case.
     if len(core_token) >= 3:
         candidate_rows = execute_cypher(
-            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS $core_token AND NOT n:Decision "
+            "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS $core_token AND NOT n:SaxonRecommendation "
             "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id",
             {"group_ids": group_ids, "core_token": core_token},
         )
@@ -255,7 +313,7 @@ def match_entities_by_name(
         return matched
 
     contains_rows = execute_cypher(
-        "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS toLower($name) AND NOT n:Decision "
+        "MATCH (n:Entity) WHERE n.group_id IN $group_ids AND toLower(n.name) CONTAINS toLower($name) AND NOT n:SaxonRecommendation "
         "RETURN n.uuid AS uuid, n.name AS name, n.summary AS summary, n.group_id AS group_id LIMIT 1",
         {"group_ids": group_ids, "name": name},
     )
