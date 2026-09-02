@@ -53,14 +53,24 @@ class _CausalRecommendation(BaseModel):
 
 # Kept short for the same reason _SYNTHESIS_MAX_TOKENS is: this runs on every
 # causal query, not just at ingestion time, and a recommendation is meant to
-# be a few sentences a person can act on, not a report.
-_RECOMMENDATION_MAX_TOKENS = 300
+# be a few sentences a person can act on, not a report. Raised from 300 --
+# found live, after routing more (real, historical) facts into chain_lines
+# (see _build_answer_lines's use above): a richer chain_lines input pushes
+# the model to reference more of it in the answer, and 300 tokens wasn't
+# enough headroom for all 4 structured fields to complete -- the response
+# got cut off mid-field, which is a pydantic *validation* failure (a field
+# is simply missing), not a content problem, and silently degraded every
+# such query to no recommendation at all.
+_RECOMMENDATION_MAX_TOKENS = 500
 
 
 # Kept low deliberately -- this is one short sentence, not a report. Also
 # bounds the cost of a call that (unlike extraction) runs on every multi-fact
-# query, not just at ingestion time.
-_SYNTHESIS_MAX_TOKENS = 80
+# query, not just at ingestion time. Raised from 80 for the same reason
+# _RECOMMENDATION_MAX_TOKENS was -- _build_answer_lines now feeds real
+# historical facts in too, and 80 tokens left no margin before a longer
+# synthesized sentence got cut off mid-JSON-field and failed validation.
+_SYNTHESIS_MAX_TOKENS = 150
 
 
 def _parse_iso(timestamp) -> Optional[datetime]:
