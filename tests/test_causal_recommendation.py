@@ -130,6 +130,31 @@ def test_unresolved_anchor_returns_none_recommendation_and_no_decision(monkeypat
     assert packet.metadata["retrieval_path"] == "none"
 
 
+def test_semantic_fallback_facts_with_no_anchor_are_fact_only_not_a_recommendation(monkeypatch):
+    # GraphRepository.causal_chain_for_query can now return (None, None,
+    # facts) for its own semantic-search fallback (no name candidate at all
+    # in the query) -- the orchestrator must route that through the same
+    # fact-only synthesis every other non-causal path uses, never a
+    # fabricated recommendation/:Decision from an anchor that was never
+    # actually resolved.
+    called = []
+    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    facts = [{"fact": "Daniel Reyes approved the expedited fix for $9,000.", "is_valid": True, "kind": "semantic_search"}]
+    orchestrator = _orchestrator(None, facts)
+
+    packet = asyncio.run(
+        orchestrator.get_causal_context_packet(
+            "Who approved the expedited fix, and what did it cost?", group_ids=["kb1"], tenant_id="t1"
+        )
+    )
+
+    assert packet.metadata["recommendation"] is None
+    assert packet.metadata["decision_id"] is None
+    assert called == []
+    assert packet.metadata["retrieval_path"] == "causal_semantic_fallback"
+    assert packet.metadata["summary"] == "Daniel Reyes approved the expedited fix for $9,000."
+
+
 def test_empty_chain_skips_synthesis_and_decision(monkeypatch):
     called = []
     monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")

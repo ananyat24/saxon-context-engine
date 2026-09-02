@@ -210,12 +210,68 @@ def test_causal_walk_never_crosses_into_another_groups_node(repo):
 
 
 def test_unresolved_query_returns_no_anchor_and_no_facts(repo):
+    # "Totally Unknown Causal Entity" IS a proper-noun-shaped candidate that
+    # fails to resolve (saw_unresolved=True) -- a confident non-match, which
+    # must still hard-fail rather than fall through to semantic search (see
+    # the new fallback tests below for the case that SHOULD fall through).
     anchor, second_entity, facts = asyncio.run(
         repo.causal_chain_for_query("What happened with Totally Unknown Causal Entity?", ["nonexistent-group"], None)
     )
     assert anchor is None
     assert second_entity is None
     assert facts == []
+
+
+# --- Semantic-search fallback for a query with no name candidate at all ----
+# Regression: found live -- "Who approved the expedited fix, and what did it
+# cost?" has no proper-noun/id candidate for the entity resolver to try at
+# all, so this endpoint used to report a flat "not found" (anchor is None,
+# facts is []) even though the plain Ask path (search_graphiti_facts) could
+# fall through to Graphiti's own hybrid search and find something real.
+# Fixed by giving causal_chain_for_query the same last-resort fallback.
+
+
+def test_no_candidate_at_all_falls_through_to_semantic_search(repo):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    fake_edge = SimpleNamespace(
+        fact="Daniel Reyes approved the expedited fix for $9,000.",
+        name="APPROVES",
+        source_node_uuid="s1",
+        target_node_uuid="t1",
+        valid_at=None,
+        invalid_at=None,
+        expired_at=None,
+        group_id="g1",
+        episodes=[],
+    )
+    repo.graphiti.search = AsyncMock(return_value=[fake_edge])
+
+    anchor, second_entity, facts = asyncio.run(
+        repo.causal_chain_for_query("Who approved the expedited fix, and what did it cost?", ["g1"], None)
+    )
+
+    assert anchor is None
+    assert second_entity is None
+    assert len(facts) == 1
+    assert facts[0]["fact"] == "Daniel Reyes approved the expedited fix for $9,000."
+    assert facts[0]["kind"] == "semantic_search"
+    repo.graphiti.search.assert_awaited_once()
+
+
+def test_proper_noun_that_fails_to_resolve_never_falls_through_to_search(repo):
+    from unittest.mock import AsyncMock
+
+    repo.graphiti.search = AsyncMock(return_value=[])
+    anchor, second_entity, facts = asyncio.run(
+        repo.causal_chain_for_query("What happened with Totally Unknown Causal Entity?", ["g1"], None)
+    )
+    assert anchor is None
+    assert facts == []
+    # The confident-non-match short-circuit must win -- semantic search is
+    # never even attempted.
+    repo.graphiti.search.assert_not_awaited()
 
 
 def test_visibility_filter_excludes_a_hop_through_a_hidden_node(repo):

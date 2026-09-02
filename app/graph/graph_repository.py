@@ -484,24 +484,46 @@ class GraphRepository:
             against real production data (see CLAUDE.md).
           - one named entity resolved: walks the causal-typed chain out
             from it (_causal_chain_facts_from), same as before this fix.
-          - nothing resolved: returns (None, None, []).
+          - nothing resolved by name at all, and no proper noun specifically
+            failed to resolve either (see resolve_named_entities'
+            saw_unresolved): falls through to Graphiti's own hybrid search,
+            same last-resort fallback search_graphiti_facts already has for
+            the plain Ask path -- returns (None, None, semantic_facts).
+            Found live: "Who approved the expedited fix, and what did it
+            cost?" and similar descriptive-reference questions have no
+            proper-noun/id candidate for the entity resolver to try at all,
+            so this endpoint used to report a flat "not found" even though
+            the plain Ask path, asked the same underlying question, could
+            find real facts via search. The caller (ContextOrchestrator)
+            routes a non-empty semantic-fallback result through the same
+            fact-only synthesis the plain Ask path uses -- never a
+            recommendation or :Decision, since this isn't a resolved anchor
+            or a real causal walk.
+          - a proper noun specifically failed to resolve: returns
+            (None, None, []), same "not found" as before -- a confident
+            non-match shouldn't be papered over with unrelated search
+            results.
 
         Returns (anchor, second_entity, facts). anchor is the "primary"
         entity either way (the first resolved candidate), so a
         single-entity caller reads the same as before; second_entity is
         only ever set in the two-entity case. facts is empty when nothing
-        resolved, or the chain/path itself came back empty (no causal-typed
-        edges from the anchor, or no path at all between the two entities).
-        Unlike the single-anchor walk, a two-entity path's facts are NOT
-        guaranteed to be causal-typed -- see is_entirely_causal, which the
-        caller uses to decide whether to treat it as a real causal chain or
-        report it as a plain, fully-sourced connection instead.
+        resolved and no semantic fallback applied, or the chain/path itself
+        came back empty (no causal-typed edges from the anchor, or no path
+        at all between the two entities). Unlike the single-anchor walk, a
+        two-entity path's facts are NOT guaranteed to be causal-typed -- see
+        is_entirely_causal, which the caller uses to decide whether to treat
+        it as a real causal chain or report it as a plain, fully-sourced
+        connection instead.
         """
         if not self.graphiti or not group_ids:
             return None, None, []
-        resolved_groups, _saw_unresolved = await self._resolve_named_entities(query_text, group_ids, visible_uuids)
+        resolved_groups, saw_unresolved = await self._resolve_named_entities(query_text, group_ids, visible_uuids)
         if not resolved_groups:
-            return None, None, []
+            if saw_unresolved:
+                return None, None, []
+            semantic_facts = await self._semantic_fallback_facts(query_text, group_ids, visible_uuids)
+            return None, None, semantic_facts
         anchor = resolved_groups[0][0]
         if len(resolved_groups) >= 2:
             second_entity = resolved_groups[1][0]
@@ -631,6 +653,21 @@ class GraphRepository:
         # it. The caller (see app/api/context.py's result_limit) can still ask
         # for more on a broad question via a "see more results" follow-up,
         # rather than everyone paying for a bigger default every time.
+        return await self._semantic_fallback_facts(query_text, group_ids, visible_uuids, num_results)
+
+    async def _semantic_fallback_facts(
+        self, query_text: str, group_ids: Optional[list[str]], visible_uuids: Optional[set[str]],
+        num_results: int = 8,
+    ) -> list[dict[str, Any]]:
+        """Graphiti's own hybrid (semantic + BM25 + graph) search -- the
+        last-resort fallback when no named entity could be resolved from the
+        query at all. Shared by search_graphiti_facts's own bottom branch
+        (above) and causal_chain_for_query's equivalent (below): a query
+        naming no entity a name-based lookup can find shouldn't just report
+        "not found" when the entity resolver never had a real signal to work
+        with in the first place (see resolve_named_entities' saw_unresolved
+        distinction -- both callers still hard-fail on a proper noun that
+        specifically failed to resolve, never falling through to this)."""
         results = await self.graphiti.search(query_text, group_ids=group_ids, num_results=num_results)
         kept = [
             r for r in results

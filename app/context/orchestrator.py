@@ -482,6 +482,14 @@ class ContextOrchestrator:
         """
         anchor, second_entity, chain_facts = await self._repo.causal_chain_for_query(query, group_ids, visible_uuids)
         if anchor is None:
+            if chain_facts:
+                # No entity resolved by name, but causal_chain_for_query's
+                # semantic-search fallback found something -- fact-only,
+                # same as every other non-causal path: this isn't a
+                # resolved anchor or a real causal walk, so it never gets a
+                # recommendation or a :Decision, only sourced evidence and a
+                # plain synthesized answer.
+                return await self._fact_only_causal_packet(query, group_ids, chain_facts, "causal_semantic_fallback")
             return ContextPacket(
                 query=query,
                 metadata={
