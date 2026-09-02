@@ -331,6 +331,56 @@ def test_two_entity_path_not_entirely_causal_is_fact_only_with_full_evidence(mon
     assert packet.metadata["retrieval_path"] == "causal_path_between_entities"
 
 
+# --- Invalidated-but-real facts must still reach the recommendation --------
+# Regression: found live right after fixing the LIMIT-before-dedup bug in
+# _causal_chain_facts_from -- the root-cause fact (a defect that got
+# invalidated once the affected lot was quarantined) DID survive dedup into
+# chain_facts, but get_causal_context_packet used to build chain_lines from
+# `[f["fact"] for f in valid_chain_facts]` -- an is_valid-only filter -- so
+# the real, relevant, but-since-superseded fact never reached the
+# recommendation LLM call at all. Fixed by routing chain_facts through
+# _build_answer_lines (same helper the plain Ask path already used for this
+# exact class of bug) instead of a raw is_valid filter.
+
+
+def test_an_invalidated_but_real_fact_still_feeds_the_recommendation(monkeypatch):
+    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: "decision-invalidated")
+    anchor = {"uuid": "order-1", "name": "Order SO-99"}
+    facts = [
+        {
+            "fact": "QualityEvent QE-1 has put Order SO-99 at risk.",
+            "is_valid": True, "relationship_type": "AFFECTS",
+            "source_node_uuid": "qe-1", "target_node_uuid": "order-1",
+            "valid_at": "2026-08-01T00:00:00Z", "invalid_at": None,
+        },
+        {
+            # The root cause: real, but superseded (is_valid=False) once the
+            # lot was quarantined -- must NOT be dropped from chain_lines.
+            "fact": "Production lot LOT-9 has a solder-joint defect causing elevated failure rates.",
+            "is_valid": False, "relationship_type": "PRODUCES",
+            "source_node_uuid": "supplier-1", "target_node_uuid": "component-1",
+            "valid_at": "2026-07-20T00:00:00Z", "invalid_at": "2026-08-05T00:00:00Z",
+        },
+    ]
+    captured_lines = {}
+
+    class _CapturingOrchestrator(ContextOrchestrator):
+        async def _synthesize_recommendation(self, query, anchor_name, chain_lines):
+            captured_lines["lines"] = chain_lines
+            return await super()._synthesize_recommendation(query, anchor_name, chain_lines)
+
+    orchestrator = _CapturingOrchestrator(graphiti_instance=_FakeGraphiti(_LLM_RESPONSE))
+    orchestrator._repo = _FakeCausalRepo(anchor, facts)
+
+    packet = asyncio.run(
+        orchestrator.get_causal_context_packet("Why is Order SO-99 at risk?", group_ids=["kb1"], tenant_id="t1")
+    )
+
+    assert any("solder-joint defect" in line for line in captured_lines["lines"])
+    assert "solder-joint defect" in packet.metadata["summary"]
+    assert packet.metadata["recommendation"] == _LLM_RESPONSE
+
+
 def test_two_entity_no_path_reports_no_connection_found_not_an_unrelated_fact(monkeypatch):
     called = []
     monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")

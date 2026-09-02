@@ -484,8 +484,7 @@ class ContextOrchestrator:
                 },
             )
 
-        valid_chain_facts = [f for f in chain_facts if f.get("is_valid", True)]
-        if not valid_chain_facts:
+        if not chain_facts:
             if second_entity is not None:
                 # Mirrors search_graphiti_facts's own two-entity "not found"
                 # phrasing -- there's genuinely nothing to fall back to here
@@ -524,7 +523,7 @@ class ContextOrchestrator:
                 },
             )
 
-        if not self._repo.is_entirely_causal(valid_chain_facts):
+        if not self._repo.is_entirely_causal(chain_facts):
             # A two-entity connecting path isn't restricted to causal-typed
             # edges the way the single-anchor walk is (see
             # causal_chain_for_query) -- "how is X connected to Y" needs the
@@ -532,9 +531,18 @@ class ContextOrchestrator:
             # isn't entirely causal, treating it as one would mean inferring
             # a "why" from, say, a shared location, which isn't a real
             # causal story -- fact-only, fully-sourced instead.
-            return await self._fact_only_causal_packet(query, group_ids, valid_chain_facts, "causal_path_between_entities")
+            return await self._fact_only_causal_packet(query, group_ids, chain_facts, "causal_path_between_entities")
 
-        chain_lines = [f["fact"] for f in valid_chain_facts]
+        # _build_answer_lines (not a raw is_valid filter) so a real but
+        # superseded fact -- e.g. the root-cause defect edge that later got
+        # invalidated once the lot was quarantined -- still reaches the
+        # recommendation synthesis below instead of silently vanishing the
+        # same way it used to vanish from the plain Ask path before that fix.
+        # Found live: the actual root cause of an at-risk order was a
+        # solder-joint-defect fact whose invalid_at made it fail the old
+        # `is_valid` filter, so the recommendation's "why" never mentioned it
+        # even though it was sitting right there in the causal chain.
+        chain_lines = _build_answer_lines(chain_facts) or [f["fact"] for f in chain_facts]
         recommendation = None
         decision_id = None
         try:
