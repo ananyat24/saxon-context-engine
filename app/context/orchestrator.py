@@ -533,6 +533,31 @@ class ContextOrchestrator:
                 },
             )
 
+        # A single-anchor causal walk that found only one causal-typed edge
+        # is too thin to trust as "the" explanation on its own when the
+        # anchor genuinely has other, non-causal-typed facts a plain Ask
+        # would surface -- committing straight to a recommendation here
+        # means that one fact silently outranks everything else known about
+        # the entity, with no way for the more relevant context to ever be
+        # seen. Found live: "Who owns the Brightpeak Automation account
+        # right now, and does that affect whether it's at risk?" walked to
+        # exactly one causal-typed fact (a PRODUCES edge to its order), and
+        # the real ownership-handoff facts (MANAGED_BY-shaped, not causal)
+        # never entered the recommendation at all -- even though the plain
+        # Ask path resolves the same entity and shows all of it correctly.
+        # Only overrides when direct_facts_for turns up something the thin
+        # chain doesn't already have; when the anchor truly has nothing
+        # else (the common, well-tested case), this is a no-op and the
+        # normal single-fact recommendation below is exactly right.
+        if second_entity is None and len(chain_facts) <= 1:
+            direct_facts = self._repo.direct_facts_for(anchor["uuid"], visible_uuids)
+            chain_fact_texts = {f["fact"] for f in chain_facts}
+            extra_facts = [f for f in direct_facts if f["fact"] not in chain_fact_texts]
+            if extra_facts:
+                return await self._fact_only_causal_packet(
+                    query, group_ids, chain_facts + extra_facts, "causal_fallback_direct_facts"
+                )
+
         if not self._repo.is_entirely_causal(chain_facts):
             # A two-entity connecting path isn't restricted to causal-typed
             # edges the way the single-anchor walk is (see

@@ -381,6 +381,72 @@ def test_an_invalidated_but_real_fact_still_feeds_the_recommendation(monkeypatch
     assert packet.metadata["recommendation"] == _LLM_RESPONSE
 
 
+# --- A single thin causal fact must not silence richer direct context -----
+# Regression: found live -- "Who owns the Brightpeak Automation account
+# right now, and does that affect whether it's at risk?" walked to exactly
+# one causal-typed fact for the anchor, and committing straight to a
+# recommendation from that one fact meant the real ownership-handoff facts
+# (not causal-typed) never made it into the answer, even though the plain
+# Ask path resolves the same entity and shows all of it. Fixed by checking
+# direct_facts_for whenever the causal chain has only one fact, and routing
+# through the fact-only fallback (with the combined evidence) whenever that
+# turns up something the thin chain didn't already have.
+
+
+def test_single_thin_causal_fact_defers_to_direct_facts_when_more_exists(monkeypatch):
+    called = []
+    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    anchor = {"uuid": "anchor-1", "name": "Test Account"}
+    thin_chain = [{"fact": "Test Account produced Test Order 900.", "is_valid": True, "relationship_type": "PRODUCES"}]
+    richer_direct_facts = [
+        {"fact": "Test Account produced Test Order 900.", "is_valid": True},
+        {"fact": "Priya manages the Test Account and is handing it off to Diego.", "is_valid": True},
+        {"fact": "Diego is taking over management of the Test Account, effective immediately.", "is_valid": True},
+    ]
+    orchestrator = _orchestrator(
+        anchor, thin_chain,
+        llm_response={"answer": "Priya manages the Test Account and is handing it off to Diego."},
+    )
+    orchestrator._repo.direct_facts = richer_direct_facts
+
+    packet = asyncio.run(
+        orchestrator.get_causal_context_packet(
+            "Who owns the Test Account right now, and does that affect whether it's at risk?",
+            group_ids=["kb1"], tenant_id="t1",
+        )
+    )
+
+    assert packet.metadata["recommendation"] is None
+    assert called == []
+    assert packet.metadata["retrieval_path"] == "causal_fallback_direct_facts"
+    assert "Priya manages the Test Account" in packet.metadata["summary"]
+    # The thin causal fact is still part of the evidence, just not the only thing.
+    assert any(f["fact"] == "Test Account produced Test Order 900." for f in packet.metadata["facts"])
+
+
+def test_single_thin_causal_fact_still_gets_a_recommendation_when_nothing_else_exists(monkeypatch):
+    # The common, already-well-tested case: a lone causal fact IS the whole
+    # story (direct_facts_for turns up nothing new) -- must keep working
+    # exactly as before, no fallback override.
+    recorded = {}
+    monkeypatch.setattr(
+        "app.context.orchestrator.record_decision",
+        lambda repo, **kw: recorded.update(kw) or "decision-thin-ok",
+    )
+    anchor = {"uuid": "anchor-1", "name": "Test Order 501"}
+    facts = [{"fact": "Test Order 501 depends on Test Widget.", "is_valid": True, "relationship_type": "DEPENDS_ON"}]
+    orchestrator = _orchestrator(anchor, facts)
+    # direct_facts defaults to [] -- nothing extra for the override to find.
+
+    packet = asyncio.run(
+        orchestrator.get_causal_context_packet("Why is Test Order 501 at risk?", group_ids=["kb1"], tenant_id="t1")
+    )
+
+    assert packet.metadata["recommendation"] == _LLM_RESPONSE
+    assert packet.metadata["retrieval_path"] == "causal_chain"
+    assert recorded["anchor_uuid"] == "anchor-1"
+
+
 def test_two_entity_no_path_reports_no_connection_found_not_an_unrelated_fact(monkeypatch):
     called = []
     monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
