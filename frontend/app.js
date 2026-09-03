@@ -65,7 +65,17 @@ async function loadKnowledgeBases() {
     knowledgeBaseDirectory = data.knowledge_bases;
     const current = getSelectedKnowledgeBase();
     const stillValid = data.knowledge_bases.some((kb) => kb.id === current);
-    if (!stillValid) setSelectedKnowledgeBase(data.default);
+    if (!stillValid) {
+      // Prefer Solandra as the page's own default landing knowledge base
+      // over whatever the tenant's server-side default happens to be
+      // (first in its configured list) -- only matters the first time
+      // someone opens this page, or after their stored choice stops being
+      // valid; picking a different knowledge base always overrides this.
+      const preferredDefault = data.knowledge_bases.some((kb) => kb.id === "solandra_supply_chain")
+        ? "solandra_supply_chain"
+        : data.default;
+      setSelectedKnowledgeBase(preferredDefault);
+    }
 
     select.innerHTML = data.knowledge_bases
       .map((kb) => `<option value="${escapeXml(kb.id)}">${escapeXml(kb.label)}</option>`)
@@ -2102,40 +2112,10 @@ function renderMcpCard() {
 // app/security.py's require_admin), never a tenant's own key. Not meant to
 // be a real admin panel -- just enough to keep the running total out of the
 // per-query line every tenant's user sees, without losing visibility for
-// whoever actually operates this deployment. Kept in localStorage under a
-// different key than saxon_api_key so entering one never substitutes for
-// the other.
-function getAdminKey() {
-  return localStorage.getItem("saxon_admin_key") || "";
-}
-
-document.getElementById("adminSpendBtn").addEventListener("click", async () => {
-  let key = getAdminKey();
-  if (!key) {
-    key = window.prompt("Admin key (ADMIN_API_KEY):") || "";
-    if (!key) return;
-    localStorage.setItem("saxon_admin_key", key);
-  }
-  try {
-    const res = await fetch(`${API}/admin/spend`, { headers: { "X-Admin-Key": key } });
-    if (res.status === 401) {
-      localStorage.removeItem("saxon_admin_key"); // a stored key that no longer works shouldn't keep silently failing
-      window.alert("That admin key isn't valid.");
-      return;
-    }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      window.alert(body.detail || "Could not load spend totals.");
-      return;
-    }
-    const data = await res.json();
-    const line = (label, bucket) =>
-      `${label}: $${bucket.spent_usd.toFixed(4)} of $${bucket.budget_usd.toFixed(2)} budget`;
-    window.alert(`${line("Query spend", data.query)}\n${line("Ingestion spend", data.ingestion)}`);
-  } catch (err) {
-    window.alert(`Error: ${err.message}`);
-  }
-});
+// The "view running spend" button was removed from this page (spend is
+// still tracked and still reachable directly at GET /api/v1/admin/spend
+// with the operator's ADMIN_API_KEY, via curl or a REST client -- this
+// just stopped surfacing it as a clickable button on the page itself).
 
 // --- Init -------------------------------------------------------------------
 async function loadTenantData() {
