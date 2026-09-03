@@ -92,6 +92,15 @@ ADMIN_API_KEY="${ADMIN_API_KEY:-}"
 GOOGLE_OAUTH_CLIENT_ID="${GOOGLE_OAUTH_CLIENT_ID:-}"
 GOOGLE_OAUTH_CLIENT_SECRET="${GOOGLE_OAUTH_CLIENT_SECRET:-}"
 TOKEN_ENCRYPTION_KEY="${TOKEN_ENCRYPTION_KEY:-}"
+# Only needed to enable the Fabric IQ Ontology / Work IQ one-click connect
+# buttons (see app/config.py and .env.example for how to get these). All
+# three of the first group or none; the two scope vars have their own
+# defaults/blank handling.
+MICROSOFT_OAUTH_TENANT_ID="${MICROSOFT_OAUTH_TENANT_ID:-}"
+MICROSOFT_OAUTH_CLIENT_ID="${MICROSOFT_OAUTH_CLIENT_ID:-}"
+MICROSOFT_OAUTH_CLIENT_SECRET="${MICROSOFT_OAUTH_CLIENT_SECRET:-}"
+FABRIC_IQ_ONTOLOGY_SCOPE="${FABRIC_IQ_ONTOLOGY_SCOPE:-McpServers.FabricIQOntology.All}"
+WORK_IQ_SCOPE="${WORK_IQ_SCOPE:-}"
 
 echo "=== 1. Selecting subscription ==="
 az account set --subscription "$SUBSCRIPTION"
@@ -179,6 +188,7 @@ SECRET_ARGS=(
 [ -n "$ADMIN_API_KEY" ] && SECRET_ARGS+=(admin-api-key="$ADMIN_API_KEY")
 [ -n "$GOOGLE_OAUTH_CLIENT_SECRET" ] && SECRET_ARGS+=(google-oauth-client-secret="$GOOGLE_OAUTH_CLIENT_SECRET")
 [ -n "$TOKEN_ENCRYPTION_KEY" ] && SECRET_ARGS+=(token-encryption-key="$TOKEN_ENCRYPTION_KEY")
+[ -n "$MICROSOFT_OAUTH_CLIENT_SECRET" ] && SECRET_ARGS+=(microsoft-oauth-client-secret="$MICROSOFT_OAUTH_CLIENT_SECRET")
 
 ENV_ARGS=(
   NEO4J_URI="$NEO4J_URI"
@@ -209,6 +219,11 @@ ENV_ARGS=(
 [ -n "$GOOGLE_OAUTH_CLIENT_ID" ] && ENV_ARGS+=(GOOGLE_OAUTH_CLIENT_ID="$GOOGLE_OAUTH_CLIENT_ID")
 [ -n "$GOOGLE_OAUTH_CLIENT_SECRET" ] && ENV_ARGS+=(GOOGLE_OAUTH_CLIENT_SECRET=secretref:google-oauth-client-secret)
 [ -n "$TOKEN_ENCRYPTION_KEY" ] && ENV_ARGS+=(TOKEN_ENCRYPTION_KEY=secretref:token-encryption-key)
+[ -n "$MICROSOFT_OAUTH_TENANT_ID" ] && ENV_ARGS+=(MICROSOFT_OAUTH_TENANT_ID="$MICROSOFT_OAUTH_TENANT_ID")
+[ -n "$MICROSOFT_OAUTH_CLIENT_ID" ] && ENV_ARGS+=(MICROSOFT_OAUTH_CLIENT_ID="$MICROSOFT_OAUTH_CLIENT_ID")
+[ -n "$MICROSOFT_OAUTH_CLIENT_SECRET" ] && ENV_ARGS+=(MICROSOFT_OAUTH_CLIENT_SECRET=secretref:microsoft-oauth-client-secret)
+ENV_ARGS+=(FABRIC_IQ_ONTOLOGY_SCOPE="$FABRIC_IQ_ONTOLOGY_SCOPE")
+[ -n "$WORK_IQ_SCOPE" ] && ENV_ARGS+=(WORK_IQ_SCOPE="$WORK_IQ_SCOPE")
 
 if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
   echo "App exists, updating image, secrets, and env vars..."

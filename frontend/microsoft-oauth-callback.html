@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!--
+  The one, fixed redirect URI registered on the Entra app registration for
+  the "fabric_iq_ontology"/"work_iq" one-click connect flow (see
+  app/ingestion/microsoft_oauth.py's redirect_uri()). Static, not a backend
+  route -- Microsoft's identity platform has no equivalent to Google
+  Identity Services' popup-only "postmessage" redirect_uri, so this page
+  plays that exact role by hand: read the code/state this popup got
+  redirected here with, hand them back to the window that opened it, close.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Connecting…</title>
+</head>
+<body>
+    <p>Connecting… you can close this window if it doesn't close automatically.</p>
+    <script>
+        (function () {
+            var params = new URLSearchParams(window.location.search);
+            var message = {
+                source: "microsoft-oauth-callback",
+                code: params.get("code"),
+                state: params.get("state"),
+                error: params.get("error"),
+                error_description: params.get("error_description"),
+            };
+            if (window.opener) {
+                window.opener.postMessage(message, window.location.origin);
+            }
+            window.close();
+        })();
+    </script>
+</body>
+</html>

@@ -222,6 +222,131 @@ def finalize_oauth_files(
     return bool(rows) and rows[0]["updated"] > 0
 
 
+def create_fabric_iq_ontology_connector(
+    tenant_id: str,
+    name: str,
+    group_id: str,
+    workspace_id: str,
+    ontology_id: str,
+    oauth_refresh_token_enc: str,
+    repo: Optional[GraphRepository] = None,
+) -> dict:
+    """Creates a "fabric_iq_ontology" connector -- direct MCP access to one
+    Fabric IQ Ontology item (see app/retrieval/fabric_iq_ontology_retriever.py's
+    module docstring for why this needs a delegated user token, not a
+    service credential like foundry_iq above). oauth_refresh_token_enc
+    must already be Fernet-encrypted (see app/graph/token_crypto.py) --
+    reuses the exact same field google_drive_oauth already stores its own
+    refresh token in (get_oauth_refresh_token below is generic by field
+    name, not scoped to one connector type), rather than inventing a
+    parallel column for what's structurally the same kind of secret.
+    status goes straight to 'never_synced' -- there's no picker step like
+    Drive's OAuth flow, the connector is immediately usable."""
+    repo = repo or GraphRepository()
+    connector_id = str(uuid.uuid4())
+    repo.execute_cypher(
+        """
+        CREATE (c:Connector {
+            id: $id, tenant_id: $tenant_id, name: $name, type: 'fabric_iq_ontology',
+            group_id: $group_id, url: null, status: 'never_synced',
+            last_synced_at: null, last_error: null, content_hash: null,
+            source_authority: 0, fabric_iq_workspace_id: $workspace_id,
+            fabric_iq_ontology_id: $ontology_id,
+            oauth_refresh_token_enc: $oauth_refresh_token_enc, created_at: datetime()
+        })
+        """,
+        {
+            "id": connector_id, "tenant_id": tenant_id, "name": name, "group_id": group_id,
+            "workspace_id": workspace_id, "ontology_id": ontology_id,
+            "oauth_refresh_token_enc": oauth_refresh_token_enc,
+        },
+    )
+    return {
+        "id": connector_id, "tenant_id": tenant_id, "name": name, "type": "fabric_iq_ontology",
+        "group_id": group_id, "url": None, "status": "never_synced", "last_synced_at": None,
+        "last_error": None, "content_hash": None, "source_authority": 0,
+        "fabric_iq_workspace_id": workspace_id, "fabric_iq_ontology_id": ontology_id,
+    }
+
+
+def create_work_iq_connector(
+    tenant_id: str,
+    name: str,
+    group_id: str,
+    oauth_refresh_token_enc: str,
+    repo: Optional[GraphRepository] = None,
+) -> dict:
+    """Creates a "work_iq" connector -- see create_fabric_iq_ontology_connector
+    above's docstring for the shared reasoning. No provider-specific extra
+    fields (Work IQ's endpoint is fixed/universal, see work_iq_retriever.py)."""
+    repo = repo or GraphRepository()
+    connector_id = str(uuid.uuid4())
+    repo.execute_cypher(
+        """
+        CREATE (c:Connector {
+            id: $id, tenant_id: $tenant_id, name: $name, type: 'work_iq',
+            group_id: $group_id, url: null, status: 'never_synced',
+            last_synced_at: null, last_error: null, content_hash: null,
+            source_authority: 0, oauth_refresh_token_enc: $oauth_refresh_token_enc, created_at: datetime()
+        })
+        """,
+        {
+            "id": connector_id, "tenant_id": tenant_id, "name": name, "group_id": group_id,
+            "oauth_refresh_token_enc": oauth_refresh_token_enc,
+        },
+    )
+    return {
+        "id": connector_id, "tenant_id": tenant_id, "name": name, "type": "work_iq",
+        "group_id": group_id, "url": None, "status": "never_synced", "last_synced_at": None,
+        "last_error": None, "content_hash": None, "source_authority": 0,
+    }
+
+
+def get_microsoft_iq_credential(
+    tenant_id: str, connector_id: str, connector_type: str, repo: Optional[GraphRepository] = None
+) -> Optional[dict]:
+    """The by-id counterpart to find_microsoft_iq_config_for_group below --
+    same "Sync now" needs THIS connector's own credential, not whichever
+    matching connector is most recent for its group_id" reasoning as
+    get_foundry_iq_credential's own docstring."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        """
+        MATCH (c:Connector {id: $id, tenant_id: $tenant_id, type: $type})
+        RETURN c.oauth_refresh_token_enc AS oauth_refresh_token_enc,
+               c.fabric_iq_workspace_id AS fabric_iq_workspace_id,
+               c.fabric_iq_ontology_id AS fabric_iq_ontology_id
+        """,
+        {"id": connector_id, "tenant_id": tenant_id, "type": connector_type},
+    )
+    return rows[0] if rows else None
+
+
+def find_microsoft_iq_config_for_group(
+    tenant_id: str, group_id: str, connector_type: str, repo: Optional[GraphRepository] = None
+) -> Optional[dict]:
+    """The per-query lookup for "fabric_iq_ontology"/"work_iq" connectors,
+    same role find_foundry_iq_config_for_group plays for that type --
+    returns the most recently created matching connector's config (fields
+    beyond oauth_refresh_token_enc vary by connector_type, so this returns
+    whatever the row has rather than a fixed shape; callers know which
+    type they asked for). None when no such connector exists for this
+    group_id."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        """
+        MATCH (c:Connector {tenant_id: $tenant_id, group_id: $group_id, type: $type})
+        RETURN c.oauth_refresh_token_enc AS oauth_refresh_token_enc,
+               c.fabric_iq_workspace_id AS fabric_iq_workspace_id,
+               c.fabric_iq_ontology_id AS fabric_iq_ontology_id
+        ORDER BY c.created_at DESC
+        LIMIT 1
+        """,
+        {"tenant_id": tenant_id, "group_id": group_id, "type": connector_type},
+    )
+    return rows[0] if rows else None
+
+
 def create_foundry_iq_connector(
     tenant_id: str,
     name: str,

@@ -174,6 +174,7 @@ def _patch_plain_query_scope(monkeypatch):
     # falls through to the global env-var check, so foundry_iq_configured
     # alone controls the outcome without touching Neo4j.
     monkeypatch.setattr(query_service.connectors, "find_foundry_iq_config_for_group", lambda *a, **k: None)
+    monkeypatch.setattr(query_service.connectors, "find_microsoft_iq_config_for_group", lambda *a, **k: None)
 
 
 def test_foundry_iq_retriever_is_added_when_fully_configured(monkeypatch):

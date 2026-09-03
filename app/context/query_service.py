@@ -22,7 +22,9 @@ from app.graph.spend_limiter import SpendLimitExceeded, get_limiter
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
 from app.graph.token_crypto import decrypt_token
 from app.models.context_packet import ContextPacket
+from app.retrieval.fabric_iq_ontology_retriever import FabricIQOntologyRetriever
 from app.retrieval.foundry_iq_retriever import FoundryIQRetriever, foundry_iq_configured
+from app.retrieval.work_iq_retriever import WorkIQRetriever
 from app.security import resolve_knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,38 @@ def _resolve_foundry_iq_retriever(
             search_endpoint=config["search_endpoint"], api_key=api_key, knowledge_base=config["knowledge_base"],
         )
     return FoundryIQRetriever() if foundry_iq_configured() else None
+
+
+def _resolve_microsoft_iq_retrievers(tenant_id: str, group_ids: list[str], repo: GraphRepository) -> list:
+    """The "fabric_iq_ontology"/"work_iq" counterpart to
+    _resolve_foundry_iq_retriever above -- no global-env-var fallback here
+    (unlike Foundry IQ, these have no service-credential config at all,
+    see app/config.py's microsoft_oauth_* settings' own comment on why),
+    so a knowledge base only ever gets one of these if a connector was
+    actually connected for it. Both, not just the first match, can apply
+    to the same group_ids -- a tenant may have connected Fabric IQ
+    Ontology and Work IQ separately, and both are worth querying."""
+    retrievers: list = []
+    for group_id in group_ids:
+        for connector_type in ("fabric_iq_ontology", "work_iq"):
+            config = connectors.find_microsoft_iq_config_for_group(tenant_id, group_id, connector_type, repo=repo)
+            if config is None or not config.get("oauth_refresh_token_enc"):
+                continue
+            try:
+                refresh_token = decrypt_token(config["oauth_refresh_token_enc"])
+            except InvalidToken:
+                logger.warning(f"{connector_type} connector for group '{group_id}' has an undecryptable credential; skipping it.")
+                continue
+            if connector_type == "fabric_iq_ontology":
+                retrievers.append(FabricIQOntologyRetriever(
+                    tenant_id=settings.microsoft_oauth_tenant_id, workspace_id=config["fabric_iq_workspace_id"],
+                    ontology_id=config["fabric_iq_ontology_id"], refresh_token=refresh_token,
+                    scope=settings.fabric_iq_ontology_scope,
+                ))
+            else:
+                retrievers.append(WorkIQRetriever(refresh_token=refresh_token, scope=settings.work_iq_scope))
+    return retrievers
+
 
 # Only anthropic/azure_openai calls are ever recorded against the spend
 # limiter (see app/graph/graphiti_adapter.py) -- a Gemini-provider tenant's
@@ -112,7 +146,10 @@ async def execute_context_query(
     # deliberately not threaded into execute_causal_query below -- see this
     # module's own note there.
     foundry_iq_retriever = _resolve_foundry_iq_retriever(tenant.tenant_id, group_ids, repo)
-    extra_retrievers = [foundry_iq_retriever] if foundry_iq_retriever else None
+    extra_retrievers = ([foundry_iq_retriever] if foundry_iq_retriever else []) + _resolve_microsoft_iq_retrievers(
+        tenant.tenant_id, group_ids, repo
+    )
+    extra_retrievers = extra_retrievers or None
     orchestrator = ContextOrchestrator(graphiti, neo4j_client=neo4j_client, extra_retrievers=extra_retrievers)
     limiter = get_limiter()
     spent_before = limiter.spent("query")

@@ -35,10 +35,14 @@ from app.ingestion.gmail_source import GmailConnector
 from app.ingestion.google_drive_source import _MAX_FILES as _MAX_FILES_PER_OAUTH_CONNECTOR
 from app.ingestion.google_drive_source import GoogleDriveConnector, GoogleDriveOAuthConnector
 from app.ingestion.google_oauth import exchange_code, refresh_access_token, revoke_token
+from app.ingestion.microsoft_oauth import build_authorize_url, decode_state, encode_state
+from app.ingestion.microsoft_oauth import exchange_code as ms_exchange_code
 from app.ingestion.outlook_mail_source import OutlookMailConnector
 from app.ingestion.sharepoint_source import SharePointConnector
 from app.ingestion.web_source import WebConnector
+from app.retrieval.fabric_iq_ontology_retriever import FabricIQOntologyRetriever
 from app.retrieval.foundry_iq_retriever import FoundryIQRetriever
+from app.retrieval.work_iq_retriever import WorkIQRetriever
 from app.security import require_tenant
 
 router = APIRouter()
@@ -84,7 +88,7 @@ _TYPES_REQUIRING_URL = {"web", "google_drive", "sharepoint", "gmail", "outlook_m
 # generic create route with a message pointing at the real flow, rather than
 # just failing _TYPES_REQUIRING_URL's "needs a URL" check with a confusing
 # error.
-_OAUTH_ONLY_TYPES = {"google_drive_oauth"}
+_OAUTH_ONLY_TYPES = {"google_drive_oauth", "fabric_iq_ontology", "work_iq"}
 
 # "foundry_iq" (app/retrieval/foundry_iq_retriever.py) is a live, per-query
 # retriever, not an ingestion connector -- it never implements
@@ -245,13 +249,11 @@ def list_connectors(request: Request, tenant: TenantConfig = Depends(require_ten
 async def create_connector(
     req: CreateConnectorRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)
 ):
-    if req.type not in _CONNECTOR_FACTORIES and req.type not in _RETRIEVER_ONLY_TYPES:
+    _known_types = _CONNECTOR_FACTORIES.keys() | _RETRIEVER_ONLY_TYPES | _OAUTH_ONLY_TYPES
+    if req.type not in _known_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Unsupported connector type '{req.type}'. "
-                f"Supported: {', '.join(sorted(_CONNECTOR_FACTORIES | _RETRIEVER_ONLY_TYPES))}."
-            ),
+            detail=f"Unsupported connector type '{req.type}'. Supported: {', '.join(sorted(_known_types))}.",
         )
     if req.type in _OAUTH_ONLY_TYPES:
         raise HTTPException(
@@ -483,6 +485,15 @@ async def _enqueue_sync(tenant: TenantConfig, connector: dict, request: Request,
         await request.app.state.ingestion_queue.enqueue(_job)
         return
 
+    if connector["type"] in _MICROSOFT_IQ_PROVIDERS:
+        async def _job() -> None:
+            await _check_microsoft_iq_connectivity(
+                tenant, connector, repo=GraphRepository(neo4j_client=request.app.state.neo4j_client)
+            )
+
+        await request.app.state.ingestion_queue.enqueue(_job)
+        return
+
     factory = _CONNECTOR_FACTORIES[connector["type"]]
 
     async def _job() -> None:
@@ -545,6 +556,49 @@ async def _check_foundry_iq_connectivity(tenant: TenantConfig, connector: dict, 
         )
 
 
+async def _check_microsoft_iq_connectivity(tenant: TenantConfig, connector: dict, repo: GraphRepository) -> None:
+    """"Sync now" for a "fabric_iq_ontology"/"work_iq" connector -- same
+    "there's nothing to ingest, run a live connectivity check instead"
+    reasoning as _check_foundry_iq_connectivity above, but refreshing a
+    delegated OAuth access token first rather than decrypting a static API
+    key."""
+    credential = connectors.get_microsoft_iq_credential(
+        tenant.tenant_id, connector["id"], connector["type"], repo=repo
+    )
+    if credential is None or not credential.get("oauth_refresh_token_enc"):
+        connectors.record_sync_result(
+            tenant.tenant_id, connector["id"], status="error", last_error="Connector configuration is missing.", repo=repo
+        )
+        return
+    try:
+        refresh_token = decrypt_token(credential["oauth_refresh_token_enc"])
+    except InvalidToken:
+        connectors.record_sync_result(
+            tenant.tenant_id, connector["id"], status="error",
+            last_error="Stored credential could not be decrypted -- reconnect this connector.", repo=repo,
+        )
+        return
+
+    scope = _scope_for_provider(connector["type"])
+    if connector["type"] == "fabric_iq_ontology":
+        retriever = FabricIQOntologyRetriever(
+            tenant_id=settings.microsoft_oauth_tenant_id, workspace_id=credential["fabric_iq_workspace_id"],
+            ontology_id=credential["fabric_iq_ontology_id"], refresh_token=refresh_token, scope=scope,
+        )
+    else:
+        retriever = WorkIQRetriever(refresh_token=refresh_token, scope=scope)
+
+    facts = await retriever.retrieve("connectivity check", num_results=1)
+    if facts:
+        connectors.record_sync_result(tenant.tenant_id, connector["id"], status="synced", repo=repo)
+    else:
+        connectors.record_sync_result(
+            tenant.tenant_id, connector["id"], status="error",
+            last_error="Could not reach this connection -- the sign-in may have expired. Reconnect it.",
+            repo=repo,
+        )
+
+
 # --- Google Drive one-click connect (see app/ingestion/google_oauth.py and
 # app/ingestion/google_drive_source.py's GoogleDriveOAuthConnector) ---------
 
@@ -569,17 +623,27 @@ class GoogleOAuthFilesRequest(BaseModel):
 
 @router.get("/oauth/providers")
 def oauth_providers(tenant: TenantConfig = Depends(require_tenant)):
-    """Tells the frontend whether the one-click Drive button should even be
-    shown, and hands it the OAuth client id it needs to launch Google's
-    consent popup -- a client id is meant to be public (it identifies the
-    app, not a secret; see Google's own OAuth docs), unlike client_secret,
-    which never leaves this module."""
-    available = bool(settings.google_oauth_client_id and settings.google_oauth_client_secret and settings.token_encryption_key)
+    """Tells the frontend whether the one-click Drive/Fabric IQ/Work IQ
+    connect buttons should even be shown. Google hands back a client id
+    directly (meant to be public -- see Google's own OAuth docs) so the
+    frontend can launch its consent popup itself; the Microsoft flow
+    doesn't need that here at all -- app.js calls
+    POST /connectors/microsoft-oauth/start instead, which builds the
+    authorize URL server-side (see that route's own docstring for why)."""
+    google_available = bool(
+        settings.google_oauth_client_id and settings.google_oauth_client_secret and settings.token_encryption_key
+    )
+    microsoft_available = bool(
+        settings.microsoft_oauth_tenant_id and settings.microsoft_oauth_client_id
+        and settings.microsoft_oauth_client_secret and settings.token_encryption_key and settings.public_base_url
+    )
     return {
         "google_drive": {
-            "available": available,
-            "client_id": settings.google_oauth_client_id if available else None,
-        }
+            "available": google_available,
+            "client_id": settings.google_oauth_client_id if google_available else None,
+        },
+        "fabric_iq_ontology": {"available": microsoft_available},
+        "work_iq": {"available": microsoft_available},
     }
 
 
@@ -693,3 +757,118 @@ async def google_oauth_finalize_files(
     connector = connectors.get_connector(tenant.tenant_id, connector_id, repo=repo)
     await _enqueue_sync(tenant, connector, request, repo)
     return _serialize(connector)
+
+
+# --- Fabric IQ Ontology / Work IQ one-click connect (see
+# app/ingestion/microsoft_oauth.py and app/retrieval/fabric_iq_ontology_retriever.py/
+# work_iq_retriever.py) -- a real per-user OAuth consent flow, like Google
+# Drive's above, but with a real server redirect (Microsoft's identity
+# platform has no equivalent to Google's popup-only "postmessage" trick):
+# a static page (frontend/microsoft-oauth-callback.html) is the registered
+# redirect URI, reads its own code/state query params, and posts them back
+# to the window that opened it -- see that file's own comment. ---------
+
+_MICROSOFT_IQ_PROVIDERS = {"fabric_iq_ontology", "work_iq"}
+
+
+def _scope_for_provider(provider: str) -> str:
+    return settings.fabric_iq_ontology_scope if provider == "fabric_iq_ontology" else settings.work_iq_scope
+
+
+class MicrosoftOAuthStartRequest(BaseModel):
+    provider: str
+    name: str = Field(min_length=1, max_length=200)
+    group_id: str
+    # Only meaningful (and required) for provider == "fabric_iq_ontology" --
+    # which one Fabric workspace/ontology item to ground queries in. Work
+    # IQ's endpoint is fixed/universal (see work_iq_retriever.py), so
+    # neither applies there.
+    workspace_id: Optional[str] = Field(default=None, max_length=200)
+    ontology_id: Optional[str] = Field(default=None, max_length=200)
+
+
+class MicrosoftOAuthFinishRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=4000)
+    state: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/microsoft-oauth/start")
+def microsoft_oauth_start(req: MicrosoftOAuthStartRequest, tenant: TenantConfig = Depends(require_tenant)):
+    """Step 1: builds Microsoft's consent URL server-side (not in the
+    frontend, unlike Google's client_id-is-public flow) so this app
+    registration's tenant id never has to be embedded in browser-visible
+    JS, and packs everything the finish step will need (which tenant,
+    which provider, which knowledge base, Fabric's workspace/ontology ids)
+    into the `state` param itself via microsoft_oauth.encode_state --
+    Fernet-encrypted, tenant-bound, and self-expiring (see that function's
+    own docstring), so there's no separate pending-connect row to clean up
+    or leak across tenants."""
+    if req.provider not in _MICROSOFT_IQ_PROVIDERS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown provider '{req.provider}'.")
+    if req.group_id not in tenant.knowledge_base_ids():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown knowledge base '{req.group_id}' for this tenant."
+        )
+    if req.provider == "fabric_iq_ontology" and not (req.workspace_id and req.ontology_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fabric_iq_ontology needs a workspace id and an ontology item id.",
+        )
+
+    scope = _scope_for_provider(req.provider)
+    if not scope:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{req.provider}' isn't configured on this server yet -- ask your operator to set its scope "
+            "(see app/config.py's work_iq_scope/fabric_iq_ontology_scope).",
+        )
+    try:
+        state = encode_state({
+            "tenant_id": tenant.tenant_id, "provider": req.provider, "name": req.name.strip(),
+            "group_id": req.group_id, "workspace_id": req.workspace_id, "ontology_id": req.ontology_id,
+        })
+        authorize_url = build_authorize_url(scope, state)
+    except ConnectorFetchError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"authorize_url": authorize_url}
+
+
+@router.post("/microsoft-oauth/finish", status_code=status.HTTP_201_CREATED)
+async def microsoft_oauth_finish(
+    req: MicrosoftOAuthFinishRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)
+):
+    """Step 2: the static callback page posted the code/state it got from
+    Microsoft's redirect back to the main window (see frontend/app.js) --
+    this decodes state (rejecting anything expired, tampered, or minted
+    for a different tenant than the one making this request), exchanges
+    the code for tokens, and creates the connector."""
+    try:
+        state_data = decode_state(req.state)
+    except ConnectorFetchError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    if state_data.get("tenant_id") != tenant.tenant_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That connection attempt isn't yours.")
+    provider = state_data.get("provider")
+    if provider not in _MICROSOFT_IQ_PROVIDERS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider in connection attempt.")
+
+    try:
+        tokens = await ms_exchange_code(req.code, _scope_for_provider(provider))
+    except ConnectorFetchError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    try:
+        encrypted_refresh_token = encrypt_token(tokens["refresh_token"])
+    except TokenEncryptionNotConfigured as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    if provider == "fabric_iq_ontology":
+        created = connectors.create_fabric_iq_ontology_connector(
+            tenant.tenant_id, state_data["name"], state_data["group_id"],
+            state_data["workspace_id"], state_data["ontology_id"], encrypted_refresh_token, repo=repo,
+        )
+    else:
+        created = connectors.create_work_iq_connector(
+            tenant.tenant_id, state_data["name"], state_data["group_id"], encrypted_refresh_token, repo=repo,
+        )
+    return _serialize(created)

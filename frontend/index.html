@@ -239,6 +239,26 @@
                 connecting again.
             </p>
 
+            <!-- Fabric IQ Ontology / Work IQ: a real per-user Microsoft sign-in,
+                 not a service credential -- see app/config.py's microsoft_oauth_*
+                 settings for why queries through these run as whoever connects
+                 them, not as whichever Saxon user is asking. -->
+            <div id="msIqConnectRow" class="oauth-connect-row" hidden>
+                <input id="fabricIqWorkspaceId" type="text" placeholder="Fabric workspace id" style="max-width:14rem" />
+                <input id="fabricIqOntologyId" type="text" placeholder="Ontology item id" style="max-width:14rem" />
+                <button id="connectFabricIqBtn" type="button" class="oauth-connect-btn">Connect Fabric IQ Ontology</button>
+                <button id="connectWorkIqBtn" type="button" class="oauth-connect-btn">Connect Work IQ</button>
+                <select id="msIqConnectKbSelect" class="kb-select connector-kb-select" title="Which knowledge base this feeds"></select>
+                <span id="msIqConnectStatus" class="status-line"></span>
+            </div>
+            <p id="msIqConnectHint" class="muted" style="font-size:0.8rem" hidden>
+                Signs you into Microsoft directly (not through Foundry IQ) -- queries drawing on
+                either of these run as whichever person connects here, not as whoever's asking
+                Saxon a question. Fabric IQ Ontology needs the workspace and ontology item id
+                (find both in the Fabric portal's OneLake catalog or the ontology item's own URL);
+                Work IQ needs neither.
+            </p>
+
             <details id="connectorFormWrap" class="raw-details">
                 <summary>New source connector</summary>
                 <div class="row">

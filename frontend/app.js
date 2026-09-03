@@ -342,7 +342,7 @@ async function deleteDocumentSet(id) {
 let connectorDirectory = [];
 
 function renderConnectorKbSelect() {
-  ["connectorKbSelect", "oauthConnectKbSelect"].forEach((id) => {
+  ["connectorKbSelect", "oauthConnectKbSelect", "msIqConnectKbSelect"].forEach((id) => {
     const select = document.getElementById(id);
     if (!select) return;
     select.innerHTML = knowledgeBaseDirectory
@@ -412,6 +412,8 @@ const CONNECTOR_TYPE_LABELS = {
   documents: "Documents",
   email: "Email inbox (mock)",
   foundry_iq: "Microsoft Foundry IQ",
+  fabric_iq_ontology: "Fabric IQ Ontology",
+  work_iq: "Work IQ",
 };
 
 // connectorDirectory itself stays the full, tenant-wide list (needed for
@@ -729,6 +731,12 @@ async function loadOAuthProviders() {
     googleOAuthClientId = drive.available ? drive.client_id : null;
     document.getElementById("oauthConnectRow").hidden = !drive.available;
     document.getElementById("oauthConnectHint").hidden = !drive.available;
+
+    const msIqAvailable = Boolean(body.fabric_iq_ontology?.available || body.work_iq?.available);
+    document.getElementById("msIqConnectRow").hidden = !msIqAvailable;
+    document.getElementById("msIqConnectHint").hidden = !msIqAvailable;
+    document.getElementById("connectFabricIqBtn").hidden = !body.fabric_iq_ontology?.available;
+    document.getElementById("connectWorkIqBtn").hidden = !body.work_iq?.available;
   } catch (err) {
     // Leave the connect row hidden -- same as "not configured".
   }
@@ -887,6 +895,102 @@ document.getElementById("connectGoogleDriveBtn").addEventListener("click", () =>
   });
   client.requestCode();
 });
+
+// --- Fabric IQ Ontology / Work IQ one-click connect -------------------
+// Real redirect-based OAuth (Microsoft's identity platform has no
+// equivalent to Google Identity Services' popup-only "postmessage" trick
+// used above) -- a popup window navigates straight to Microsoft's consent
+// URL (built server-side, see POST /connectors/microsoft-oauth/start),
+// gets redirected by Microsoft to the static callback page
+// (frontend/microsoft-oauth-callback.html), which reads its own code/state
+// and posts them back here via window.postMessage, then closes itself.
+
+function setMsIqConnectStatus(text, cls) {
+  const el = document.getElementById("msIqConnectStatus");
+  el.textContent = text;
+  el.className = `status-line${cls ? " " + cls : ""}`;
+}
+
+async function startMicrosoftIqConnect(provider, btn) {
+  const groupId = document.getElementById("msIqConnectKbSelect").value;
+  const kbLabel = knowledgeBaseDirectory.find((kb) => kb.id === groupId)?.label || groupId;
+  const workspaceId = document.getElementById("fabricIqWorkspaceId").value.trim();
+  const ontologyId = document.getElementById("fabricIqOntologyId").value.trim();
+  if (provider === "fabric_iq_ontology" && (!workspaceId || !ontologyId)) {
+    setMsIqConnectStatus("Give it a Fabric workspace id and an ontology item id first.", "bad");
+    return;
+  }
+
+  btn.disabled = true;
+  setMsIqConnectStatus("Opening Microsoft sign-in…", "");
+  try {
+    const res = await fetch(`${API}/connectors/microsoft-oauth/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        provider,
+        name: `${provider === "fabric_iq_ontology" ? "Fabric IQ Ontology" : "Work IQ"} (${kbLabel})`,
+        group_id: groupId,
+        workspace_id: provider === "fabric_iq_ontology" ? workspaceId : undefined,
+        ontology_id: provider === "fabric_iq_ontology" ? ontologyId : undefined,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setMsIqConnectStatus(body.detail || "Could not start that connection.", "bad");
+      btn.disabled = false;
+      return;
+    }
+    const { authorize_url } = await res.json();
+    pendingMsIqConnect = { provider, btn };
+    window.open(authorize_url, "microsoft-oauth", "width=500,height=650");
+  } catch (err) {
+    setMsIqConnectStatus(`Error: ${err.message}`, "bad");
+    btn.disabled = false;
+  }
+}
+
+let pendingMsIqConnect = null;
+
+window.addEventListener("message", async (event) => {
+  if (event.origin !== window.location.origin) return;
+  const data = event.data;
+  if (!data || data.source !== "microsoft-oauth-callback" || !pendingMsIqConnect) return;
+  const { btn } = pendingMsIqConnect;
+  pendingMsIqConnect = null;
+  btn.disabled = false;
+
+  if (data.error) {
+    setMsIqConnectStatus(data.error_description || "Sign-in was cancelled.", data.error === "access_denied" ? "" : "bad");
+    return;
+  }
+  if (!data.code) {
+    setMsIqConnectStatus("Sign-in didn't complete -- try again.", "bad");
+    return;
+  }
+  setMsIqConnectStatus("Connecting…", "");
+  try {
+    const res = await fetch(`${API}/connectors/microsoft-oauth/finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ code: data.code, state: data.state }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setMsIqConnectStatus(body.detail || "Could not finish connecting.", "bad");
+      return;
+    }
+    setMsIqConnectStatus("Connected.", "ok");
+    document.getElementById("fabricIqWorkspaceId").value = "";
+    document.getElementById("fabricIqOntologyId").value = "";
+    await loadConnectors();
+  } catch (err) {
+    setMsIqConnectStatus(`Error: ${err.message}`, "bad");
+  }
+});
+
+document.getElementById("connectFabricIqBtn").addEventListener("click", (e) => startMicrosoftIqConnect("fabric_iq_ontology", e.currentTarget));
+document.getElementById("connectWorkIqBtn").addEventListener("click", (e) => startMicrosoftIqConnect("work_iq", e.currentTarget));
 
 // Types that need a tenant-supplied address -- kept in sync with
 // app/api/connectors.py's own _TYPES_REQUIRING_URL. The demo data types

@@ -287,6 +287,48 @@ class Settings(BaseSettings):
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
 
+    # OAuth client for the "fabric_iq_ontology" and "work_iq" connector
+    # types (app/ingestion/microsoft_oauth.py) -- the one-click "Connect
+    # Fabric IQ Ontology"/"Connect Work IQ" buttons. A genuinely different
+    # auth model from foundry_iq's connector above: Fabric IQ Ontology and
+    # Work IQ, queried directly (not through Foundry IQ), require DELEGATED
+    # user authentication -- Microsoft's own docs are explicit that Fabric
+    # IQ Ontology's MCP endpoint needs "a BYO Entra app" and Work IQ's
+    # tools act on that signed-in person's own mailbox/calendar/chats, not
+    # a service account. So unlike every other connector type in this
+    # codebase (a headless credential a server can use any time), a query
+    # against one of these two runs as whichever person clicked "Connect"
+    # -- a real product decision, not an implementation detail, flagged
+    # here so it isn't missed later: see CLAUDE.md's v7 section.
+    #
+    # This is one Entra app registration (the "BYO Entra app" both
+    # providers' docs ask for), shared by both connector types -- get it
+    # from Azure Portal -> Microsoft Entra ID -> App registrations -> New
+    # registration (platform: Web, redirect URI:
+    # <this deployment's PUBLIC_BASE_URL>/static/microsoft-oauth-callback.html),
+    # then Certificates & secrets -> New client secret. client_id is not a
+    # secret (the frontend embeds it to build Microsoft's own consent URL,
+    # via GET /api/v1/connectors/oauth/providers) -- client_secret is, and
+    # never leaves this server.
+    microsoft_oauth_tenant_id: str = ""
+    microsoft_oauth_client_id: str = ""
+    microsoft_oauth_client_secret: str = ""
+    # The exact delegated scope string each provider's MCP endpoint expects
+    # -- Microsoft's own docs name Fabric IQ Ontology's
+    # (McpServers.FabricIQOntology.All) but don't document Work IQ's at the
+    # same level of detail (its docs only say a client discovers this via
+    # the server's own /.well-known/oauth-protected-resource endpoint, and
+    # that four broad permissions gate it) -- both preview APIs, both
+    # subject to change per Microsoft's own warning on those docs.
+    # Deliberately configurable rather than hardcoded, so a wrong or
+    # since-changed guess is a config fix, not a code change. Prefixed with
+    # this app registration's own Application ID URI if Entra requires
+    # that (api://<app-id>/<scope-name>) -- check your own tenant's exposed
+    # API blob; left as bare scope names below since that's what each
+    # provider's docs show literally.
+    fabric_iq_ontology_scope: str = "McpServers.FabricIQOntology.All"
+    work_iq_scope: str = ""
+
     # Symmetric key (Fernet, url-safe base64, 32 bytes) this server uses to
     # encrypt every OAuth refresh token before it's written to Neo4j (see
     # app/graph/token_crypto.py) -- a Drive refresh token is a live
