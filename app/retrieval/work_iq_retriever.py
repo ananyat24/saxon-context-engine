@@ -1,8 +1,8 @@
-# A live, query-time retriever against Work IQ's universal MCP endpoint --
-# see app/retrieval/fabric_iq_ontology_retriever.py's module docstring for
+# A live, query-time retriever against Work IQ's universal MCP endpoint.
+# See app/retrieval/fabric_iq_ontology_retriever.py's module docstring for
 # the shared reasoning (direct MCP connection, delegated-user auth, one
 # fixed identity regardless of which Saxon user asked). Uses Work IQ's
-# `ask` tool (see CLAUDE.md's v7 section) -- "invoke Microsoft 365 Copilot
+# `ask` tool (see CLAUDE.md's v7 section): "invoke Microsoft 365 Copilot
 # for natural-language reasoning" over that connected person's own mail,
 # calendar, chats, and files, the closest fit to a "query in, grounded
 # answer out" retriever among Work IQ's 10 fixed tools (the other 9 are
@@ -31,7 +31,7 @@ class WorkIQRetriever:
         visible_uuids: Optional[set[str]] = None,
         num_results: int = 8,
     ) -> list[dict[str, Any]]:
-        """Ignores group_ids/visible_uuids -- see
+        """Ignores group_ids/visible_uuids; see
         FabricIQOntologyRetriever.retrieve's docstring for why."""
         try:
             access_token = await refresh_access_token(self.refresh_token, self.scope)

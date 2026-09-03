@@ -1,5 +1,5 @@
 # Structural validation for a single ontology YAML file (already parsed into a dict
-# by OntologyLoader). This does NOT check the ontology's business meaning -- it only
+# by OntologyLoader). This does NOT check the ontology's business meaning; it only
 # checks that the file has the shape the rest of the codebase expects, so a typo in
 # a YAML file fails loudly at load time instead of causing a confusing error later
 # when something tries to read a field that doesn't exist.
@@ -46,7 +46,7 @@ class OntologyValidator:
             if not isinstance(entity, dict):
                 raise OntologyValidationError(f"Entity '{entity_name}' must be a mapping")
             # Every entity type must extend an existing type (ultimately tracing back
-            # to the base "Entity" type) -- this is what enforces the core-first
+            # to the base "Entity" type). This is what enforces the core-first
             # layering described in ontology/README.md: a domain pack can't invent an
             # entity out of nothing, only specialize something the core already defines.
             if entity_name != "Entity" and "extends" not in entity:

@@ -16,7 +16,7 @@ class Fact(BaseModel):
     predicate: str
 
     # The actual value being asserted. Typed as `Any` because a fact's value could be
-    # a string, a number, a date, etc. depending on the predicate -- there's no single
+    # a string, a number, a date, etc. depending on the predicate: there's no single
     # type that fits every kind of fact.
     value: Any
 
@@ -30,6 +30,6 @@ class Fact(BaseModel):
     # facts come from automated extraction rather than a verified source system.
     confidence: float | None = None
 
-    # ids of Evidence records (see evidence.py) that back up this fact -- lets you
+    # ids of Evidence records (see evidence.py) that back up this fact, so you can
     # trace a statement back to the document, message, or record it came from.
     evidence_ids: list[str] = Field(default_factory=list)

@@ -3,12 +3,12 @@
 # Why this exists: loading and validating the ontology (loader/validator/registry)
 # only makes it available to *us*. Graphiti's LLM extraction doesn't see it unless
 # it's passed to add_episode(), and without that the LLM invents its own type
-# names -- ingesting Northwind customers produced HAS_COMPANY_NAME,
+# names: ingesting Northwind customers produced HAS_COMPANY_NAME,
 # LOCATED_IN_CITY, and LOCATED_IN_COUNTRY, none of which are in the ontology,
 # alongside LOCATED_AT and OWNS, which are. That inconsistency is exactly what
 # an ontology is supposed to prevent, so the schema has to reach the extractor.
 #
-# Graphiti wants `dict[str, type[BaseModel]]` -- actual Pydantic classes, whose
+# Graphiti wants `dict[str, type[BaseModel]]`: actual Pydantic classes, whose
 # names and docstrings it puts in the extraction prompt. So each ontology type
 # is converted into a generated Pydantic model here.
 from typing import Any, Optional

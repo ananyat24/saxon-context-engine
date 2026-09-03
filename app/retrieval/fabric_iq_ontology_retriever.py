@@ -1,19 +1,19 @@
 # A live, query-time retriever against a Fabric IQ Ontology, queried
-# DIRECTLY (its own MCP endpoint), not through Foundry IQ -- see
+# directly (its own MCP endpoint), not through Foundry IQ. See
 # app/retrieval/foundry_iq_retriever.py's module docstring for the more
 # common path (Fabric IQ as a knowledge source Foundry IQ orchestrates).
 # This module exists for the case where a tenant wants Fabric IQ Ontology
 # grounding without standing up a Foundry IQ knowledge base at all.
 #
 # Genuinely different auth model from every other retriever/connector in
-# this codebase: Fabric IQ Ontology's MCP endpoint requires DELEGATED user
-# authentication (Microsoft's own docs, verified 2026-09 -- "a BYO Entra
-# app"), not a service credential -- see app/config.py's
+# this codebase: Fabric IQ Ontology's MCP endpoint requires delegated user
+# authentication (Microsoft's own docs, verified 2026-09: "a BYO Entra
+# app"), not a service credential. See app/config.py's
 # microsoft_oauth_* settings and app/ingestion/microsoft_oauth.py for the
 # consent flow this depends on. A query against this retriever answers
 # grounded in whichever person connected it, the same way a query against
 # Saxon's own graph answers grounded in the connectors a tenant has set
-# up -- it is NOT per-asking-user-scoped the way app/graph/authorization.py's
+# up. It is NOT per-asking-user-scoped the way app/graph/authorization.py's
 # as_user visibility is; see this retriever's own retrieve() docstring.
 import logging
 from typing import Any, Optional
@@ -43,7 +43,7 @@ class FabricIQOntologyRetriever:
         visible_uuids: Optional[set[str]] = None,
         num_results: int = 8,
     ) -> list[dict[str, Any]]:
-        """Ignores group_ids/visible_uuids -- same reasoning as
+        """Ignores group_ids/visible_uuids, same reasoning as
         FoundryIQRetriever's own retrieve() docstring, sharpened here: this
         doesn't just have a separate permission model, it runs as one
         specific Microsoft identity (whoever completed the "Connect Fabric

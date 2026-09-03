@@ -1,7 +1,7 @@
 # In-memory, merged view of the ontology: the result of loading core.yaml plus every
 # domain pack (and, eventually, a customer-specific extension file) into one combined
 # set of entity/relationship definitions. This is what the rest of the app queries
-# when it needs to know "what entity types exist?" -- see app/ontology/bootstrap.py
+# when it needs to know "what entity types exist?" See app/ontology/bootstrap.py
 # for how a populated registry is built at startup.
 from copy import deepcopy
 from typing import Any
@@ -35,7 +35,7 @@ class OntologyRegistry:
         self.validator.validate(ontology)
 
         # Keep the metadata (id/name/version/description) of whichever ontology was
-        # registered first -- normally the enterprise core file -- as the registry's
+        # registered first, normally the enterprise core file, as the registry's
         # "identity". Later files (domain packs) don't overwrite it.
         if not self._ontology["ontology"]:
             self._ontology["ontology"] = deepcopy(ontology["ontology"])
@@ -49,18 +49,18 @@ class OntologyRegistry:
                 existing = self._ontology[section].get(key)
                 if isinstance(existing, dict) and isinstance(value, dict):
                     # Both this layer and an earlier layer define the same key (e.g.
-                    # two domain packs both touch "Organization") -- merge their
+                    # two domain packs both touch "Organization"), so merge their
                     # properties instead of one silently replacing the other.
                     existing.update(deepcopy(value))
                 elif existing is not None and existing != value:
-                    # A scalar section (aliases is the only one today -- entities/
+                    # A scalar section (aliases is the only one today; entities/
                     # relationships/event_types/fact_types entries are always dicts,
                     # handled by the merge branch above) where two layers define the
                     # same key with genuinely different values: e.g. one domain pack's
                     # alias "po" -> "Order" and another's "po" -> "PurchaseOrder".
                     # This used to silently let whichever pack loaded last win, which
                     # meant a real ambiguity (which type does "po" actually mean?)
-                    # never surfaced anywhere -- fail loudly at registration time
+                    # never surfaced anywhere. Fail loudly at registration time
                     # instead, the same way a malformed ontology file already does
                     # (see OntologyValidator), rather than resolving it implicitly by
                     # load order.
@@ -73,7 +73,7 @@ class OntologyRegistry:
                     )
                 else:
                     # Either genuinely new, or the same value redefined identically
-                    # (harmless -- two packs agreeing on an alias isn't a conflict).
+                    # (harmless: two packs agreeing on an alias isn't a conflict).
                     self._ontology[section][key] = deepcopy(value)
 
     def get_entity_type(self, name: str) -> dict[str, Any] | None:
@@ -90,14 +90,14 @@ class OntologyRegistry:
 
     def causal_relationship_types(self) -> list[str]:
         """Every relationship type any registered ontology file flagged
-        `causal: true` -- see ontology/core.yaml's DEPENDS_ON/CAUSED_BY/
+        `causal: true`. See ontology/core.yaml's DEPENDS_ON/CAUSED_BY/
         AFFECTS/RESULTED_IN/SOURCED_FROM for the generic set, and a domain
         pack (e.g. supply_chain.yaml's SUPPLIES/COMPOSED_OF/FLAGGED_BY/
         QUALITY_ISSUE_ON) for a domain-specific one. This is what
         GraphRepository's causal-chain walker treats as "explains why," so
         a domain pack that wants its own relationship types to participate
         in causal reasoning marks them here rather than needing a code
-        change in graph_repository.py -- found the hard way: supply_chain.yaml
+        change in graph_repository.py. Found the hard way: supply_chain.yaml
         was written specifically to represent the reference architecture's
         own Order -> Product -> Component -> Supplier -> QualityEvent
         example, but none of its relationship types were in the walker's

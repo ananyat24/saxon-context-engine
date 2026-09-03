@@ -1,5 +1,5 @@
 # Shared "connect to an MCP server as a client, call one tool with a
-# single natural-language string, get text back" logic -- used by both
+# single natural-language string, get text back" logic, used by both
 # app/retrieval/fabric_iq_ontology_retriever.py and work_iq_retriever.py.
 # Factored out because both are the same shape (a bearer-token-authed
 # streamable-HTTP MCP server exposing a tool that takes a query/question
@@ -7,12 +7,12 @@
 # names differ.
 #
 # Deliberately introspects the tool's own input schema (list_tools()) at
-# call time rather than hardcoding a parameter name like "query" --
+# call time rather than hardcoding a parameter name like "query".
 # Microsoft's own docs for both Fabric IQ Ontology and Work IQ explicitly
 # warn these are preview APIs whose "tool names and parameters" may change
 # (see CLAUDE.md's v7 section). Picking the tool's first required
 # string-typed input property is a defensible guess given a tool already
-# known (by name) to take one natural-language question, not a blind one --
+# known (by name) to take one natural-language question, not a blind one,
 # and it keeps working across a parameter rename that would otherwise
 # silently break a hardcoded key.
 import logging
@@ -29,7 +29,7 @@ _TIMEOUT_SECONDS = 15.0
 
 async def query_mcp_tool(url: str, access_token: str, tool_name: str, query_text: str) -> Optional[str]:
     """Returns the tool's text result, or None on anything that means "this
-    retriever found nothing usable" -- unreachable server, tool not found,
+    retriever found nothing usable": unreachable server, tool not found,
     no string parameter to put the query in, or the server reporting an
     error. Never raises: same "a live external dependency being
     unreachable degrades to found-nothing, not a failed query" principle

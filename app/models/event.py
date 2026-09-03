@@ -1,6 +1,6 @@
 # Event: something that happened at a specific point in time, e.g. "order shipped"
 # or "contract signed". Distinct from a Fact (a state that holds over a period of
-# time) -- an Event is a discrete occurrence.
+# time). An Event is a discrete occurrence.
 from datetime import datetime
 from typing import Any
 from pydantic import BaseModel, Field

@@ -1,8 +1,8 @@
-# Entity: a "thing" in the graph -- a person, an organization, a machine, a document, etc.
+# Entity: a "thing" in the graph, such as a person, an organization, a machine, or a document.
 #
 # This is a Pydantic model, not a plain Python class. Pydantic checks the types of the
 # data you pass in at runtime and raises a clear error if something doesn't match, which
-# is why these classes look like plain field lists with no __init__ method -- Pydantic
+# is why these classes look like plain field lists with no __init__ method: Pydantic
 # generates that for you based on the fields declared below.
 from typing import Any
 from pydantic import BaseModel, Field

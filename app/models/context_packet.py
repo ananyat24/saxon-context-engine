@@ -1,4 +1,4 @@
-# ContextPacket: the final, assembled answer to a query -- everything the system
+# ContextPacket: the final, assembled answer to a query. Everything the system
 # gathered (entities, relationships, facts, events, and the evidence behind them)
 # bundled together so it can be handed to an LLM as grounding, or returned directly
 # to a caller. Think of this as the "response object" for the whole context engine:
@@ -32,5 +32,5 @@ class ContextPacket(BaseModel):
     # estimate one (e.g. by averaging the confidence of the facts it contains).
     confidence: float | None = None
 
-    # Anything else worth attaching -- which retrievers ran, timing info, etc.
+    # Anything else worth attaching: which retrievers ran, timing info, etc.
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -1,6 +1,6 @@
 # Reads ontology definitions from disk. An "ontology" here is just a YAML file that
 # lists out the entity types (Person, Organization, ...) and relationship types
-# (MANAGES, OWNS, ...) that are allowed in the graph -- see ontology/core.yaml for
+# (MANAGES, OWNS, ...) that are allowed in the graph. See ontology/core.yaml for
 # the full definition and ontology/README.md for how the layering (core -> domain ->
 # customer) works. This module only handles reading the YAML into a Python dict;
 # app/ontology/validator.py checks that the dict is well-formed, and
