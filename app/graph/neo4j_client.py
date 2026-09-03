@@ -1,7 +1,7 @@
 # Thin wrapper around the official Neo4j Python driver. Neo4j is the graph database
 # this project stores everything in; a "driver" is the connection-pool object the
 # neo4j package gives you to run queries against it. Nothing here is specific to
-# Graphiti or to this project's ontology -- this is just plumbing.
+# Graphiti or to this project's ontology; this is just plumbing.
 import logging
 from neo4j import GraphDatabase, Driver
 from app.config import settings

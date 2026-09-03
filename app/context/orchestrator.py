@@ -21,7 +21,7 @@
 #
 # Note: this fills in ContextPacket.metadata with a plain-text summary and the
 # raw per-fact records (including temporal validity), but not the packet's
-# structured `facts` list -- turning retriever results into proper Fact model
+# structured `facts` list. Turning retriever results into proper Fact model
 # instances is a follow-up step, not yet implemented.
 import logging
 from datetime import datetime
