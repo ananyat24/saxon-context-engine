@@ -3,7 +3,7 @@
   The one, fixed redirect URI registered on the Entra app registration for
   the "fabric_iq_ontology"/"work_iq" one-click connect flow (see
   app/ingestion/microsoft_oauth.py's redirect_uri()). Static, not a backend
-  route -- Microsoft's identity platform has no equivalent to Google
+  route. Microsoft's identity platform has no equivalent to Google
   Identity Services' popup-only "postmessage" redirect_uri, so this page
   plays that exact role by hand: read the code/state this popup got
   redirected here with, hand them back to the window that opened it, close.

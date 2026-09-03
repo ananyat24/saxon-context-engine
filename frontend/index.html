@@ -30,7 +30,7 @@
 
     <!-- Access key popup: every /graph and /context route needs one to know
          whose data to show. Stored in localStorage only, on this browser, for
-         demo convenience -- never sent anywhere but this API's own routes. -->
+         demo convenience. Never sent anywhere but this API's own routes. -->
     <div id="keyOverlay" class="overlay" hidden>
         <div class="modal">
             <div class="modal-header">
@@ -240,7 +240,7 @@
             </p>
 
             <!-- Fabric IQ Ontology / Work IQ: a real per-user Microsoft sign-in,
-                 not a service credential -- see app/config.py's microsoft_oauth_*
+                 not a service credential. See app/config.py's microsoft_oauth_*
                  settings for why queries through these run as whoever connects
                  them, not as whichever Saxon user is asking. -->
             <div id="msIqConnectRow" class="oauth-connect-row" hidden>
@@ -424,7 +424,7 @@
     </main>
 
     <!-- Google Identity Services (the "Connect Google Drive" consent popup)
-         and the Picker API (the file-selection dialog after consent) -- both
+         and the Picker API (the file-selection dialog after consent). Both
          load lazily/no-ops harmlessly if GOOGLE_OAUTH_CLIENT_ID isn't
          configured server-side, since app.js only ever calls into them after
          GET /connectors/oauth/providers confirms the button should show. -->

@@ -71,14 +71,14 @@ header {
 .badge-bad { background: var(--status-critical); color: #fff; }
 .badge-warn { background: var(--status-warning); color: #fff; }
 /* Translucent-white fill only reads correctly over the dark header this was
-   designed for (see the "checking..." health badge) -- the same fill over a
+   designed for (see the "checking..." health badge). The same fill over a
    light card/table background (connector type tags, "Never synced"/"Queued"
    status, "Private" doc-set tag) washes out to barely-visible, so those use
    this solid light-surface variant instead. */
 .badge-muted { background: rgba(255,255,255,0.15); color: #cdd6e2; }
 .badge-neutral { background: var(--surface-sunken); color: var(--text-muted); }
 
-/* A real <button>, styled to still read as a badge -- for the "Error"
+/* A real <button>, styled to still read as a badge: for the "Error"
    status pill, which is clickable (see formatSyncStatus in app.js) to show
    why a sync failed, not just decorative. */
 .badge-btn {
@@ -441,7 +441,7 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
 }
 .doc-sets-table tr:last-child td { border-bottom: none; }
 
-/* Column proportions per table -- table-layout: fixed (above) needs these so
+/* Column proportions per table: table-layout: fixed (above) needs these so
    a long, unbreakable value (a connector's full URL, in particular) wraps
    within its own cell instead of blowing out the column width, without
    squeezing the shorter columns (Status, Last synced, the action buttons)
