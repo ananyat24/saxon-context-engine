@@ -50,7 +50,7 @@ entities:
   ContractTerm:
     extends: Entity
     description: >
-      The time window a contract is in force -- effective date, expiration
+      The time window a contract is in force: effective date, expiration
       date, renewal terms. Modeled as its own entity because a contract's
       term is frequently amended independently of the rest of the agreement.
     properties:

@@ -80,7 +80,7 @@ relationships:
     description: Supplier is a source of this Component.
     # Part of the leadership worked example's causal chain (Order -> Product
     # -> Component -> Supplier -> QualityEvent, see this file's own status
-    # note in CLAUDE.md) -- without this flag, GraphRepository's causal-chain
+    # note in CLAUDE.md). Without this flag, GraphRepository's causal-chain
     # walker (which only recognizes core.yaml's 5 generic causal types by
     # default) can't see this edge at all, even when it's extracted exactly
     # as intended. See OntologyRegistry.causal_relationship_types().

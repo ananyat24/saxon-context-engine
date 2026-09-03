@@ -40,7 +40,7 @@ Entity
 1. Copy `ontology/customer-extension-template.yaml` (or an existing domain file
    under `ontology/domains/`) as a starting point.
 2. Add entity types under `entities:`, each with `extends:` pointing at an
-   existing core or domain type -- never a bare new type with no parent.
+   existing core or domain type: never a bare new type with no parent.
 3. Add relationship types under `relationships:` only when an existing one
    (`ontology/core.yaml`) doesn't already capture the meaning.
 4. Validate your changes:
