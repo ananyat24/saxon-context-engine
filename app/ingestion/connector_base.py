@@ -5,7 +5,7 @@
 #
 # Kept deliberately small: a connector's only job is turning its source's
 # current content into SourceRecords (the same shape every other ingestion
-# path in this codebase already produces -- see app/ingestion/file_source.py)
+# path in this codebase already produces, see app/ingestion/file_source.py)
 # and producing a fingerprint of that content, so app/api/connectors.py's
 # sync flow, and the content-hash dedup-before-extraction guard, work
 # identically regardless of source type.
@@ -32,7 +32,7 @@ class SourceConnector(ABC):
     @abstractmethod
     def content_hash(self, records: list[SourceRecord]) -> str:
         """A cheap fingerprint of `records` (already the result of fetch()),
-        used to skip re-ingesting -- and re-paying for extraction on -- a
+        used to skip re-ingesting, and re-paying for extraction on, a
         sync that found no real change since the last one."""
 
     @abstractmethod
@@ -45,7 +45,7 @@ def hash_records(records: list[SourceRecord]) -> str:
     """Shared content_hash() implementation for a connector that fetches
     several records at once (database rows, a folder of documents/emails):
     a fingerprint of every record's body, in order, so any addition, removal,
-    or edit among them changes the hash -- not just an edit to one record
+    or edit among them changes the hash, not just an edit to one record
     that happens to be first."""
     if not records:
         return ""

@@ -1,19 +1,19 @@
-# The "structured database/CRM" connector type -- represents pulling rows
+# The "structured database/CRM" connector type: represents pulling rows
 # from a live structured source (a CRM's API, a client's Postgres/MySQL
 # database) via the same row-to-prose path app/ingestion/file_source.py's
 # read_csv_records() already uses for the sample datasets.
 #
 # No live credentialed source is available yet (see CLAUDE.md's v1 note), so
-# this reads CSVs from disk rather than a real DB/API client -- but which
-# CSVs is no longer a single bundled demo folder shared by every tenant (see
+# this reads CSVs from disk rather than a real DB/API client. Which CSVs is
+# no longer a single bundled demo folder shared by every tenant though (see
 # CLAUDE.md's follow-up on the "easily droppable CSV" gap). A connector now
-# reads from its OWN upload folder (data/uploads/<connector_id>/, populated
-# only by POST /connectors/{id}/files -- see app/api/connectors.py), falling
+# reads from its own upload folder (data/uploads/<connector_id>/, populated
+# only by POST /connectors/{id}/files, see app/api/connectors.py), falling
 # back to the original bundled mock CRM dataset if nothing's been uploaded to
 # it yet. The folder path is still never taken from a tenant-supplied value
 # (connector_id is server-generated), so the original path-traversal /
 # arbitrary-file-read concern this module's docstring used to flag doesn't
-# apply to this either -- only the upload endpoint's own filename handling
+# apply to this either; only the upload endpoint's own filename handling
 # needs to guard against that, which it does (Path(...).name strips any
 # directory components before a file ever touches disk).
 import csv
@@ -23,23 +23,23 @@ from typing import Optional
 from app.ingestion.connector_base import ConnectorFetchError, SourceConnector, hash_records
 from app.ingestion.file_source import FileSourceSpec, SourceRecord, read_csv_records
 
-# A column an auto-inferred spec should treat as this row's "as-of" date --
-# without this, every auto-inferred episode gets reference_time=now() at
+# A column an auto-inferred spec should treat as this row's "as-of" date.
+# Without this, every auto-inferred episode gets reference_time=now() at
 # ingestion time regardless of what the CSV's own date fields say, which
 # loses a re-synced dataset's real calendar semantics (a day1/day2_update
 # pair collapses to "whichever minute each sync happened to run" instead of
-# the actual days the data represents -- see CLAUDE.md's v1 status note on
+# the actual days the data represents; see CLAUDE.md's v1 status note on
 # the Solandra transition-tracking gap this contributes to). Deliberately
 # conservative in two ways: (1) a column whose name literally contains
 # "date" (OrderDate, DueDate, ShipDate) is always preferred when one exists;
 # (2) the fallback only matches a known temporal-event prefix immediately
 # before "At"/"On" (CreatedAt, UpdatedOn, ResolvedAt), not just any column
-# ending in those two letters -- "Location" also ends in "on", and a naive
-# suffix-only check would wrongly pick it. A wrong guess here degrades
+# ending in those two letters, since "Location" also ends in "on", and a
+# naive suffix-only check would wrongly pick it. A wrong guess here degrades
 # gracefully, never dangerously: read_csv_records' parse_date() already
 # returns None for a value it can't parse as a date, which the caller
 # already treats the same as "no date column" (falls back to ingestion
-# time) -- this can only ever recover a real date it previously missed, not
+# time). This can only ever recover a real date it previously missed, not
 # fabricate a wrong one.
 _DATE_COLUMN_PREFIXES = (
     "created", "updated", "modified", "opened", "closed", "resolved",
@@ -66,7 +66,7 @@ UPLOADS_ROOT = Path("data/uploads")
 
 # accounts.csv is the original bundled dataset and keeps its hand-picked
 # spec (record type + which column is the id/name) exactly as before. Any
-# *other* CSV -- dropped into the demo folder, or uploaded to a connector --
+# other CSV, dropped into the demo folder, or uploaded to a connector,
 # doesn't have a hand-picked spec, so _infer_spec() below guesses one from
 # the header instead of requiring an exact filename/column match.
 _KNOWN_SPECS: dict[str, FileSourceSpec] = {
@@ -125,8 +125,8 @@ def _load_accounts() -> list[SourceRecord]:
 
 class DatabaseConnector(SourceConnector):
     """Structured-source connector: ingests whatever CSVs have been uploaded
-    to this specific connector (POST /connectors/{connector_id}/files --
-    see app/api/connectors.py), one file per record type, the same layout
+    to this specific connector (POST /connectors/{connector_id}/files, see
+    app/api/connectors.py), one file per record type, the same layout
     the bundled sample datasets use (see data/samples/northwind/, etc.).
     Falls back to the bundled demo CRM dataset (data/samples/mock_crm/) when
     nothing's been uploaded to this connector yet, so an existing "Database
@@ -139,9 +139,9 @@ class DatabaseConnector(SourceConnector):
     def _upload_dir(self) -> Optional[Path]:
         # No id yet (see app/api/connectors.py's pre-creation validation
         # call, which probes a type's factory with {} before the connector
-        # row -- and its id -- exists) -- nothing to look up, always fall
-        # back to the bundled demo dataset rather than resolving to the
-        # shared uploads root itself.
+        # row, and its id, exists), so there's nothing to look up: always
+        # fall back to the bundled demo dataset rather than resolving to
+        # the shared uploads root itself.
         return connector_upload_dir(self._connector_id) if self._connector_id else None
 
     async def fetch(self) -> list[SourceRecord]:

@@ -1,4 +1,4 @@
-# Shared "strip tags, keep the visible text" helper -- used by every
+# Shared "strip tags, keep the visible text" helper, used by every
 # connector that can receive HTML content (a fetched web page, an Outlook/
 # Gmail message body). Deliberately dependency-free (stdlib html.parser, not
 # BeautifulSoup/lxml): MVP scope doesn't justify a new dependency for
@@ -7,7 +7,7 @@
 import re
 from html.parser import HTMLParser
 
-# Elements whose contents are never real page text -- markup/behavior/style,
+# Elements whose contents are never real page text: markup/behavior/style,
 # not something a person reading the page would see.
 _SKIP_TAGS = {"script", "style", "noscript", "template", "svg"}
 

@@ -1,12 +1,12 @@
 # Fetches a single web page and turns it into a SourceRecord the same shape
-# app/ingestion/file_source.py produces for a CSV row or .txt file -- so a web
+# app/ingestion/file_source.py produces for a CSV row or .txt file, so a web
 # page flows through the exact same IngestionPipeline.ingest_episode() call as
 # every other source, with no special-casing needed downstream. This is the
-# first real "connector" (a live external source, not a local sample file) --
+# first real "connector" (a live external source, not a local sample file);
 # see app/graph/connectors.py for the connector record this backs.
 #
 # HTML-to-text stripping is shared with any other connector that can receive
-# HTML content (Outlook/Gmail message bodies) -- see app/ingestion/html_text.py.
+# HTML content (Outlook/Gmail message bodies); see app/ingestion/html_text.py.
 import hashlib
 import ipaddress
 import socket
@@ -19,12 +19,12 @@ from app.ingestion.file_source import SourceRecord
 from app.ingestion.html_text import html_to_text
 
 # Fetching an arbitrary external URL on a user's behalf needs a hard timeout
-# and a size cap -- otherwise one slow or huge page ties up the request
+# and a size cap, otherwise one slow or huge page ties up the request
 # indefinitely. 10s and 2MB are generous for a normal web page/article.
 _FETCH_TIMEOUT_SECONDS = 10.0
 _MAX_CONTENT_BYTES = 2 * 1024 * 1024
-# Keeps a single sync's LLM cost bounded regardless of how long the page is --
-# extraction cost scales with input tokens, and nothing here should let one
+# Keeps a single sync's LLM cost bounded regardless of how long the page is.
+# Extraction cost scales with input tokens, and nothing here should let one
 # oversized page turn into a surprise bill.
 _MAX_TEXT_CHARS = 20_000
 
@@ -34,7 +34,7 @@ class WebFetchError(ConnectorFetchError):
 
 
 # A tenant supplies this URL and the server fetches it on the tenant's
-# behalf -- without a check like this, a connector is a ready-made SSRF
+# behalf. Without a check like this, a connector is a ready-made SSRF
 # primitive: "add a web connector pointed at http://169.254.169.254/..." (the
 # Azure/AWS/GCP instance-metadata address) or http://localhost:<internal-port>
 # would make this server, sitting inside the deployment's own network, fetch
@@ -45,7 +45,7 @@ _MAX_REDIRECTS = 5
 
 def _assert_public_host(hostname: str) -> None:
     """Resolves `hostname` and rejects it if any resolved address is
-    loopback/private/link-local/reserved/multicast -- covers "localhost",
+    loopback/private/link-local/reserved/multicast: covers "localhost",
     bare IPs, and hostnames that merely resolve to an internal address (DNS
     rebinding via a domain the attacker controls)."""
     try:
@@ -69,20 +69,20 @@ def _assert_fetchable(url: str) -> None:
 
 async def fetch_web_record(url: str) -> SourceRecord:
     """Fetches `url`, strips it down to plain text, and returns it as a
-    SourceRecord ready for IngestionPipeline.ingest_episode() -- the same
+    SourceRecord ready for IngestionPipeline.ingest_episode(), the same
     shape read_csv_records()/read_text_records() produce for their sources.
 
     Raises WebFetchError (never a raw httpx exception) on anything that
     should stop a sync and surface a clear message: unreachable host, non-2xx
     status, a non-text response (e.g. a PDF or image), too large, or nothing
     extractable once the tags are stripped. Also rejects the URL up front,
-    and every redirect hop, if it points at a non-public address -- see
+    and every redirect hop, if it points at a non-public address, see
     _assert_fetchable().
     """
     try:
         # Redirects are followed manually (not follow_redirects=True) so each
         # hop's target gets the same public-address check as the original
-        # URL -- otherwise a public URL that 302s to an internal address
+        # URL. Otherwise a public URL that 302s to an internal address
         # would sail straight through the check above.
         async with httpx.AsyncClient(follow_redirects=False, timeout=_FETCH_TIMEOUT_SECONDS) as client:
             current_url = url
@@ -124,12 +124,12 @@ async def fetch_web_record(url: str) -> SourceRecord:
 def content_hash(record: SourceRecord) -> str:
     """A cheap fingerprint of a fetched page's text, used to skip re-ingesting
     (and re-paying for extraction on) a sync that found no real change since
-    last time -- see app/graph/connectors.py."""
+    last time; see app/graph/connectors.py."""
     return hashlib.sha256(record.body.encode("utf-8")).hexdigest()
 
 
 class WebConnector(SourceConnector):
-    """The SourceConnector implementation for a single web page -- thin
+    """The SourceConnector implementation for a single web page: a thin
     wrapper around fetch_web_record()/content_hash() above, so both the
     plain functions (used directly by earlier code/tests) and the generic
     connector interface (used by app/api/connectors.py's dispatch table)

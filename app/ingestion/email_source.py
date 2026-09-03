@@ -1,12 +1,12 @@
-# The "email/inbox" connector type -- represents pulling messages from a
+# The "email/inbox" connector type: represents pulling messages from a
 # live mailbox (Gmail, Microsoft Graph) via a minimal From/To/Subject/Date
 # header format, parsed into the same SourceRecord shape every other source
 # in this codebase produces.
 #
 # Like "database"/DatabaseConnector, this connector now also reads from its
 # own upload folder (data/uploads/<connector_id>/, populated by
-# POST /connectors/{id}/files -- see app/api/connectors.py) before falling
-# back to the bundled mock inbox -- a real client-supplied email export
+# POST /connectors/{id}/files, see app/api/connectors.py) before falling
+# back to the bundled mock inbox. A real client-supplied email export
 # (Gmail/Outlook "download my data" style: a JSON array of
 # {from, to, subject, date, body} objects) is dropped in the same way an
 # uploaded CSV is for the database connector, rather than needing a live
@@ -23,7 +23,7 @@ from app.ingestion.file_source import SourceRecord
 
 _MOCK_EMAIL_DIR = Path("data/samples/mock_email")
 
-# Matches a simple "Header: value" line at the start of a message -- good
+# Matches a simple "Header: value" line at the start of a message: good
 # enough for the bundled mock .txt files (a real Gmail/Graph connector would
 # get these fields structured from the API instead of parsing text).
 _HEADER_RE = re.compile(r"^(From|To|Subject|Date):\s*(.*)$")
@@ -77,9 +77,9 @@ def _load_emails() -> list[SourceRecord]:
 
 def _message_to_record(msg: dict, source_label: str, index: int) -> Optional[SourceRecord]:
     """One {from, to, subject, date, body} object (a single element of an
-    uploaded export's JSON array) -> a SourceRecord, same descriptive shape
-    _parse_email builds for the .txt mock format above so extraction sees
-    consistent input regardless of which path produced it."""
+    uploaded export's JSON array) becomes a SourceRecord, same descriptive
+    shape _parse_email builds for the .txt mock format above so extraction
+    sees consistent input regardless of which path produced it."""
     body_text = str(msg.get("body", "")).strip()
     if not body_text:
         return None
@@ -105,10 +105,10 @@ def _message_to_record(msg: dict, source_label: str, index: int) -> Optional[Sou
 
 def _load_json_exports_from(folder: Path, source_label: str) -> list[SourceRecord]:
     """Reads every *.json file in `folder` as an array of
-    {from, to, subject, date, body} objects -- the shape Gmail/Outlook
+    {from, to, subject, date, body} objects, the shape Gmail/Outlook
     "export your data" tooling (or a small script hitting either API) would
     reasonably produce. A file that isn't a JSON array of objects is skipped
-    rather than failing the whole folder -- one malformed export shouldn't
+    rather than failing the whole folder: one malformed export shouldn't
     block every other one uploaded alongside it."""
     records: list[SourceRecord] = []
     for path in sorted(folder.glob("*.json")):
@@ -129,13 +129,13 @@ def _load_json_exports_from(folder: Path, source_label: str) -> list[SourceRecor
 
 class EmailConnector(SourceConnector):
     """Reads whatever's been uploaded to this specific connector
-    (POST /connectors/{connector_id}/files -- a JSON array export, one file
-    per batch/day) -- see this module's own docstring. Falls back to the
+    (POST /connectors/{connector_id}/files, a JSON array export, one file
+    per batch/day), see this module's own docstring. Falls back to the
     bundled mock inbox (data/samples/mock_email/) when nothing's been
     uploaded yet, same "own folder, demo fallback" pattern
     DatabaseConnector uses. `source_label` distinguishes an otherwise
     identical "email" connector's own uploaded messages in the UI/evidence
-    (e.g. "Gmail" vs "Outlook") -- purely descriptive, doesn't change how
+    (e.g. "Gmail" vs "Outlook"), purely descriptive, and doesn't change how
     the upload folder is resolved."""
 
     def __init__(self, connector_id: str = "", source_label: str = "Email"):

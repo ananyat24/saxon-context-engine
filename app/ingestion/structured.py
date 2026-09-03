@@ -1,6 +1,6 @@
 # Graphiti's extraction is built for natural-language text, not structured rows.
 # This turns a structured record (e.g. a CRM export row) into readable prose so
-# the LLM can pull entities and facts out of it -- see scripts/test_graph.py for
+# the LLM can pull entities and facts out of it. See scripts/test_graph.py for
 # an example of what that text looks like when hand-written for a CRM/ERP scenario.
 #
 # Why prose rather than the raw "col: value, col: value" dump this used to emit:

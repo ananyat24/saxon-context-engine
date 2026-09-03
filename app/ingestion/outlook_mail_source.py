@@ -1,21 +1,21 @@
-# The "outlook_mail" connector type -- pulls recent messages from one live
+# The "outlook_mail" connector type: pulls recent messages from one live
 # Microsoft 365 mailbox's inbox via Microsoft Graph, into the same
 # SourceRecord shape every other source in this codebase produces.
 #
 # Authenticates with the same Azure AD (Entra ID) app registration as the
 # "sharepoint" connector type (app/config.py's sharepoint_tenant_id/
-# client_id/client_secret) via the OAuth2 client credentials flow -- one
+# client_id/client_secret) via the OAuth2 client credentials flow: one
 # operator-wide app registration backs both connector types, not a second
 # credential to configure. The app registration additionally needs Microsoft
-# Graph's Mail.Read *application* permission (admin-consented) for this
+# Graph's Mail.Read application permission (admin-consented) for this
 # connector type specifically; Sites.Read.All alone (what SharePoint needs)
-# isn't enough -- see app/config.py's docstring for both.
+# isn't enough, see app/config.py's docstring for both.
 #
 # Like SharePoint's Sites.Read.All, Mail.Read as an application permission is
 # an org-wide grant: once consented, this connector type can read any
 # mailbox in the tenant Graph is asked for, not just the one a connector
 # happens to point at. The connector's "url" field holds which mailbox
-# (a user's email address) to read -- that's the only thing scoping a given
+# (a user's email address) to read; that's the only thing scoping a given
 # connector to one inbox.
 import re
 
@@ -29,7 +29,7 @@ from app.ingestion.html_text import html_to_text
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 # Keeps a single sync's cost and runtime bounded regardless of how full the
-# mailbox is -- same reasoning as the SharePoint/Drive connectors' file caps.
+# mailbox is, same reasoning as the SharePoint/Drive connectors' file caps.
 _MAX_MESSAGES = 20
 _MAX_TEXT_CHARS = 5_000
 

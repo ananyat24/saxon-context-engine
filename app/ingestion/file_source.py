@@ -33,9 +33,9 @@ class FileSourceSpec:
     kind of thing each row is, and (optionally) which column holds the date the
     row's content actually happened.
 
-    This exists because a CSV alone doesn't say what its rows *mean*. Ingesting
+    This exists because a CSV alone doesn't say what its rows mean. Ingesting
     orders.csv well needs to know "each row is an Order, keyed by OrderID, and
-    happened on OrderDate" -- guessing that from column names would be brittle.
+    happened on OrderDate": guessing that from column names would be brittle.
     """
 
     filename: str
@@ -50,14 +50,14 @@ class FileSourceSpec:
     name_column: Optional[str] = None
     date_column: Optional[str] = None
     date_formats: tuple[str, ...] = ("%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y")
-    # Columns to leave out of the generated text -- typically bulk fields that
+    # Columns to leave out of the generated text: typically bulk fields that
     # add tokens (and LLM cost) without adding facts worth extracting.
     skip_columns: set[str] = field(default_factory=set)
 
 
 def parse_date(value: str, formats: tuple[str, ...]) -> Optional[datetime]:
     """Best-effort date parsing across the formats a spec lists. Returns None
-    rather than raising, so one malformed date doesn't abort a whole file --
+    rather than raising, so one malformed date doesn't abort a whole file:
     the record still ingests, just without a reference time."""
     value = (value or "").strip()
     if not value:
@@ -76,7 +76,7 @@ def read_csv_records(
 ) -> Iterator[SourceRecord]:
     """Yield one SourceRecord per row of a CSV.
 
-    row_filter, if given, skips rows it returns False for -- e.g. limiting a
+    row_filter, if given, skips rows it returns False for, e.g. limiting a
     dimension table to just the rows a small slice of a fact table actually
     references, so a curated sample stays connected instead of pulling in
     unrelated rows that nothing else in the sample points to.

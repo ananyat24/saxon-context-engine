@@ -1,5 +1,5 @@
 # The actual "run one connector's sync" logic, extracted so it's identical
-# regardless of who triggers it -- a manual "Sync now" click
+# regardless of who triggers it: a manual "Sync now" click
 # (app/api/connectors.py) or the background scheduler
 # (app/graph/connector_scheduler.py). Both call this; neither reimplements
 # the fetch -> dedup-check -> ingest -> record-result sequence on its own,
@@ -27,7 +27,7 @@ class SyncResult(TypedDict):
     synced: bool
     skipped_unchanged: bool
     error: str | None
-    # True only for a spend-cap failure -- the one error a caller (the HTTP
+    # True only for a spend-cap failure: the one error a caller (the HTTP
     # route) needs to react to differently (402, not just "sync failed").
     spend_limit_exceeded: bool
 
@@ -39,7 +39,7 @@ async def run_connector_sync(
     *,
     repo: GraphRepository,
 ) -> SyncResult:
-    """Never raises -- every failure mode (a bad fetch, an unchanged
+    """Never raises: every failure mode (a bad fetch, an unchanged
     fetch, a spend cap, an unexpected extraction error) is reported back in
     the returned dict instead, so a caller can react however fits it rather
     than this function assuming one caller's error-handling shape."""
@@ -54,7 +54,7 @@ async def run_connector_sync(
     new_hash = source.content_hash(records)
     if new_hash == connector.get("content_hash"):
         # Fetched fine, but it's word-for-word what the last successful sync
-        # already ingested -- re-running extraction on identical text would
+        # already ingested. Re-running extraction on identical text would
         # just spend real money to add a near-duplicate episode for no new
         # information, so this is a genuine cost guard, not just bookkeeping.
         # It's what makes a frequent background sync (see
@@ -63,15 +63,15 @@ async def run_connector_sync(
         connectors.record_sync_result(tenant.tenant_id, connector_id, status="unchanged", repo=repo)
         return {"synced": False, "skipped_unchanged": True, "error": None, "spend_limit_exceeded": False}
 
-    # Deliberately NOT the tenant's pooled Graphiti client (see
-    # app/graph/tenant_graphiti_pool.py) -- that one is tagged bucket="query"
+    # Deliberately not the tenant's pooled Graphiti client (see
+    # app/graph/tenant_graphiti_pool.py): that one is tagged bucket="query"
     # and shares the query spend budget. Ingestion has its own budget (see
     # app/graph/spend_limiter.py), so this needs its own client tagged
     # bucket="ingestion", same as scripts/ingest_samples.py, rather than
     # silently spending a sync against the query budget.
     graphiti = build_graphiti(google_api_key=tenant.gemini_api_key, bucket="ingestion")
     try:
-        # Content from any of these source types is arbitrary -- no domain
+        # Content from any of these source types is arbitrary: no domain
         # pack fits it a priori, unlike a known dataset like Northwind
         # (sales/supply_chain). Core-only keeps extraction focused on the
         # generic entity/relationship vocabulary rather than guessing at a
@@ -87,7 +87,7 @@ async def run_connector_sync(
                 group_id=connector["group_id"],
             )
             # Tags the Episodic node this record produced with which
-            # connector wrote it -- see app/api/graph.py's ?connector_id=
+            # connector wrote it, see app/api/graph.py's ?connector_id=
             # filter, which is what makes the connector preview modal
             # ("what's been pulled into the graph from this connector")
             # show only this connector's own facts instead of everything in
@@ -98,16 +98,16 @@ async def run_connector_sync(
             # Retried, not just best-effort on the first attempt: a
             # real-world failure here was observed to be a transient Neo4j
             # blip (a few seconds of ServiceUnavailable, recovering on its
-            # own) -- and because this write happens *after* the content
-            # this episode represents is already durably ingested, a
-            # transient failure here is uniquely sticky: content_hash gets
-            # recorded as "already synced" regardless (correctly -- the
-            # content really was ingested), which means an *unchanged*
-            # future sync will keep skipping re-ingestion forever and never
-            # get another chance to tag this episode. A short retry absorbs
-            # exactly the transient case that would otherwise create a
-            # permanently untagged episode with no natural way to recover
-            # short of a manual purge_connector_data + forced re-sync.
+            # own). Because this write happens after the content this
+            # episode represents is already durably ingested, a transient
+            # failure here is uniquely sticky: content_hash gets recorded as
+            # "already synced" regardless (correctly, since the content
+            # really was ingested), which means an unchanged future sync
+            # will keep skipping re-ingestion forever and never get another
+            # chance to tag this episode. A short retry absorbs exactly the
+            # transient case that would otherwise create a permanently
+            # untagged episode with no natural way to recover short of a
+            # manual purge_connector_data + forced re-sync.
             try:
                 episode_uuid = result.episode.uuid
             except Exception as e:
@@ -140,16 +140,16 @@ async def run_connector_sync(
         await graphiti.close()
 
     connectors.record_sync_result(tenant.tenant_id, connector_id, status="synced", content_hash=new_hash, repo=repo)
-    # New data just landed for this group -- don't leave a stale "no
+    # New data just landed for this group, so don't leave a stale "no
     # information found" (or an outdated answer) sitting in the response
     # cache for however long its TTL has left. See app/context/response_cache.py.
     get_response_cache().invalidate_group(tenant.tenant_id, connector["group_id"])
 
     # The Reconcile stage (app/graph/reconciliation.py): a newly-ingested
-    # entity in THIS connector's group_id might be the same real-world thing
+    # entity in this connector's group_id might be the same real-world thing
     # as one already sitting in another of this tenant's group_ids, so this
     # runs across every group_id the tenant has, not just the one that just
-    # synced. Best-effort -- a reconciliation failure shouldn't turn an
+    # synced. Best-effort: a reconciliation failure shouldn't turn an
     # otherwise-successful sync into a reported error; the next sync (of any
     # of this tenant's connectors) will just try again.
     try:

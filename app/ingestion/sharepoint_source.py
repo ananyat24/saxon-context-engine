@@ -1,19 +1,19 @@
-# The "sharepoint" connector type -- pulls text content from every
+# The "sharepoint" connector type: pulls text content from every
 # supported file in one SharePoint site's default document library, via
 # Microsoft Graph, into the same SourceRecord shape every other source in
 # this codebase produces.
 #
 # Authenticates as an Azure AD (Entra ID) app registration using the OAuth2
 # client credentials flow (see app/config.py's sharepoint_tenant_id/
-# client_id/client_secret) -- the SharePoint/Graph equivalent of the Google
+# client_id/client_secret), the SharePoint/Graph equivalent of the Google
 # Drive connector's service account: no interactive user login, works
 # headless for a server-side "Sync now"/scheduled sync.
 #
 # One real difference from Drive worth calling out, not glossing over:
 # Drive's access boundary is per-folder (the service account only sees a
 # folder once someone explicitly shares it). This app registration's access
-# boundary is a single org-wide Microsoft Graph *application* permission
-# (Sites.Read.All, admin-consented) -- once granted, this connector type can
+# boundary is a single org-wide Microsoft Graph application permission
+# (Sites.Read.All, admin-consented): once granted, this connector type can
 # read any SharePoint site in the tenant, not just the ones a connector
 # happens to be pointed at. Whoever grants that permission is making that
 # org-wide call, not a per-site one.
@@ -31,7 +31,7 @@ from app.ingestion.graph_auth import get_graph_access_token
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 # Keeps a single sync's cost and runtime bounded regardless of how large the
-# document library is -- same reasoning as the Google Drive connector's caps.
+# document library is, same reasoning as the Google Drive connector's caps.
 _MAX_FILES = 20
 _MAX_TEXT_CHARS = 20_000
 
@@ -43,8 +43,8 @@ _TEXT_EXTENSIONS = (".txt", ".md", ".csv")
 
 def _parse_site_url(url: str) -> tuple[str, str]:
     """Splits a SharePoint site URL like
-    https://contoso.sharepoint.com/sites/Marketing into (hostname, site_path)
-    -- the two pieces Graph's /sites/{hostname}:/{site-path} lookup needs."""
+    https://contoso.sharepoint.com/sites/Marketing into (hostname, site_path),
+    the two pieces Graph's /sites/{hostname}:/{site-path} lookup needs."""
     parsed = urlparse(url.strip())
     hostname = parsed.hostname
     path = parsed.path.strip("/")
@@ -136,7 +136,7 @@ class SharePointConnector(SourceConnector):
         is_plain_text = mime in PLAIN_TEXT_MIME_TYPES or name.lower().endswith(_TEXT_EXTENSIONS)
         parser = BINARY_TEXT_PARSERS.get(mime)
         if not is_plain_text and not parser:
-            return None  # unsupported type -- skip rather than guess
+            return None  # unsupported type: skip rather than guess
 
         try:
             resp = await client.get(f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/content", headers=headers)
@@ -153,8 +153,9 @@ class SharePointConnector(SourceConnector):
             else:
                 text = resp.text.strip()
         except Exception:
-            # A corrupt/malformed file, or a parsing library error -- same
-            # "skip this one file" treatment, not a whole-sync failure.
+            # A corrupt/malformed file, or a parsing library error, gets
+            # the same "skip this one file" treatment, not a whole-sync
+            # failure.
             return None
 
         if not text:

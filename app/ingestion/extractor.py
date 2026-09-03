@@ -1,5 +1,5 @@
 # Graphiti already runs LLM-based entity/fact extraction internally when you call
-# add_episode() (see app/ingestion/pipeline.py) -- this class is a placeholder hook
+# add_episode() (see app/ingestion/pipeline.py). This class is a placeholder hook
 # for extraction logic that needs to run on top of that, e.g. applying ontology-
 # specific rules before extraction (only look for types this ontology defines) or
 # filtering/post-processing candidates Graphiti already produced. It intentionally

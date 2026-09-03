@@ -1,4 +1,4 @@
-# Thin wrapper around Graphiti's `add_episode` call -- the entry point for getting
+# Thin wrapper around Graphiti's `add_episode` call: the entry point for getting
 # any piece of text (a CRM note, an email, a transcript) into the graph. Graphiti
 # handles the actual entity/fact extraction via an LLM; this class gives that call
 # a consistent, logged interface and, importantly, passes the ontology schema into
@@ -28,7 +28,7 @@ class IngestionPipeline:
         """`entity_types`/`edge_types`/`edge_type_map` come from
         app.ontology.graphiti_types.build_graphiti_schema(). Leaving them None
         falls back to Graphiti's unconstrained extraction, where it invents
-        type names -- fine for a quick demo, not for a consistent graph.
+        type names: fine for a quick demo, not for a consistent graph.
         """
         self.graphiti = graphiti_instance
         self.entity_types = entity_types
@@ -45,7 +45,7 @@ class IngestionPipeline:
     ) -> Any:
         """Send one "episode" of text to Graphiti for extraction and storage.
 
-        `body` is plain text -- Graphiti's LLM reads it and figures out what
+        `body` is plain text: Graphiti's LLM reads it and figures out what
         entities and facts it contains, then writes them into Neo4j. `group_id`
         is optional data isolation (e.g. one tenant's data vs. another's);
         `reference_time` is when the episode's content actually happened/was

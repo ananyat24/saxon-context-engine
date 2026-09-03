@@ -1,4 +1,4 @@
-# The "gmail" connector type -- pulls recent messages from one live Gmail
+# The "gmail" connector type: pulls recent messages from one live Gmail
 # inbox via the Gmail API, into the same SourceRecord shape every other
 # source in this codebase produces.
 #
@@ -7,13 +7,13 @@
 # google_drive_service_account_json), but reading a mailbox needs a
 # different access model than reading a shared Drive folder: there's no
 # "share this inbox with the service account" action a user can take the way
-# there is for a Drive folder. Instead this uses domain-wide delegation --
+# there is for a Drive folder. Instead this uses domain-wide delegation:
 # a Google Workspace admin authorizes the service account (by its numeric
 # client id, in the Workspace Admin console under Security -> API controls ->
-# Domain-wide Delegation) to *impersonate* any user in the domain for the
+# Domain-wide Delegation) to impersonate any user in the domain for the
 # gmail.readonly scope, and this connector then acts as whichever mailbox its
 # "url" field names (see Credentials.with_subject() below). That's an
-# org-wide grant, same shape as SharePoint's Sites.Read.All -- whoever
+# org-wide grant, same shape as SharePoint's Sites.Read.All: whoever
 # authorizes it is authorizing this connector type to read any mailbox in
 # the Workspace domain, not just the one a connector happens to point at.
 # Domain-wide delegation is a Google Workspace (paid) feature; it isn't
@@ -37,7 +37,7 @@ _GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 _GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1"
 
 # Keeps a single sync's cost and runtime bounded regardless of how full the
-# mailbox is -- same reasoning as the SharePoint/Drive connectors' file caps.
+# mailbox is, same reasoning as the SharePoint/Drive connectors' file caps.
 _MAX_MESSAGES = 20
 _MAX_TEXT_CHARS = 5_000
 
@@ -59,7 +59,7 @@ def _flatten_parts(payload: dict) -> Iterator[dict]:
 def _extract_body_text(payload: dict) -> str:
     """A message can be single-part or a MIME tree; prefer a text/plain part
     anywhere in that tree, falling back to text/html (stripped) if that's
-    all there is -- same preference order a mail client uses."""
+    all there is, the same preference order a mail client uses."""
     parts = list(_flatten_parts(payload))
     for p in parts:
         if p.get("mimeType") == "text/plain" and (p.get("body") or {}).get("data"):
@@ -84,7 +84,7 @@ class GmailConnector(SourceConnector):
             raise ConnectorFetchError(f"'{mailbox}' doesn't look like a mailbox address.")
 
     def _get_access_token(self) -> str:
-        """Blocking (google-auth's own refresh() call is synchronous) --
+        """Blocking (google-auth's own refresh() call is synchronous):
         always run this via asyncio.to_thread, never awaited directly."""
         raw = settings.google_drive_service_account_json
         if not raw:

@@ -1,4 +1,4 @@
-# The "unstructured documents" connector type -- represents pulling files
+# The "unstructured documents" connector type: represents pulling files
 # from a live document store (SharePoint, Google Drive) via the same
 # whole-file ingestion path app/ingestion/file_source.py's
 # read_text_records() already uses for the sample datasets.
@@ -8,8 +8,8 @@
 # app/ingestion/database_source.py.
 #
 # Picks up .txt directly, plus .pdf/.docx via the same parsers the live
-# Google Drive/SharePoint connectors use (app/ingestion/document_text_extraction.py)
-# -- so dropping a client's real-shaped mock documents (a PDF policy doc, a
+# Google Drive/SharePoint connectors use (app/ingestion/document_text_extraction.py),
+# so dropping a client's real-shaped mock documents (a PDF policy doc, a
 # Word onboarding guide) in alongside/instead of the bundled .txt files works
 # without needing to convert them to plain text first.
 from pathlib import Path

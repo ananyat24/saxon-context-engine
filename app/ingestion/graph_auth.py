@@ -1,4 +1,4 @@
-# Shared Microsoft Graph client-credentials auth -- both the "sharepoint"
+# Shared Microsoft Graph client-credentials auth: both the "sharepoint"
 # and "outlook_mail" connector types (app/ingestion/sharepoint_source.py,
 # app/ingestion/outlook_mail_source.py) authenticate as the same Azure AD
 # app registration the same way; factored out here rather than duplicated,
@@ -14,7 +14,7 @@ _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 async def get_graph_access_token(client: httpx.AsyncClient, *, missing_permission_hint: str) -> str:
     """`missing_permission_hint` names the specific Graph application
     permission this caller needs (e.g. "Sites.Read.All" or "Mail.Read"),
-    surfaced in the 403 case's error message -- the same app registration
+    surfaced in the 403 case's error message: the same app registration
     backs multiple connector types, each needing its own permission
     admin-consented, so a generic "access denied" wouldn't say which one."""
     tenant_id = settings.sharepoint_tenant_id

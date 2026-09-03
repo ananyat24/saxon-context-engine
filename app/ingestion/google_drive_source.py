@@ -7,20 +7,20 @@
 #   individual user's own Google login. A service account needs no
 #   interactive OAuth consent screen, which is what makes a server-side
 #   "Sync now"/scheduled sync possible with zero per-connector setup beyond
-#   sharing one folder -- but getting a client to actually share a folder
+#   sharing one folder, but getting a client to actually share a folder
 #   with a service account's email is real onboarding friction.
 #
 # - GoogleDriveOAuthConnector ("google_drive_oauth"): a real per-user OAuth
-#   consent flow -- the one-click "Connect Google Drive" button (see
+#   consent flow, the one-click "Connect Google Drive" button (see
 #   app/api/connectors.py's oauth/exchange + oauth/files routes, and
 #   app/ingestion/google_oauth.py for the token exchange/refresh/revoke
 #   calls). Scoped to drive.file, Google's narrowest Drive scope: this
 #   connector can only ever read the specific files a user picked via the
-#   Google Picker at connect time, nothing else in their Drive -- and
+#   Google Picker at connect time, nothing else in their Drive, and
 #   drive.file needs no Google app-verification/security-audit process,
 #   unlike the broader drive.readonly scope a folder-level grant would
 #   require. The tradeoff is real and disclosed in the frontend copy: a
-#   file added to the "same" folder later isn't automatically picked up --
+#   file added to the "same" folder later isn't automatically picked up;
 #   the user has to reconnect and pick again.
 import asyncio
 import json
@@ -47,13 +47,13 @@ from app.ingestion.file_source import SourceRecord
 _DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 # Keeps a single sync's cost and runtime bounded regardless of how large the
-# shared folder is -- same reasoning as web_source.py's own caps.
+# shared folder is, same reasoning as web_source.py's own caps.
 _MAX_FILES = 20
 _MAX_TEXT_CHARS = 20_000
 
 _GOOGLE_FOLDER_MIME = "application/vnd.google-apps.folder"
 # Google's own native formats (Docs/Sheets/Slides) aren't stored as plain
-# files -- they have to be *exported* as one, via a separate Drive API call
+# files; they have to be exported as one, via a separate Drive API call
 # from a regular file download (see _fetch_file_as_record). This maps each
 # native type to the export format that gets the most useful plain text out
 # of it: Sheets as CSV (keeps row/column structure legible), Slides and Docs
@@ -65,16 +65,16 @@ _GOOGLE_NATIVE_EXPORT_MIME_TYPES = {
 }
 # Plain-text mime types and PDF/DOCX parsing (_SUPPORTED_FILE_MIME_TYPES,
 # _BINARY_PARSERS, _MAX_BINARY_BYTES) come from
-# app/ingestion/document_text_extraction.py -- shared with the SharePoint
+# app/ingestion/document_text_extraction.py, shared with the SharePoint
 # connector rather than duplicated here.
 
-# A real Drive file/folder id is a specific base64url-ish alphabet -- this
+# A real Drive file/folder id is a specific base64url-ish alphabet. This
 # also doubles as a defensive check before the id is interpolated into a
 # Drive API `q` search-query string below.
 _DRIVE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # Drive's own mimeType field for a regular (non-Google-native) file isn't
-# always reliable -- depending on how a file got into the folder (drag-drop
+# always reliable. Depending on how a file got into the folder (drag-drop
 # from certain OS file managers, Drive for Desktop sync, some third-party
 # upload tools), a genuine .csv/.txt/.md can come back tagged as something
 # generic like application/octet-stream instead of text/csv, which used to
@@ -82,7 +82,7 @@ _DRIVE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 # whole sync with "No supported files found" even though the files were
 # exactly the supported kind. SharePoint's connector already has to work
 # around the equivalent Graph API quirk for the same reason (see
-# sharepoint_source.py's own _TEXT_EXTENSIONS) -- extension is checked as a
+# sharepoint_source.py's own _TEXT_EXTENSIONS): extension is checked as a
 # fallback signal alongside mimeType here too, not instead of it.
 _TEXT_EXTENSIONS = (".txt", ".md", ".csv")
 _BINARY_MIME_BY_EXTENSION = {".pdf": _PDF_MIME, ".docx": _DOCX_MIME}
@@ -110,7 +110,7 @@ class GoogleDriveConnector(SourceConnector):
         self.folder_id = _extract_folder_id(folder_url_or_id)
 
     def _get_access_token(self) -> str:
-        """Blocking (google-auth's own refresh() call is synchronous) --
+        """Blocking (google-auth's own refresh() call is synchronous):
         always run this via asyncio.to_thread, never awaited directly."""
         raw = settings.google_drive_service_account_json
         if not raw:
@@ -151,7 +151,7 @@ class GoogleDriveConnector(SourceConnector):
 
     async def _list_files(self, client: httpx.AsyncClient, headers: dict) -> list[dict]:
         # Escapes a literal single-quote inside the id before it's embedded
-        # in Drive's own query-string language -- _DRIVE_ID_RE already
+        # in Drive's own query-string language. _DRIVE_ID_RE already
         # rejects one in practice, but this keeps the query construction
         # itself safe even if that check is ever loosened.
         folder_id_escaped = self.folder_id.replace("'", "\\'")
@@ -184,7 +184,7 @@ class GoogleDriveConnector(SourceConnector):
 
 
 async def _fetch_file_as_record(client: httpx.AsyncClient, headers: dict, f: dict) -> Optional[SourceRecord]:
-    """Shared by both connector types below -- doesn't touch either one's
+    """Shared by both connector types below. Doesn't touch either one's
     auth, so it takes the access-token headers as a plain dict rather than
     being a method on either class."""
     mime = f.get("mimeType", "")
@@ -224,17 +224,18 @@ async def _fetch_file_as_record(client: httpx.AsyncClient, headers: dict, f: dic
             resp.raise_for_status()
             if len(resp.content) > _MAX_BINARY_BYTES:
                 return None
-            # CPU-bound parsing -- off the event loop so one large file
+            # CPU-bound parsing, off the event loop so one large file
             # doesn't stall every other request this process is serving.
             text = (await asyncio.to_thread(parser, resp.content)).strip()
         else:
-            return None  # unsupported type -- skip rather than guess
+            return None  # unsupported type: skip rather than guess
     except httpx.HTTPError:
         # One unreadable file shouldn't fail the whole sync.
         return None
     except Exception:
-        # A corrupt/encrypted/malformed file, or a parsing library error --
-        # same "skip this one file" treatment, not a whole-sync failure.
+        # A corrupt/encrypted/malformed file, or a parsing library error,
+        # gets the same "skip this one file" treatment, not a whole-sync
+        # failure.
         return None
 
     if not text:
@@ -251,7 +252,7 @@ async def _fetch_file_as_record(client: httpx.AsyncClient, headers: dict, f: dic
 
 class GoogleDriveOAuthConnector(SourceConnector):
     """The one-click "Connect Google Drive" connector type
-    ("google_drive_oauth") -- reads exactly the files a user picked via the
+    ("google_drive_oauth"): reads exactly the files a user picked via the
     Google Picker at connect time (app/api/connectors.py's oauth/files
     route), authenticating as that user's own OAuth grant rather than an
     operator-configured service account. See this module's own top
@@ -259,7 +260,7 @@ class GoogleDriveOAuthConnector(SourceConnector):
 
     file_ids identifies which files to read; tenant_id/connector_id are
     only used to look up and refresh this connector's own stored OAuth
-    grant (app/graph/connectors.py) -- this class holds no credentials
+    grant (app/graph/connectors.py); this class holds no credentials
     itself between calls, both instances are cheap to construct per-sync."""
 
     def __init__(self, file_ids: list[str], tenant_id: str, connector_id: str):
