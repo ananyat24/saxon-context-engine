@@ -1,4 +1,4 @@
-# app/retrieval/mcp_query_helper.py's _pick_string_param -- pure function,
+# app/retrieval/mcp_query_helper.py's _pick_string_param: pure function,
 # no MCP connection involved. query_mcp_tool itself (the actual MCP
 # handshake) is exercised indirectly through
 # test_fabric_iq_ontology_retriever.py/test_work_iq_retriever.py, which

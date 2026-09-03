@@ -1,4 +1,4 @@
-# FabricIQOntologyRetriever and WorkIQRetriever -- refresh_access_token and
+# FabricIQOntologyRetriever and WorkIQRetriever: refresh_access_token and
 # query_mcp_tool are both monkeypatched (no real Microsoft tenant, no real
 # MCP server); this covers each retriever's own fact-shaping and its
 # graceful-degradation paths (refresh failure, empty MCP result).

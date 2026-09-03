@@ -59,14 +59,14 @@ def test_require_tenant_rejects_unknown_key(monkeypatch):
 
 
 def test_require_tenant_accepts_known_key(monkeypatch, tenant):
-    # Found in the static config -- never reaches the Neo4j fallback at all.
+    # Found in the static config: never reaches the Neo4j fallback at all.
     monkeypatch.setattr(settings, "tenant_api_keys", {"real-key": tenant})
     assert require_tenant(_FakeRequest(), x_api_key="real-key") is tenant
 
 
 def test_require_tenant_falls_back_to_the_neo4j_backed_store(monkeypatch, tenant):
     # A tenant created through the admin API (app/api/admin.py) isn't in the
-    # static config at all -- require_tenant must still find it.
+    # static config at all: require_tenant must still find it.
     monkeypatch.setattr(settings, "tenant_api_keys", {})
     monkeypatch.setattr("app.graph.tenants.find_tenant_by_api_key", lambda api_key, repo=None: tenant)
     assert require_tenant(_FakeRequest(), x_api_key="a-dynamic-tenants-key") is tenant

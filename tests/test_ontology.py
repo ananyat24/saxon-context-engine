@@ -51,7 +51,7 @@ def test_domain_packs_define_real_types():
     assert "HAS_CLAUSE" in legal.relationship_types()
 
     # sales and supply_chain were empty scaffolds until the Context
-    # Graph/Layer/Engine pivot (see CLAUDE.md) -- these assert they were
+    # Graph/Layer/Engine pivot (see CLAUDE.md): these assert they were
     # actually populated with real, extends:-chained types rather than left
     # as stubs, and that the causal-chain example the pivot cites (an Order
     # -> Product -> Component -> Supplier -> QualityEvent) is representable.
@@ -71,7 +71,7 @@ def test_domain_packs_define_real_types():
 
 
 def test_scoped_registry_excludes_other_domains():
-    # Scoping keeps the extraction prompt focused -- a manufacturing ingest
+    # Scoping keeps the extraction prompt focused: a manufacturing ingest
     # shouldn't carry the legal vocabulary.
     manufacturing = build_scoped_registry(["manufacturing"])
     assert "Machine" in manufacturing.entity_types()
@@ -110,7 +110,7 @@ def test_registry_rejects_two_packs_aliasing_the_same_word_to_different_types():
     # The bug this guards against: aliases are a flat merged namespace across
     # every registered ontology file (see OntologyRegistry.register), and
     # unlike entities/relationships/event_types/fact_types (always dicts,
-    # merged by updating properties), an alias is a plain string -- so a
+    # merged by updating properties), an alias is a plain string, so a
     # later pack's conflicting alias used to silently win with no warning.
     # Found for real this session: sales.yaml and supply_chain.yaml both
     # originally aliased "po" to a different type (Order vs. PurchaseOrder).
@@ -121,7 +121,7 @@ def test_registry_rejects_two_packs_aliasing_the_same_word_to_different_types():
 
 
 def test_registry_allows_two_packs_aliasing_the_same_word_identically():
-    # Not every repeated alias is a conflict -- two packs genuinely agreeing
+    # Not every repeated alias is a conflict: two packs genuinely agreeing
     # ("customer" -> "Account" in both) shouldn't fail registration.
     registry = OntologyRegistry()
     registry.register(_minimal_ontology(aliases={"customer": "Account"}))
@@ -132,7 +132,7 @@ def test_registry_allows_two_packs_aliasing_the_same_word_identically():
 def test_registry_still_merges_two_packs_extending_the_same_entity_type():
     # Regression check: the fix above must not break the existing, intended
     # behavior of two packs both touching the same entity/relationship type
-    # (a dict value) -- only scalar (alias) conflicts should raise. The merge
+    # (a dict value): only scalar (alias) conflicts should raise. The merge
     # itself is a shallow dict.update at the entity level (not a deep merge
     # of nested "properties"), so this checks that shape: a second pack
     # adding a new top-level field (here, "description") to a type an
@@ -164,7 +164,7 @@ def test_edge_types_and_map_cover_domain_relationships():
 
 
 # --- causal_relationship_types (drives GraphRepository's causal-chain
-# walker -- see that module's own _CAUSAL_RELATIONSHIP_TYPES docstring) ----
+# walker: see that module's own _CAUSAL_RELATIONSHIP_TYPES docstring) ----
 
 
 def test_causal_relationship_types_includes_core_generic_types():
@@ -174,12 +174,12 @@ def test_causal_relationship_types_includes_core_generic_types():
     for name in ("AFFECTS", "DEPENDS_ON", "CAUSED_BY", "RESULTED_IN", "SOURCED_FROM", "PRODUCES", "TRIGGERED_BY"):
         assert name in causal
     # A relationship with no causal flag at all must not show up just
-    # because it's defined -- RELATED_TO is core's generic catch-all, and
+    # because it's defined: RELATED_TO is core's generic catch-all, and
     # PROVIDES/PERFORMED_ON are administrative/classificatory rather than
     # causal (see ontology/core.yaml's own comments on PRODUCES/
     # TRIGGERED_BY for why those two specifically needed the flag: a real
-    # root-cause chain routinely runs through exactly them -- "supplier
-    # PRODUCES a lot, that lot PRODUCES a defective component" -- and the
+    # root-cause chain routinely runs through exactly them ("supplier
+    # PRODUCES a lot, that lot PRODUCES a defective component"), and the
     # causal-chain walker used to dead-end one hop short of a root cause
     # that was fully present and connected in the graph).
     for name in ("RELATED_TO", "PROVIDES", "PERFORMED_ON"):
@@ -191,7 +191,7 @@ def test_causal_relationship_types_includes_a_flagged_domain_specific_type():
     # specifically to represent the reference architecture's own worked
     # example (Order -> Product -> Component -> Supplier -> QualityEvent),
     # but GraphRepository's causal walker used to only recognize core's 5
-    # generic types -- none of supply_chain's own relationship names -- so
+    # generic types, none of supply_chain's own relationship names, so
     # that exact example could never produce a causal answer even with
     # perfectly-extracted data. See CLAUDE.md's v5/v2 follow-up notes.
     registry = build_scoped_registry(["supply_chain"])

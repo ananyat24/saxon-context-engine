@@ -1,4 +1,4 @@
-# FoundryIQRetriever tests -- no real Azure AI Search resource. httpx's
+# FoundryIQRetriever tests: no real Azure AI Search resource. httpx's
 # AsyncClient is monkeypatched, same spirit as test_sharepoint_connector.py.
 import asyncio
 
