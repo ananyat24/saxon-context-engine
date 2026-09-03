@@ -1,6 +1,6 @@
-# Document Sets: lets a tenant group several of their own knowledge bases
-# ("connectors") into one named, filterable bundle -- see
-# app/graph/document_sets.py for the storage layer and app/api/context.py's
+# Document Sets let a tenant group several of their own knowledge bases
+# ("connectors") into one named, filterable bundle. See
+# app/graph/document_sets.py for the storage layer, and app/api/context.py's
 # document_set field for how one scopes a query across every connector it
 # names.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -18,16 +18,16 @@ class CreateDocumentSetRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     connector_ids: list[str] = Field(min_length=1)
     # Purely a label surfaced in the UI for now, like the reference product's
-    # own "Public" column -- this app has one shared API key per tenant, not
-    # per-operator accounts within a tenant, so there's no separate identity
-    # to withhold a private set from yet.
+    # own "Public" column. This app has one shared API key per tenant, not
+    # separate operator accounts within a tenant, so there's no separate
+    # identity to withhold a private set from yet.
     is_public: bool = True
 
 
 def _serialize(doc_set: dict, tenant: TenantConfig) -> dict:
     """Adds each connector's human-readable label on top of the stored
-    connector_ids, so the client doesn't need a second round trip or its own
-    copy of the tenant's knowledge-base labels just to render a table."""
+    connector_ids, so the client doesn't need a second round trip or its
+    own copy of the tenant's knowledge base labels just to render a table."""
     labels_by_id = {kb.id: kb.label for kb in tenant.knowledge_bases}
     return {
         "id": doc_set["id"],
@@ -37,9 +37,9 @@ def _serialize(doc_set: dict, tenant: TenantConfig) -> dict:
         ],
         "is_public": doc_set["is_public"],
         # A document set is a live filter over connectors that are already
-        # ingested, not a separate index it has to build -- there's no real
-        # "indexing"/"stale" state to report here; it's current the moment
-        # it's created.
+        # ingested, not a separate index it has to build. There's no real
+        # "indexing" or "stale" state to report here; it's current the
+        # moment it's created.
         "status": "Up to date",
     }
 
@@ -75,9 +75,9 @@ def update_document_set(
     request: Request,
     tenant: TenantConfig = Depends(require_tenant),
 ):
-    """Full replace, not a partial patch -- the edit form always submits a
-    complete name/connectors/is_public, same shape as create (see
-    CreateDocumentSetRequest)."""
+    """Full replace, not a partial patch. The edit form always submits a
+    complete name, connector list, and is_public flag, the same shape as
+    create (see CreateDocumentSetRequest)."""
     unknown = set(req.connector_ids) - tenant.knowledge_base_ids()
     if unknown:
         raise HTTPException(

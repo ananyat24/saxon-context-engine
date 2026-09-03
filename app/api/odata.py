@@ -1,19 +1,19 @@
 # A read-only OData v4 feed over the same tenant-scoped entity/fact data
-# app/api/graph.py already exposes to Saxon's own UI -- the "Context Layer"
-# reference architecture explicitly names Power BI as a first-class consumer
-# alongside Copilots/agents/apps, and Power BI Desktop's built-in "OData
-# Feed" data source (Get Data > OData Feed) can point straight at this with
-# no custom connector to build or certify. Same auth, same tenant boundary,
-# same underlying Cypher this project already runs -- this file only adds
-# the OData request/response shape on top.
+# app/api/graph.py already exposes to Saxon's own UI. The "Context Layer"
+# reference architecture explicitly names Power BI as a first-class
+# consumer alongside Copilots, agents, and apps, and Power BI Desktop's
+# built-in "OData Feed" data source (Get Data > OData Feed) can point
+# straight at this with no custom connector to build or certify. Same
+# auth, same tenant boundary, same underlying Cypher this project already
+# runs. This file only adds the OData request/response shape on top.
 #
-# Deliberately NOT a full OData implementation ($filter/$orderby/$expand
-# etc.) -- just enough ($top, and the service document + $metadata a client
-# needs to even discover the feed) for Power BI's OData connector to load
-# Entities/Facts as tables. If richer server-side filtering becomes a real
-# need, extend this rather than reaching for a separate OData library --
-# the data source underneath is exactly the same Cypher app/api/graph.py
-# already runs.
+# Deliberately not a full OData implementation ($filter, $orderby, $expand,
+# and so on). Just enough ($top, plus the service document and $metadata a
+# client needs to discover the feed) for Power BI's OData connector to
+# load Entities/Facts as tables. If richer server-side filtering becomes a
+# real need, extend this rather than reaching for a separate OData
+# library. The data source underneath is exactly the same Cypher
+# app/api/graph.py already runs.
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 
@@ -35,9 +35,9 @@ def _clamp_top(top: int | None) -> int:
 
 def _service_root(request: Request) -> str:
     # Prefer the configured public URL (see app/config.py's public_base_url)
-    # when set -- behind Azure Container Apps, request.base_url reflects the
-    # internal HTTP forwarding address, not the client-facing HTTPS one, and
-    # an OData client resolves relative @odata.context/next-link URLs
+    # when it's set. Behind Azure Container Apps, request.base_url reflects
+    # the internal HTTP forwarding address, not the client-facing HTTPS one,
+    # and an OData client resolves relative @odata.context/next-link URLs
     # against whatever this returns.
     from app.config import settings
 
@@ -47,9 +47,9 @@ def _service_root(request: Request) -> str:
 
 @router.get("")
 def service_document(request: Request, tenant: TenantConfig = Depends(require_tenant)):
-    """The OData service document -- the first thing an OData client (Power
-    BI's OData Feed connector included) requests to discover what feeds
-    (EntitySets) are available."""
+    """The OData service document. This is the first thing an OData client
+    (Power BI's OData Feed connector included) requests to discover what
+    feeds (EntitySets) are available."""
     root = _service_root(request)
     return {
         "@odata.context": f"{root}/$metadata",
@@ -60,12 +60,12 @@ def service_document(request: Request, tenant: TenantConfig = Depends(require_te
     }
 
 
-# Minimal CSDL describing the two feeds below. Every property is typed
-# Edm.String (including timestamps) deliberately -- Graphiti's valid_at/
-# invalid_at can be null or absent, and a nullable Edm.DateTimeOffset that's
-# sometimes missing entirely trips up some OData clients' schema inference
-# more than a plain string does; a client that wants to parse them as dates
-# can still do so client-side.
+# Minimal CSDL describing the two feeds below. Every property is
+# deliberately typed Edm.String, including timestamps. Graphiti's
+# valid_at/invalid_at can be null or absent, and a nullable
+# Edm.DateTimeOffset that's sometimes missing entirely trips up some
+# OData clients' schema inference more than a plain string does. A client
+# that wants to parse them as dates can still do so on its own side.
 _METADATA_XML = """<?xml version="1.0" encoding="utf-8"?>
 <edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
   <edmx:DataServices>

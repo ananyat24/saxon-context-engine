@@ -17,21 +17,21 @@ api_router = APIRouter()
 api_router.include_router(health_router, prefix="/health", tags=["Health"])
 api_router.include_router(entities_router, prefix="/entities", tags=["Entities"])
 api_router.include_router(context_router, prefix="/context", tags=["Context"])
-# Every route in graph.py requires a tenant API key and scopes its query to
-# that tenant's group_id -- see app/api/graph.py's module docstring.
+# Every route in graph.py requires a tenant API key and scopes its query
+# to that tenant's group_id. See app/api/graph.py's module docstring.
 api_router.include_router(graph_router, prefix="/graph", tags=["Graph"])
 api_router.include_router(document_sets_router, prefix="/document-sets", tags=["Document Sets"])
 api_router.include_router(connectors_router, prefix="/connectors", tags=["Connectors"])
-# The Reconcile stage's human review queue -- see app/graph/reconciliation.py.
+# The Reconcile stage's human review queue. See app/graph/reconciliation.py.
 api_router.include_router(reconciliation_router, prefix="/reconciliation", tags=["Reconciliation"])
-# Operator-only (ADMIN_API_KEY, not a tenant's own key) -- see app/api/admin.py.
+# Operator-only (ADMIN_API_KEY, not a tenant's own key). See app/api/admin.py.
 api_router.include_router(admin_router, prefix="/admin", tags=["Admin"])
-# Unauthenticated (Microsoft Graph calls this directly, with no API key) --
+# Unauthenticated. Microsoft Graph calls this directly with no API key;
 # see app/api/webhooks.py's module docstring for the actual trust boundary.
 api_router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])
-# The Context Layer's BI surface -- a read-only OData v4 feed Power BI's
-# built-in "OData Feed" connector can point at directly. Same X-API-Key
-# tenant auth as every other route here; see app/api/odata.py.
+# The Context Layer's BI surface: a read-only OData v4 feed that Power
+# BI's built-in "OData Feed" connector can point at directly. Same
+# X-API-Key tenant auth as every other route here. See app/api/odata.py.
 api_router.include_router(odata_router, prefix="/odata", tags=["OData / BI"])
 
 __all__ = ["api_router"]

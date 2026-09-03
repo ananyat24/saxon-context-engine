@@ -1,8 +1,9 @@
-# The Reconcile stage's human review surface (see app/graph/reconciliation.py's
-# module docstring): a :ProposedMerge is a fuzzy, not-confident-enough-to-
-# auto-merge name match found across two of a tenant's connectors, sitting
-# `pending` until a person here approves (writes the :SAME_AS edge) or
-# rejects it (leaves it decided, never re-proposed on a later sync).
+# The Reconcile stage's human review surface. See app/graph/reconciliation.py's
+# module docstring for the full picture: a :ProposedMerge is a fuzzy name
+# match found across two of a tenant's connectors that wasn't confident
+# enough to auto-merge on its own. It sits as `pending` until a person here
+# approves it (writing the :SAME_AS edge) or rejects it (marked decided,
+# never proposed again on a later sync).
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 

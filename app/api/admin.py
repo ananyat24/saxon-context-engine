@@ -1,8 +1,9 @@
-# Operator-only tenant management -- the live-without-a-redeploy path
-# alongside `python scripts/manage_tenants.py` / config/tenants.json (see
+# Operator-only tenant management: the live, no-redeploy-needed path
+# alongside `python scripts/manage_tenants.py` and config/tenants.json (see
 # app/config.py's tenant_api_keys docstring and app/graph/tenants.py for
-# why). Every route here requires ADMIN_API_KEY (app/security.py's
-# require_admin), a single operator secret, never a tenant's own key.
+# why both exist). Every route here requires ADMIN_API_KEY (checked by
+# app/security.py's require_admin), a single operator secret, never a
+# tenant's own key.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
@@ -18,12 +19,12 @@ router = APIRouter(dependencies=[Depends(require_admin)])
 @router.get("/spend")
 def get_spend():
     """The real, persisted running totals for both spend-limiter buckets
-    (see app/graph/spend_limiter.py) -- moved behind ADMIN_API_KEY rather
-    than shown per-query in the main UI, which every tenant's user could
-    see regardless of whether they should know this app's own operating
+    (see app/graph/spend_limiter.py). Kept behind ADMIN_API_KEY rather than
+    shown per query in the main UI, since every tenant's user could see
+    that regardless of whether they should know this app's own operating
     cost. Per-query cost is still in the raw API response
-    (metadata.cost_usd) for anyone building their own tooling against it --
-    this route is just what the demo UI's own admin-only footer reads."""
+    (metadata.cost_usd) for anyone building their own tooling against it;
+    this route is just how an operator checks the running total directly."""
     limiter = get_limiter()
     return {
         "query": {"spent_usd": round(limiter.spent("query"), 6), "budget_usd": settings.azure_openai_query_budget_usd},
@@ -67,7 +68,7 @@ def create_tenant(req: CreateTenantRequest, request: Request):
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-    # The only place this key is ever returned -- only its hash is stored
+    # The only place this key is ever returned. Only its hash is stored
     # (see app/graph/tenants.py), so there's no way to recover it later.
     return {**summary, "api_key": raw_key}
 
@@ -87,12 +88,12 @@ class ReassignConnectorTenantRequest(BaseModel):
 @router.post("/connectors/{connector_id}/reassign-tenant")
 def reassign_connector_tenant(connector_id: str, req: ReassignConnectorTenantRequest, request: Request):
     """Moves an existing connector's management ownership to a different
-    tenant -- see app/graph/connectors.py's reassign_tenant for exactly
-    what does and doesn't change. Typical use: a connector was created
-    under a throwaway tenant to unblock ingestion into a knowledge base
-    before the real tenant had that knowledge base in its own list;
-    consolidate it into the real tenant once that's fixed, without
-    re-ingesting (which would cost real money for no new information)."""
+    tenant. See app/graph/connectors.py's reassign_tenant for exactly what
+    does and doesn't change. Typical use: a connector was created under a
+    throwaway tenant to unblock ingestion into a knowledge base before the
+    real tenant had that knowledge base in its own list. Once that's
+    fixed, this consolidates it into the real tenant without re-ingesting,
+    which would cost real money for no new information."""
     repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
     moved = connectors.reassign_tenant(connector_id, req.tenant_id, repo=repo)
     if not moved:

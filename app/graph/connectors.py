@@ -1,18 +1,18 @@
-# Connectors: a configured link to an external data source (a web page, plus
-# demo/mock-data structured "database", "documents", and "email" types --
-# see app/api/connectors.py's _CONNECTOR_FACTORIES; a real SharePoint/Google
-# Drive/CRM API is meant to slot in later as new `type` values without
-# changing this storage layer or the API shape). Each
-# connector feeds one of the tenant's existing knowledge bases -- syncing it
-# fetches the source's content and runs it through the same
-# IngestionPipeline every other source in this codebase already uses (see
-# app/api/connectors.py), so nothing about extraction/graph-writing is
-# connector-specific.
+# Connectors: a configured link to an external data source (a web page,
+# plus demo/mock-data structured "database", "documents", and "email"
+# types, see app/api/connectors.py's _CONNECTOR_FACTORIES; a real
+# SharePoint, Google Drive, or CRM API is meant to slot in later as new
+# `type` values without changing this storage layer or the API shape).
+# Each connector feeds one of the tenant's existing knowledge bases.
+# Syncing it fetches the source's content and runs it through the same
+# IngestionPipeline every other source in this codebase already uses
+# (see app/api/connectors.py), so nothing about extraction or
+# graph-writing is connector-specific.
 #
-# Stored as :Connector nodes in Neo4j, same rationale as :DocumentSet (see
-# app/graph/document_sets.py's module docstring): this is app-owned data a
-# client creates/deletes live through the UI, and it has to survive a
-# redeploy, which a local JSON file can't.
+# Stored as :Connector nodes in Neo4j, the same rationale as :DocumentSet
+# (see app/graph/document_sets.py's module docstring): this is app-owned
+# data a client creates and deletes live through the UI, and it has to
+# survive a redeploy, which a local JSON file can't.
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -21,14 +21,14 @@ from app.graph.graph_repository import GraphRepository
 
 
 def ensure_connector_indexes(repo: Optional[GraphRepository] = None) -> None:
-    """Idempotent, safe to call on every startup -- same pattern as
+    """Idempotent, safe to call on every startup, the same pattern as
     authorization.ensure_authorization_indexes."""
     repo = repo or GraphRepository()
     repo.execute_cypher(
         "CREATE INDEX connector_tenant_id IF NOT EXISTS FOR (c:Connector) ON (c.tenant_id)"
     )
     # Backs the connector-scoped queries in app/api/graph.py (GET /graph/nodes
-    # and /graph/relationships with ?connector_id=) -- see
+    # and /graph/relationships with ?connector_id=). See
     # app/ingestion/connector_sync.py's episode-tagging for what sets this.
     repo.execute_cypher(
         "CREATE INDEX episodic_connector_id IF NOT EXISTS FOR (e:Episodic) ON (e.connector_id)"
@@ -40,10 +40,11 @@ _FIELDS = (
     "last_error, content_hash, source_authority, oauth_file_ids"
 )
 # Real-time push (see app/ingestion/graph_subscriptions.py, app/api/webhooks.py)
-# -- kept as separate optional fields rather than folded into _FIELDS above
-# since every existing connector predates them (null on any row created
-# before this), but still returned by list/get below: app/api/connectors.py's
-# _serialize() needs push_subscription_id to report whether push is enabled.
+# is kept as separate optional fields rather than folded into _FIELDS
+# above, since every existing connector predates them (null on any row
+# created before this), but it's still returned by list/get below:
+# app/api/connectors.py's _serialize() needs push_subscription_id to
+# report whether push is enabled.
 _PUSH_FIELDS = "push_subscription_id, push_client_state, push_expires_at"
 _ALL_FIELDS = f"{_FIELDS}, {_PUSH_FIELDS}"
 
@@ -65,9 +66,10 @@ def list_connectors(tenant_id: str, repo: Optional[GraphRepository] = None) -> l
 
 
 def get_connector(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> Optional[dict]:
-    """Looked up by id AND tenant_id together -- same boundary every other
-    per-tenant lookup in this codebase enforces (see resolve_knowledge_base):
-    a caller can only ever reach a connector belonging to their own tenant."""
+    """Looked up by id and tenant_id together, the same boundary every
+    other per-tenant lookup in this codebase enforces (see
+    resolve_knowledge_base): a caller can only ever reach a connector
+    belonging to their own tenant."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         f"""
@@ -84,20 +86,20 @@ def get_connector(tenant_id: str, connector_id: str, repo: Optional[GraphReposit
 
 
 def reassign_tenant(connector_id: str, new_tenant_id: str, repo: Optional[GraphRepository] = None) -> bool:
-    """Moves an existing connector's *management* ownership to a different
-    tenant -- for consolidating a connector created under a throwaway/
-    temporary tenant (e.g. one stood up just to get a knowledge base's
-    first ingestion done before the real tenant had that knowledge base in
-    its own list) into the tenant that should actually own it going
+    """Moves an existing connector's management ownership to a different
+    tenant. For consolidating a connector created under a throwaway or
+    temporary tenant (say, one stood up just to get a knowledge base's
+    first ingestion done before the real tenant had that knowledge base
+    in its own list) into the tenant that should actually own it going
     forward. Doesn't touch anything else: the connector's id, group_id,
-    url/name, sync state, and -- critically -- the already-ingested graph
-    data (Entity/RELATES_TO/Episodic nodes, scoped by group_id, not
-    tenant_id) are all unaffected. Operator-only in practice (see
-    app/api/admin.py's require_admin) -- there's no tenant-facing route for
-    this, since a tenant reassigning its own connector to itself is
-    meaningless and reassigning it to a DIFFERENT tenant is exactly the
-    kind of cross-tenant action only an operator should be able to do.
-    Returns False if no connector with that id exists."""
+    url and name, and sync state are all unaffected, and critically so
+    is the already-ingested graph data (Entity, RELATES_TO, and Episodic
+    nodes, scoped by group_id, not tenant_id). Operator-only in practice
+    (see app/api/admin.py's require_admin). There's no tenant-facing
+    route for this, since a tenant reassigning its own connector to
+    itself is meaningless, and reassigning it to a different tenant is
+    exactly the kind of cross-tenant action only an operator should be
+    able to do. Returns False if no connector with that id exists."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         "MATCH (c:Connector {id: $id}) SET c.tenant_id = $new_tenant_id RETURN count(c) AS updated",
@@ -115,13 +117,13 @@ def create_connector(
     repo: Optional[GraphRepository] = None,
     source_authority: int = 0,
 ) -> dict:
-    """source_authority: an operator/tenant-set rank (higher = more
-    authoritative), used only to break ties when two connectors' facts
-    disagree about the same relationship at the same point in time (see
-    app/context/orchestrator.py's authority tie-break) -- it never hides or
-    filters a fact, every source's own facts stay visible regardless of
-    rank. Defaults to 0 (no special standing) so an unset connector doesn't
-    silently outrank or lose to anything."""
+    """source_authority is an operator or tenant-set rank, higher meaning
+    more authoritative, used only to break ties when two connectors'
+    facts disagree about the same relationship at the same point in time
+    (see app/context/orchestrator.py's authority tie-break). It never
+    hides or filters a fact; every source's own facts stay visible
+    regardless of rank. Defaults to 0, no special standing, so an unset
+    connector doesn't silently outrank or lose to anything."""
     repo = repo or GraphRepository()
     connector_id = str(uuid.uuid4())
     repo.execute_cypher(
@@ -156,15 +158,15 @@ def create_oauth_pending_connector(
     oauth_refresh_token_enc: str,
     repo: Optional[GraphRepository] = None,
 ) -> dict:
-    """Creates a "google_drive_oauth" connector immediately after the OAuth
-    code exchange succeeds (see app/api/connectors.py's oauth/exchange
-    route), before the user has actually picked which files to read --
-    status 'authorized_needs_files' distinguishes this from every other
-    connector's 'never_synced', so the frontend knows to resume the picker
-    rather than offer "Sync now" on a connector with nothing to sync yet.
-    oauth_refresh_token_enc must already be Fernet-encrypted (see
-    app/graph/token_crypto.py) -- this function stores exactly what it's
-    given, it doesn't encrypt on your behalf."""
+    """Creates a "google_drive_oauth" connector immediately after the
+    OAuth code exchange succeeds (see app/api/connectors.py's
+    oauth/exchange route), before the user has actually picked which
+    files to read. Status 'authorized_needs_files' distinguishes this
+    from every other connector's 'never_synced', so the frontend knows
+    to resume the picker rather than offer "Sync now" on a connector
+    with nothing to sync yet. oauth_refresh_token_enc must already be
+    Fernet-encrypted (see app/graph/token_crypto.py). This function
+    stores exactly what it's given; it doesn't encrypt on your behalf."""
     repo = repo or GraphRepository()
     connector_id = str(uuid.uuid4())
     repo.execute_cypher(
@@ -200,15 +202,16 @@ def finalize_oauth_files(
     repo: Optional[GraphRepository] = None,
 ) -> bool:
     """Called once the user has picked files in the Google Picker (see
-    app/api/connectors.py's oauth/files route) -- moves the connector out
+    app/api/connectors.py's oauth/files route). Moves the connector out
     of 'authorized_needs_files' and into the normal 'never_synced' state
-    every other connector starts in, so from here on it's indistinguishable
-    from any other connector type to the sync path. Only ever moves a
-    connector OUT of 'authorized_needs_files', never re-targets an
-    already-active one -- picking files again means reconnecting (see that
-    route's own docstring for why). Returns False if no matching pending
-    connector was found (wrong tenant, wrong id, or already finalized),
-    so the caller can 404/409 instead of silently no-op'ing."""
+    every other connector starts in, so from here on it's
+    indistinguishable from any other connector type to the sync path.
+    Only ever moves a connector out of 'authorized_needs_files,' never
+    re-targets an already-active one: picking files again means
+    reconnecting (see that route's own docstring for why). Returns False
+    if no matching pending connector was found (wrong tenant, wrong id,
+    or already finalized), so the caller can 404 or 409 instead of
+    silently no-op'ing."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         """
@@ -231,17 +234,18 @@ def create_fabric_iq_ontology_connector(
     oauth_refresh_token_enc: str,
     repo: Optional[GraphRepository] = None,
 ) -> dict:
-    """Creates a "fabric_iq_ontology" connector -- direct MCP access to one
+    """Creates a "fabric_iq_ontology" connector: direct MCP access to one
     Fabric IQ Ontology item (see app/retrieval/fabric_iq_ontology_retriever.py's
     module docstring for why this needs a delegated user token, not a
     service credential like foundry_iq above). oauth_refresh_token_enc
-    must already be Fernet-encrypted (see app/graph/token_crypto.py) --
-    reuses the exact same field google_drive_oauth already stores its own
-    refresh token in (get_oauth_refresh_token below is generic by field
-    name, not scoped to one connector type), rather than inventing a
-    parallel column for what's structurally the same kind of secret.
-    status goes straight to 'never_synced' -- there's no picker step like
-    Drive's OAuth flow, the connector is immediately usable."""
+    must already be Fernet-encrypted (see app/graph/token_crypto.py).
+    This reuses the exact same field google_drive_oauth already stores
+    its own refresh token in (get_oauth_refresh_token below is generic
+    by field name, not scoped to one connector type), rather than
+    inventing a parallel column for what's structurally the same kind of
+    secret. Status goes straight to 'never_synced,' since there's no
+    picker step like Drive's OAuth flow. The connector is immediately
+    usable."""
     repo = repo or GraphRepository()
     connector_id = str(uuid.uuid4())
     repo.execute_cypher(
@@ -276,9 +280,10 @@ def create_work_iq_connector(
     oauth_refresh_token_enc: str,
     repo: Optional[GraphRepository] = None,
 ) -> dict:
-    """Creates a "work_iq" connector -- see create_fabric_iq_ontology_connector
+    """Creates a "work_iq" connector. See create_fabric_iq_ontology_connector
     above's docstring for the shared reasoning. No provider-specific extra
-    fields (Work IQ's endpoint is fixed/universal, see work_iq_retriever.py)."""
+    fields, since Work IQ's endpoint is fixed and universal (see
+    work_iq_retriever.py)."""
     repo = repo or GraphRepository()
     connector_id = str(uuid.uuid4())
     repo.execute_cypher(
@@ -305,10 +310,10 @@ def create_work_iq_connector(
 def get_microsoft_iq_credential(
     tenant_id: str, connector_id: str, connector_type: str, repo: Optional[GraphRepository] = None
 ) -> Optional[dict]:
-    """The by-id counterpart to find_microsoft_iq_config_for_group below --
-    same "Sync now" needs THIS connector's own credential, not whichever
-    matching connector is most recent for its group_id" reasoning as
-    get_foundry_iq_credential's own docstring."""
+    """The by-id counterpart to find_microsoft_iq_config_for_group below.
+    Same reasoning as get_foundry_iq_credential's own docstring: "Sync
+    now" needs this connector's own credential, not whichever matching
+    connector is most recent for its group_id."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         """
@@ -325,13 +330,13 @@ def get_microsoft_iq_credential(
 def find_microsoft_iq_config_for_group(
     tenant_id: str, group_id: str, connector_type: str, repo: Optional[GraphRepository] = None
 ) -> Optional[dict]:
-    """The per-query lookup for "fabric_iq_ontology"/"work_iq" connectors,
-    same role find_foundry_iq_config_for_group plays for that type --
-    returns the most recently created matching connector's config (fields
-    beyond oauth_refresh_token_enc vary by connector_type, so this returns
-    whatever the row has rather than a fixed shape; callers know which
-    type they asked for). None when no such connector exists for this
-    group_id."""
+    """The per-query lookup for "fabric_iq_ontology" and "work_iq"
+    connectors, the same role find_foundry_iq_config_for_group plays for
+    that type. Returns the most recently created matching connector's
+    config. Fields beyond oauth_refresh_token_enc vary by connector_type,
+    so this returns whatever the row has rather than a fixed shape;
+    callers know which type they asked for. Returns None when no such
+    connector exists for this group_id."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         """
@@ -356,21 +361,21 @@ def create_foundry_iq_connector(
     api_key_enc: str,
     repo: Optional[GraphRepository] = None,
 ) -> dict:
-    """Creates a "foundry_iq" connector -- see app/retrieval/foundry_iq_retriever.py's
+    """Creates a "foundry_iq" connector. See app/retrieval/foundry_iq_retriever.py's
     module docstring for why this is a live, query-time retriever config,
-    not an ingestion connector: there's no fetch()/content_hash/sync
+    not an ingestion connector: there's no fetch(), content_hash, or sync
     lifecycle here, just three settings a query-time lookup
     (find_foundry_iq_config_for_group below) reads back per query. `url`
-    stores search_endpoint, same "the address field is the address field"
-    convention sharepoint/google_drive already use. api_key_enc must
-    already be Fernet-encrypted (see app/graph/token_crypto.py) -- this
-    function stores exactly what it's given, same contract as
-    create_oauth_pending_connector above. status is set straight to
-    'never_synced' (not a distinct pending state) since there's no
-    multi-step setup flow like OAuth's picker step -- the connector is
-    immediately usable the moment it's created; "Sync now" for this type
-    runs a live connectivity check instead of an ingestion sync (see
-    app/api/connectors.py's _enqueue_sync)."""
+    stores search_endpoint, the same "the address field is the address
+    field" convention sharepoint and google_drive already use.
+    api_key_enc must already be Fernet-encrypted (see
+    app/graph/token_crypto.py). This function stores exactly what it's
+    given, the same contract as create_oauth_pending_connector above.
+    Status is set straight to 'never_synced,' not a distinct pending
+    state, since there's no multi-step setup flow like OAuth's picker
+    step: the connector is immediately usable the moment it's created.
+    "Sync now" for this type runs a live connectivity check instead of
+    an ingestion sync (see app/api/connectors.py's _enqueue_sync)."""
     repo = repo or GraphRepository()
     connector_id = str(uuid.uuid4())
     repo.execute_cypher(
@@ -405,16 +410,17 @@ def find_foundry_iq_config_for_group(
     tenant_id: str, group_id: str, repo: Optional[GraphRepository] = None
 ) -> Optional[dict]:
     """The per-query lookup execute_context_query uses to build a
-    FoundryIQRetriever scoped to whichever knowledge base is actually being
-    queried, instead of one global deployment-wide config -- a tenant
-    configures this once, through the UI, per knowledge base, the same way
-    every other connector is configured. Returns None (not an error) when
-    no foundry_iq connector exists for this group_id -- the caller falls
-    back to the deployment-wide FOUNDRY_IQ_* env vars, if any (see
-    query_service.py). If more than one exists for the same group_id
-    (nothing prevents that today), the most recently created one wins --
-    same "first/most-recent match" tiebreak this codebase already uses
-    elsewhere rather than erroring on an edge case nothing depends on."""
+    FoundryIQRetriever scoped to whichever knowledge base is actually
+    being queried, instead of one global deployment-wide config. A
+    tenant configures this once, through the UI, per knowledge base, the
+    same way every other connector is configured. Returns None, not an
+    error, when no foundry_iq connector exists for this group_id; the
+    caller falls back to the deployment-wide FOUNDRY_IQ_* env vars, if
+    any (see query_service.py). If more than one exists for the same
+    group_id, which nothing prevents today, the most recently created
+    one wins, the same "first or most recent match" tiebreak this
+    codebase already uses elsewhere rather than erroring on an edge case
+    nothing depends on."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         """
@@ -432,12 +438,13 @@ def find_foundry_iq_config_for_group(
 def get_foundry_iq_credential(
     tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None
 ) -> Optional[dict]:
-    """The by-id counterpart to find_foundry_iq_config_for_group above --
+    """The by-id counterpart to find_foundry_iq_config_for_group above,
     used by the "Sync now" connectivity check (app/api/connectors.py's
     _enqueue_sync), which already has this exact connector's own id and
-    needs to test THIS connector's credential, not "whichever foundry_iq
-    connector happens to be most recent for this group_id" (the group_id
-    lookup's own documented tiebreak, right for query time, wrong here)."""
+    needs to test this connector's credential specifically, not
+    "whichever foundry_iq connector happens to be most recent for this
+    group_id" (the group_id lookup's own documented tiebreak, right for
+    query time, wrong here)."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         """
@@ -452,11 +459,11 @@ def get_foundry_iq_credential(
 
 def get_oauth_refresh_token(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> Optional[str]:
     """Returns the connector's still-encrypted refresh token (see
-    app/graph/token_crypto.py for decrypting it) -- deliberately a separate
-    query from get_connector()/list_connectors() above rather than a field
-    in _FIELDS, so a live credential never flows through the same code path
-    that builds an HTTP API response, even by accident in a future change
-    to _serialize()."""
+    app/graph/token_crypto.py for decrypting it). Deliberately a separate
+    query from get_connector()/list_connectors() above rather than a
+    field in _FIELDS, so a live credential never flows through the same
+    code path that builds an HTTP API response, even by accident in a
+    future change to _serialize()."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) RETURN c.oauth_refresh_token_enc AS token",
@@ -469,12 +476,13 @@ def get_oauth_refresh_token(tenant_id: str, connector_id: str, repo: Optional[Gr
 
 def authority_by_group_id(tenant_id: str, repo: Optional[GraphRepository] = None) -> dict[str, int]:
     """Maps each of this tenant's own group_ids (knowledge bases) to the
-    highest source_authority among the connectors feeding it -- more than
-    one connector can write into the same knowledge base, so this takes the
-    max rather than assuming a 1:1 connector-to-group_id mapping. A
-    group_id with no connectors (or only ones with no authority set) is
-    just absent from the returned map; callers should treat a missing
-    entry as authority 0, same as an explicitly-unset connector."""
+    highest source_authority among the connectors feeding it. More than
+    one connector can write into the same knowledge base, so this takes
+    the max rather than assuming a one-to-one connector-to-group_id
+    mapping. A group_id with no connectors, or only ones with no
+    authority set, is just absent from the returned map. Callers should
+    treat a missing entry as authority 0, the same as an explicitly
+    unset connector."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         "MATCH (c:Connector {tenant_id: $tenant_id}) "
@@ -485,25 +493,26 @@ def authority_by_group_id(tenant_id: str, repo: Optional[GraphRepository] = None
 
 
 def purge_connector_data(connector_id: str, group_id: str, repo: Optional[GraphRepository] = None) -> dict:
-    """Removes everything a *specific connector's own syncs* wrote -- not
-    the connector row itself (see delete_connector for that) -- using the
-    same Episodic.connector_id tag app/ingestion/connector_sync.py writes and
+    """Removes everything a specific connector's own syncs wrote. Not the
+    connector row itself (see delete_connector for that), using the same
+    Episodic.connector_id tag app/ingestion/connector_sync.py writes and
     app/api/graph.py's ?connector_id= filter reads. Exists for recovering
     from a bad sync (wrong data uploaded, a sync that partially completed
-    before an error, content that shouldn't have landed) without wiping the
-    whole knowledge base or leaving the connector permanently tainted --
-    the connector keeps its config (url/name/group_id) and can be synced
-    again immediately after this, clean.
+    before an error, content that shouldn't have landed) without wiping
+    the whole knowledge base or leaving the connector permanently
+    tainted. The connector keeps its config (url, name, group_id) and
+    can be synced again immediately after this, clean.
 
-    A RELATES_TO fact is only ever fully deleted when *every* episode that
-    touched it belongs to this connector -- a fact another sync (this
-    connector's own earlier run, or a different connector entirely) also
-    contributed to keeps existing, just with this connector's episode
-    uuid(s) stripped from its `episodes` list. An Entity is only deleted if
-    it ends up with zero remaining RELATES_TO edges once that's done --
-    never one still backing a fact from elsewhere. This mirrors
-    app/context/orchestrator.py's own "never hide or filter a fact that's
-    still real" posture, applied to deletion instead of ranking."""
+    A RELATES_TO fact is only ever fully deleted when every episode that
+    touched it belongs to this connector. A fact another sync also
+    contributed to, whether this connector's own earlier run or a
+    different connector entirely, keeps existing, just with this
+    connector's episode uuid or uuids stripped from its `episodes` list.
+    An Entity is only deleted if it ends up with zero remaining
+    RELATES_TO edges once that's done, never one still backing a fact
+    from elsewhere. This mirrors app/context/orchestrator.py's own
+    "never hide or filter a fact that's still real" posture, applied to
+    deletion instead of ranking."""
     repo = repo or GraphRepository()
     edge_result = repo.execute_cypher(
         """
@@ -534,14 +543,14 @@ def purge_connector_data(connector_id: str, group_id: str, repo: Optional[GraphR
         "DETACH DELETE ep RETURN count(ep) AS deleted",
         {"group_id": group_id, "connector_id": connector_id},
     )
-    # Also resets the connector's own sync bookkeeping -- content_hash in
+    # Also resets the connector's own sync bookkeeping. content_hash in
     # particular has to go back to null, or the next sync sees "identical
     # content to last time" (the hash was computed over the exact files
-    # this purge just undid) and skips re-ingesting via
-    # run_connector_sync's own dedup check, silently leaving the connector
-    # empty even after a real "Sync now". record_sync_result() (above)
-    # deliberately doesn't do this -- it only ever *sets* a hash on an
-    # actual synced outcome, never clears one -- so this is a direct SET
+    # this purge just undid) and skips re-ingesting through
+    # run_connector_sync's own dedup check, silently leaving the
+    # connector empty even after a real "Sync now." record_sync_result()
+    # above deliberately doesn't do this: it only ever sets a hash on an
+    # actual synced outcome, never clears one, so this is a direct SET
     # rather than reusing it with a fabricated status.
     repo.execute_cypher(
         "MATCH (c:Connector {id: $connector_id}) "
@@ -567,13 +576,13 @@ def delete_connector(tenant_id: str, connector_id: str, repo: Optional[GraphRepo
 
 def mark_sync_queued(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> None:
     """Called the moment a sync is accepted onto the ingestion queue (see
-    app/graph/ingestion_queue.py), before the queued job actually runs --
-    so a client polling GET /connectors sees "queued" immediately instead
-    of the stale status from whatever the connector's last sync attempt
-    was, for however long it takes a worker to pick the job up. Doesn't
-    touch last_synced_at/last_error -- those still describe the last
-    *completed* attempt until this one finishes and record_sync_result()
-    below overwrites them."""
+    app/graph/ingestion_queue.py), before the queued job actually runs.
+    This is so a client polling GET /connectors sees "queued" immediately
+    instead of the stale status from whatever the connector's last sync
+    attempt was, for however long it takes a worker to pick the job up.
+    Doesn't touch last_synced_at or last_error; those still describe the
+    last completed attempt until this one finishes and
+    record_sync_result() below overwrites them."""
     repo = repo or GraphRepository()
     repo.execute_cypher(
         "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) SET c.status = 'queued'",
@@ -590,13 +599,14 @@ def record_sync_result(
     content_hash: Optional[str] = None,
     repo: Optional[GraphRepository] = None,
 ) -> None:
-    """Called once a sync attempt finishes, success or not -- overwrites
-    whatever mark_sync_queued() above set. `status` is one of "synced" (new
-    content ingested), "unchanged" (fetched fine, but matched content_hash
-    from last time so nothing was re-ingested -- see
-    app/ingestion/web_source.py's content_hash), or "error". content_hash is
-    only updated on an actual "synced" outcome, so an "error" or "unchanged"
-    run doesn't clobber the fingerprint a real sync last recorded."""
+    """Called once a sync attempt finishes, success or not. Overwrites
+    whatever mark_sync_queued() above set. `status` is one of "synced"
+    (new content ingested), "unchanged" (fetched fine, but matched
+    content_hash from last time so nothing was re-ingested; see
+    app/ingestion/web_source.py's content_hash), or "error". content_hash
+    is only updated on an actual "synced" outcome, so an "error" or
+    "unchanged" run doesn't clobber the fingerprint a real sync last
+    recorded."""
     repo = repo or GraphRepository()
     set_clauses = ["c.status = $status", "c.last_synced_at = $last_synced_at", "c.last_error = $last_error"]
     params = {
@@ -624,11 +634,11 @@ def set_push_subscription(
     expires_at,
     repo: Optional[GraphRepository] = None,
 ) -> None:
-    """Records a newly-created (or renewed) Microsoft Graph subscription --
-    see app/ingestion/graph_subscriptions.py. Called after a successful
-    create_mail_subscription()/renew_subscription() call, never on its own;
-    a failed subscription attempt just leaves these fields unset/stale and
-    the connector keeps working via polling."""
+    """Records a newly-created or renewed Microsoft Graph subscription.
+    See app/ingestion/graph_subscriptions.py. Called after a successful
+    create_mail_subscription() or renew_subscription() call, never on
+    its own. A failed subscription attempt just leaves these fields
+    unset or stale, and the connector keeps working through polling."""
     repo = repo or GraphRepository()
     repo.execute_cypher(
         "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) "
@@ -645,9 +655,10 @@ def set_push_subscription(
 
 
 def clear_push_subscription(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> None:
-    """Called when a subscription is deleted, or renewal fails permanently
-    (see app/graph/connector_scheduler.py) -- the connector falls back to
-    polling-only, same as it worked before push was ever set up."""
+    """Called when a subscription is deleted, or renewal fails
+    permanently (see app/graph/connector_scheduler.py). The connector
+    falls back to polling-only, the same as it worked before push was
+    ever set up."""
     repo = repo or GraphRepository()
     repo.execute_cypher(
         "MATCH (c:Connector {id: $id, tenant_id: $tenant_id}) "
@@ -658,11 +669,11 @@ def clear_push_subscription(tenant_id: str, connector_id: str, repo: Optional[Gr
 
 def get_connector_by_subscription_id(subscription_id: str, repo: Optional[GraphRepository] = None) -> Optional[dict]:
     """Maps an inbound Graph notification's subscriptionId back to the
-    connector it belongs to -- app/api/webhooks.py's only way to know which
-    connector to sync, since the notification itself carries no tenant/API
-    key. subscription_id is Graph-assigned and globally unique, so this
-    intentionally isn't scoped by tenant_id the way every other lookup in
-    this module is."""
+    connector it belongs to. This is app/api/webhooks.py's only way to
+    know which connector to sync, since the notification itself carries
+    no tenant or API key. subscription_id is Graph-assigned and globally
+    unique, so this intentionally isn't scoped by tenant_id the way
+    every other lookup in this module is."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         f"MATCH (c:Connector {{push_subscription_id: $subscription_id}}) "
@@ -678,9 +689,10 @@ def get_connector_by_subscription_id(subscription_id: str, repo: Optional[GraphR
 
 
 def list_connectors_with_push_subscriptions(repo: Optional[GraphRepository] = None) -> list[dict]:
-    """Every connector (any tenant) with an active push subscription -- what
-    the scheduler's renewal check iterates, since a subscription nearing
-    expiry has to be renewed regardless of which tenant owns its connector."""
+    """Every connector, any tenant, with an active push subscription.
+    What the scheduler's renewal check iterates, since a subscription
+    nearing expiry has to be renewed regardless of which tenant owns its
+    connector."""
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(
         f"MATCH (c:Connector) WHERE c.push_subscription_id IS NOT NULL "
