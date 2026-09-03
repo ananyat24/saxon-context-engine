@@ -1,4 +1,4 @@
-// Demo UI logic: no framework, no build step -- fetch the API's own endpoints
+// Demo UI logic: no framework, no build step: fetch the API's own endpoints
 // and render what comes back, so this only ever shows what the backend
 // actually has, never mock data.
 
@@ -21,7 +21,7 @@ function authHeaders() {
 // Which dataset (group_id) the Graph and Ask panels are scoped to. Persisted
 // per-browser so switching pages/reloading doesn't silently reset it back to
 // the default. The server still validates this against the tenant's own list
-// on every request (see app/security.py's resolve_knowledge_base) -- this is
+// on every request (see app/security.py's resolve_knowledge_base): this is
 // just which one the UI asks for, not a trust boundary.
 function getSelectedKnowledgeBase() {
   return localStorage.getItem("saxon_kb") || "";
@@ -44,7 +44,7 @@ function buildQuery(params) {
 
 // Every connector (knowledge base) this tenant has, kept around so the
 // document-set create form can offer them as checkboxes without a second
-// fetch -- populated by loadKnowledgeBases().
+// fetch: populated by loadKnowledgeBases().
 let knowledgeBaseDirectory = [];
 
 async function loadKnowledgeBases() {
@@ -68,7 +68,7 @@ async function loadKnowledgeBases() {
     if (!stillValid) {
       // Prefer Solandra as the page's own default landing knowledge base
       // over whatever the tenant's server-side default happens to be
-      // (first in its configured list) -- only matters the first time
+      // (first in its configured list): only matters the first time
       // someone opens this page, or after their stored choice stops being
       // valid; picking a different knowledge base always overrides this.
       const preferredDefault = data.knowledge_bases.some((kb) => kb.id === "solandra_supply_chain")
@@ -94,7 +94,7 @@ document.getElementById("kbSelect").addEventListener("change", async (e) => {
   renderScopeSelect(); // "This connector only" option's label follows the new selection, and doc sets that don't touch this KB drop out
   // Source connectors and document sets are fetched once per page load
   // (they don't change when switching knowledge bases), but which of them
-  // are actually *shown* does -- re-render both against the new selection
+  // are actually *shown* does: re-render both against the new selection
   // rather than refetching, since nothing about the underlying data changed.
   renderConnectorsTable();
   renderConnectorKbSelect(); // "New source connector" form defaults to the newly-selected KB
@@ -109,16 +109,16 @@ document.getElementById("kbSelect").addEventListener("change", async (e) => {
 // --- Document sets ----------------------------------------------------------
 // Named bundles of one or more connectors (knowledge bases), used to scope
 // the "Ask a question" panel across several of them at once instead of
-// picking exactly one -- see app/graph/document_sets.py. Every set here
+// picking exactly one: see app/graph/document_sets.py. Every set here
 // belongs to the current tenant only (enforced server-side).
 let documentSetDirectory = [];
 // Which document set (if any) the Ask panel is scoped to right now. "" means
-// "just the single connector picked in the header" -- the original behavior.
+// "just the single connector picked in the header": the original behavior.
 // Not persisted across reloads, same reasoning as selectedUser: this is a
 // live choice about the question you're about to ask, not a standing setting.
 let selectedDocumentSet = "";
 // Which document set the create/edit form below is currently editing, if
-// any -- "" means the form is in "new document set" mode. The form itself
+// any: "" means the form is in "new document set" mode. The form itself
 // is shared between create and edit (same fields either way) rather than
 // duplicating it, so editing "just" means pre-filling it and switching what
 // the submit button does.
@@ -140,8 +140,8 @@ function renderDocSetConnectorPicker(checkedIds = []) {
     .join("");
 }
 
-// A document set can legitimately span several knowledge bases at once --
-// that's its whole point (see app/graph/document_sets.py) -- so "belongs to
+// A document set can legitimately span several knowledge bases at once,
+// which is its whole point (see app/graph/document_sets.py), so "belongs to
 // the current knowledge base" means "touches it at all", not "is entirely
 // contained in it": a set spanning Solandra and Northwind should still show
 // up on either tab, but a Northwind-only set has no business appearing
@@ -245,7 +245,7 @@ document.getElementById("scopeSelect").addEventListener("change", async (e) => {
   selectedDocumentSet = e.target.value;
   // Re-fetches the header knowledge base's own nodes too (loadGraph), since
   // refreshSuggestedQuestionsForScope needs a fallback list when the scope
-  // switches back to "this connector only" -- simplest way to keep that
+  // switches back to "this connector only": simplest way to keep that
   // fallback correct without caching header nodes separately.
   await loadGraph();
 });
@@ -336,14 +336,14 @@ async function deleteDocumentSet(id) {
     if (editingDocSetId === id) resetDocSetForm();
     await loadDocumentSets();
   } catch (err) {
-    // Silently leave the row in place -- the delete button itself is the
+    // Silently leave the row in place: the delete button itself is the
     // retry affordance, no need for a dedicated error banner here.
   }
 }
 
 // --- Source connectors -------------------------------------------------------
 // Pulls content in from an external source (a web page today) into one of
-// the tenant's knowledge bases -- see app/graph/connectors.py and
+// the tenant's knowledge bases: see app/graph/connectors.py and
 // app/api/connectors.py. Distinct from "connector" as used in the Document
 // Sets section above (there it means one of the tenant's existing knowledge
 // bases); here it means the thing that gets data INTO one in the first
@@ -359,7 +359,7 @@ function renderConnectorKbSelect() {
       .map((kb) => `<option value="${escapeXml(kb.id)}">${escapeXml(kb.label)}</option>`)
       .join("");
     // Default a new connector to whichever knowledge base is currently
-    // selected, rather than always defaulting to the first option -- still
+    // selected, rather than always defaulting to the first option: still
     // changeable, just a sensible starting point for "add one below" right
     // after seeing this knowledge base has none.
     const current = getSelectedKnowledgeBase();
@@ -369,7 +369,7 @@ function renderConnectorKbSelect() {
 
 function formatSyncStatus(c) {
   // "stale" (see app/api/connectors.py's _connector_health) takes priority
-  // over the raw status -- a connector can be "synced" from its own last
+  // over the raw status: a connector can be "synced" from its own last
   // attempt's point of view and still be stale if nothing's synced it
   // again in a long time, which is exactly the case worth flagging: the
   // background scheduler may have stopped running for it.
@@ -390,8 +390,8 @@ function formatSyncStatus(c) {
   };
   const label = labels[c.status] || c.status;
   const cls = c.status === "error" ? "badge-bad" : c.status === "never_synced" ? "badge-neutral" : "badge-ok";
-  // An error badge is a real button, not just a span with a hover title --
-  // the hover title stays too (still useful on desktop without a click),
+  // An error badge is a real button, not just a span with a hover title.
+  // The hover title stays too (still useful on desktop without a click),
   // but a click is the discoverable, works-on-touch way to actually read
   // why a sync failed, rather than a message that only ever showed up if
   // you happened to hover exactly the right badge.
@@ -401,7 +401,7 @@ function formatSyncStatus(c) {
   return `<span class="badge ${cls}">${escapeXml(label)}</span>`;
 }
 
-// Connector types that read from their own uploaded file(s) -- see
+// Connector types that read from their own uploaded file(s): see
 // app/api/connectors.py's upload_connector_file (extension per type) and
 // app/ingestion/database_source.py/email_source.py's own-folder-first
 // fallback-to-demo-data pattern. Kept in one place so the creation form,
@@ -428,7 +428,7 @@ const CONNECTOR_TYPE_LABELS = {
 
 // connectorDirectory itself stays the full, tenant-wide list (needed for
 // by-id lookups from sync/delete/preview, and it's fetched once regardless
-// of which knowledge base is selected) -- but a client with several
+// of which knowledge base is selected), but a client with several
 // knowledge bases under one tenant/API key (e.g. a shared demo key spanning
 // Northwind and a client's own data) shouldn't see every OTHER knowledge
 // base's connectors just because it's viewing this one. Every place that
@@ -530,7 +530,7 @@ function renderConnectorsTable() {
   });
   // A dropped-in file is uploaded right away (see uploadConnectorCsv below);
   // it isn't ingested until "Sync now" runs, same as any other connector
-  // type -- uploading just makes the file available for the next sync.
+  // type: uploading just makes the file available for the next sync.
   body.querySelectorAll("[data-upload-csv-id]").forEach((input) => {
     input.addEventListener("change", () => {
       const file = input.files?.[0];
@@ -541,12 +541,12 @@ function renderConnectorsTable() {
 }
 
 // Fetches nodes/relationships for one specific knowledge base (group_id),
-// independent of whatever the header's kbSelect is currently set to -- used
+// independent of whatever the header's kbSelect is currently set to: used
 // by the connector data preview and the doc-set-aware suggested questions
 // below, both of which need a specific scope rather than "whatever's
 // selected right now". Pass connectorId to narrow further to just that one
-// connector's own facts (see app/api/graph.py's ?connector_id= filter) --
-// without it, this returns everything in the whole knowledge base, which is
+// connector's own facts (see app/api/graph.py's ?connector_id= filter).
+// Without it, this returns everything in the whole knowledge base, which is
 // correct for the doc-set case below but was the actual bug in the
 // connector preview (a knowledge base commonly has more than one connector
 // feeding it).
@@ -588,13 +588,13 @@ async function openConnectorPreview(connectorId) {
   }
   if (nodes.length === 0 && rels.length === 0) {
     // Per-connector tracking (the connector_id filter above) only tags
-    // episodes from a sync that actually re-ingested content -- a
+    // episodes from a sync that actually re-ingested content: a
     // connector whose last sync found nothing *changed* (the common case
     // for a connector synced before this tracking existed) never got a
     // chance to tag its already-ingested facts, and a plain "Sync now"
     // won't fix that either: content-hash dedup means it'll just detect
     // "unchanged" again and skip re-ingesting, forever. Fixing this for
-    // real means forcing a real re-ingestion -- offered directly below
+    // real means forcing a real re-ingestion: offered directly below
     // rather than pointing at a "Sync now" that would silently do nothing.
     subtitle.textContent = "Nothing tracked specifically for this connector yet.";
     bodyEl.innerHTML = `
@@ -626,7 +626,7 @@ async function openConnectorPreview(connectorId) {
 }
 
 // Forces a connector's content to be re-ingested for real, so its facts get
-// tagged with connector_id this time -- see app/api/connectors.py's
+// tagged with connector_id this time: see app/api/connectors.py's
 // purge_connector_data (clears this connector's own already-tagged data, a
 // no-op here since there isn't any, but critically also resets its stored
 // content_hash) followed by a real sync. Resetting content_hash is the
@@ -702,14 +702,14 @@ async function loadConnectors() {
 }
 
 // A sync accepted onto the background ingestion queue (see
-// app/graph/ingestion_queue.py) really does finish on its own -- usually
-// within a minute, since it's running real extraction/embedding calls --
+// app/graph/ingestion_queue.py) really does finish on its own: usually
+// within a minute, since it's running real extraction/embedding calls,
 // but nothing was re-checking this list after the initial "queued"
 // response, so the row just sat on "Queued…" until something else
 // happened to reload it (switching knowledge bases, clicking another
 // button). Not stuck, just never re-checked. This polls every few seconds
 // for as long as anything here is still "queued", and stops itself once
-// nothing is -- so idle viewing costs nothing.
+// nothing is, so idle viewing costs nothing.
 let connectorsPollTimer = null;
 
 function pollWhileConnectorsAreBusy() {
@@ -728,7 +728,7 @@ function pollWhileConnectorsAreBusy() {
 // steps, feeling like one click: (1) Google's own consent popup (Identity
 // Services), (2) trade the resulting code for tokens server-side, get back a
 // short-lived access token, (3) open the Google Picker with that token so the
-// user picks exactly which files to share -- no folder-sharing step, no admin.
+// user picks exactly which files to share: no folder-sharing step, no admin.
 let googleOAuthClientId = null;
 let googlePickerLoading = null;
 
@@ -748,7 +748,7 @@ async function loadOAuthProviders() {
     document.getElementById("connectFabricIqBtn").hidden = !body.fabric_iq_ontology?.available;
     document.getElementById("connectWorkIqBtn").hidden = !body.work_iq?.available;
   } catch (err) {
-    // Leave the connect row hidden -- same as "not configured".
+    // Leave the connect row hidden: same as "not configured".
   }
 }
 
@@ -770,8 +770,8 @@ function setOAuthConnectStatus(text, cls) {
   el.className = `status-line${cls ? " " + cls : ""}`;
 }
 
-// Opens the Picker restricted to individual file selection (no folders --
-// see google_drive_source.py's module docstring for why: the drive.file
+// Opens the Picker restricted to individual file selection (no folders;
+// see google_drive_source.py's module docstring for why): the drive.file
 // scope this app requests doesn't grant access to a folder's contents, only
 // to files the user explicitly opens/picks one at a time).
 function openGoogleDrivePicker(accessToken) {
@@ -810,7 +810,7 @@ async function finishGoogleDriveFileSelection(connectorId, accessToken) {
     return;
   }
   if (!result.picked) {
-    // No files chosen -- don't leave a half-connected, unused Google grant
+    // No files chosen: don't leave a half-connected, unused Google grant
     // sitting around (holding a live OAuth grant nobody's using is exactly
     // the kind of thing worth cleaning up automatically, not leaving for
     // someone to notice later). This also revokes it at Google's end (see
@@ -840,8 +840,8 @@ async function finishGoogleDriveFileSelection(connectorId, accessToken) {
 }
 
 // Resumes a connector left in "authorized_needs_files" (the consent step
-// finished, but the file picker never did -- e.g. the tab was closed) --
-// mints a fresh access token from the already-stored refresh token instead
+// finished, but the file picker never did, e.g. the tab was closed).
+// Mints a fresh access token from the already-stored refresh token instead
 // of asking the user to sign into Google again.
 async function resumeGoogleDrivePicker(connectorId) {
   setOAuthConnectStatus("Reopening file picker…", "");
@@ -909,7 +909,7 @@ document.getElementById("connectGoogleDriveBtn").addEventListener("click", () =>
 // --- Fabric IQ Ontology / Work IQ one-click connect -------------------
 // Real redirect-based OAuth (Microsoft's identity platform has no
 // equivalent to Google Identity Services' popup-only "postmessage" trick
-// used above) -- a popup window navigates straight to Microsoft's consent
+// used above): a popup window navigates straight to Microsoft's consent
 // URL (built server-side, see POST /connectors/microsoft-oauth/start),
 // gets redirected by Microsoft to the static callback page
 // (frontend/microsoft-oauth-callback.html), which reads its own code/state
@@ -1002,7 +1002,7 @@ window.addEventListener("message", async (event) => {
 document.getElementById("connectFabricIqBtn").addEventListener("click", (e) => startMicrosoftIqConnect("fabric_iq_ontology", e.currentTarget));
 document.getElementById("connectWorkIqBtn").addEventListener("click", (e) => startMicrosoftIqConnect("work_iq", e.currentTarget));
 
-// Types that need a tenant-supplied address -- kept in sync with
+// Types that need a tenant-supplied address: kept in sync with
 // app/api/connectors.py's own _TYPES_REQUIRING_URL. The demo data types
 // (database/documents/email) read a fixed bundled sample server-side, so
 // their URL field stays hidden rather than asking for an input that's ignored.
@@ -1021,10 +1021,10 @@ function updateConnectorUrlVisibility() {
   document.getElementById("connectorUrlRow").hidden = !CONNECTOR_TYPES_REQUIRING_URL.has(type);
   document.getElementById("connectorUrl").placeholder = CONNECTOR_URL_PLACEHOLDERS[type] || "";
   // The file picker only makes sense for a type with its own upload
-  // endpoint support -- see app/api/connectors.py's upload_connector_file
+  // endpoint support: see app/api/connectors.py's upload_connector_file
   // (CONNECTOR_UPLOAD_TYPES above mirrors its per-type extension check).
   // Previously "upload a CSV" was only discoverable *after* creating a
-  // database connector (the upload control lived on its table row) -- easy
+  // database connector (the upload control lived on its table row): easy
   // to miss if you're looking for it up front in the form.
   const uploadInfo = CONNECTOR_UPLOAD_TYPES[type];
   document.getElementById("connectorCsvRow").hidden = !uploadInfo;
@@ -1116,16 +1116,16 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
 });
 
 // Sync now just accepts the job onto the background ingestion queue and
-// returns immediately (see app/graph/ingestion_queue.py) -- it no longer
+// returns immediately (see app/graph/ingestion_queue.py): it no longer
 // waits for fetch+extraction to finish, so there's no longer a synchronous
 // result to read from the response itself. This best-effort poll is purely
 // a UI convenience so a person watching the table sees it land instead of
 // having to manually refresh; it's not how the app tracks the real
-// outcome -- the connector's own status (visible to any client, any time,
+// outcome: the connector's own status (visible to any client, any time,
 // via GET /connectors) is that source of truth regardless of whether
 // anyone's still watching this poll.
 const SYNC_POLL_INTERVAL_MS = 2000;
-const SYNC_POLL_MAX_ATTEMPTS = 15; // ~30s -- covers a typical demo-sized sync
+const SYNC_POLL_MAX_ATTEMPTS = 15; // ~30s: covers a typical demo-sized sync
 
 async function syncConnector(id) {
   const row = document.querySelector(`#connectorsBody tr[data-id="${CSS.escape(id)}"]`);
@@ -1140,7 +1140,7 @@ async function syncConnector(id) {
       headers: authHeaders(),
     });
   } catch (err) {
-    // Network failure before a response came back at all -- the reload
+    // Network failure before a response came back at all: the reload
     // below still runs so the row doesn't stay stuck on "Queuing...".
   }
   await loadConnectors();
@@ -1151,7 +1151,7 @@ async function pollUntilSyncSettles(id, attempt = 0) {
   const current = connectorDirectory.find((c) => c.id === id);
   if (!current || current.status !== "queued" || attempt >= SYNC_POLL_MAX_ATTEMPTS) {
     // A settled sync may have just run reconciliation server-side (see
-    // app/ingestion/connector_sync.py) -- refresh the review queue so a new
+    // app/ingestion/connector_sync.py): refresh the review queue so a new
     // proposal shows up without a manual page reload.
     await loadReconciliation();
     return;
@@ -1162,7 +1162,7 @@ async function pollUntilSyncSettles(id, attempt = 0) {
 }
 
 // --- Reconciliation review queue ---------------------------------------------
-// The Reconcile stage's uncertain (fuzzy-name) cross-connector matches -- see
+// The Reconcile stage's uncertain (fuzzy-name) cross-connector matches: see
 // app/graph/reconciliation.py. Confident matches (exact/normalized name)
 // merge automatically and never show up here; this panel is only for the
 // ones a human has to decide.
@@ -1213,7 +1213,7 @@ async function loadReconciliation() {
       return;
     }
     const proposals = await res.json();
-    // Only worth showing at all once there's something to decide -- an
+    // Only worth showing at all once there's something to decide: an
     // empty review queue isn't news the way an empty connectors/document
     // sets table still is (those are things you'd set up).
     card.hidden = proposals.length === 0;
@@ -1232,7 +1232,7 @@ async function decideReconciliationProposal(id, action) {
       headers: authHeaders(),
     });
   } catch (err) {
-    // Falls through to the reload below either way -- loadReconciliation
+    // Falls through to the reload below either way: loadReconciliation
     // re-fetching the real pending list is the source of truth, not this
     // request's own success/failure.
   }
@@ -1241,7 +1241,7 @@ async function decideReconciliationProposal(id, action) {
 
 // "Easily droppable CSV": a Database/CRM connector accepts a CSV upload
 // directly, landing it in that connector's own folder server-side (see
-// app/api/connectors.py's POST /connectors/{id}/files) -- one file per
+// app/api/connectors.py's POST /connectors/{id}/files): one file per
 // record type is the expected shape, matching how the bundled sample
 // datasets are laid out. The upload alone doesn't ingest anything; "Sync
 // now" (unchanged) picks up whatever's been uploaded, the same as any other
@@ -1253,7 +1253,7 @@ async function uploadConnectorCsv(id, file) {
   try {
     const res = await fetch(`${API}/connectors/${encodeURIComponent(id)}/files`, {
       method: "POST",
-      headers: authHeaders(), // deliberately no Content-Type -- the browser sets the multipart boundary itself
+      headers: authHeaders(), // deliberately no Content-Type: the browser sets the multipart boundary itself
       body: form,
     });
     if (!res.ok) {
@@ -1265,7 +1265,7 @@ async function uploadConnectorCsv(id, file) {
     window.alert(`Error uploading "${file.name}": ${err.message}`);
     return;
   }
-  // Not persisted -- just a quick confirmation the drop landed, so someone
+  // Not persisted: just a quick confirmation the drop landed, so someone
   // dropping in several files in a row can see each one register before
   // clicking "Sync now" once at the end.
   if (row) {
@@ -1289,18 +1289,18 @@ async function deleteConnector(id) {
     if (!res.ok && res.status !== 204) return;
     await loadConnectors();
   } catch (err) {
-    // Silently leave the row in place -- the delete button itself is the
+    // Silently leave the row in place: the delete button itself is the
     // retry affordance, no need for a dedicated error banner here.
   }
 }
 
 // --- "View as" (role-based visibility) --------------------------------------
 // Which person's view of the selected knowledge base the Graph and Ask panels
-// show. Not persisted across reloads like the knowledge base is -- switching
+// show. Not persisted across reloads like the knowledge base is: switching
 // who you're looking through is a live comparison you're making right now,
 // not a standing preference. The server still validates this id belongs to
 // the selected knowledge base's own org chart on every request (see
-// app/graph/authorization.py's resolve_as_user) -- this is just which one the
+// app/graph/authorization.py's resolve_as_user): this is just which one the
 // UI asks for, not a trust boundary.
 let selectedUser = "";
 // id -> {id, name, role, manager_id}, refreshed by loadUsers(). Lets
@@ -1317,7 +1317,7 @@ function setSelectedUser(id) {
 }
 
 // Orders the org chart top-down (exec, then managers, then reps) rather than
-// alphabetically, so picking a name also gives a rough sense of seniority --
+// alphabetically, so picking a name also gives a rough sense of seniority,
 // without drawing the tree itself, which read as clutter in a dropdown.
 function buildUserOptions(users) {
   const byId = Object.fromEntries(users.map((u) => [u.id, u]));
@@ -1504,7 +1504,7 @@ async function loadGraph() {
 
   try {
     // /graph/nodes and /graph/relationships are independent "most recently
-    // created" queries -- on any graph bigger than a couple dozen nodes,
+    // created" queries: on any graph bigger than a couple dozen nodes,
     // the 15 most-recent nodes and the 25 most-recent relationships mostly
     // DON'T share endpoints, so renderGraph (which only draws an edge when
     // both its endpoints are in the shown node set) ends up drawing almost
@@ -1543,7 +1543,7 @@ async function loadGraph() {
     if (requestId !== graphRequestId) return; // superseded again while parsing the responses
 
     // Show the nodes the fetched relationships actually connect first, so
-    // those edges have both endpoints on screen -- then pad out with other
+    // those edges have both endpoints on screen: then pad out with other
     // recent nodes (unconnected among the ones we fetched, but real) up to
     // a readable cap. Without this, most edges silently fail to render
     // because their endpoints never made the "most recent 15 nodes" cut.
@@ -1562,7 +1562,7 @@ async function loadGraph() {
     if (nodes.length === 0) {
       emptyEl.style.display = "block";
       svg.innerHTML = "";
-      // Still explain *whose* empty view this is -- a rep with nothing
+      // Still explain *whose* empty view this is: a rep with nothing
       // assigned to them yet should read as "this person can't see anything
       // here," not as a broken page.
       insightEl.textContent = getSelectedUser() ? describeGraph(summary, nodes) : "";
@@ -1581,7 +1581,7 @@ async function loadGraph() {
 // Turns the raw counts into a sentence a stakeholder can act on, rather than
 // making them infer what "4 nodes, 6 relationships" means on their own. When
 // a user is selected, this is also the proof that role-based visibility is
-// actually filtering, not just decorating the page with a dropdown -- it
+// actually filtering, not just decorating the page with a dropdown: it
 // names whose view this is and how much of the knowledge base that leaves out.
 function describeGraph(summary, nodes) {
   const { node_count, relationship_count } = summary;
@@ -1603,13 +1603,13 @@ function describeGraph(summary, nodes) {
 // Picks which set of nodes the suggested questions should be built from:
 // when a document set is scoping the Ask panel (see getSelectedDocumentSet),
 // suggestions should reflect everything in THAT bundle, not just whichever
-// single connector happens to be selected in the header -- otherwise a
+// single connector happens to be selected in the header: otherwise a
 // question chip could reference something outside the dataset actually
 // being searched. `headerNodes` (already fetched by loadGraph for the
 // header's own knowledge base) is reused when no document set is active, to
 // avoid a second fetch for the common case.
 // Hand-picked for knowledge bases where the auto-generated chips (built
-// from whatever's most recently created -- see renderSuggestedQuestions)
+// from whatever's most recently created: see renderSuggestedQuestions)
 // turned out thin or off-topic on inspection: a demo's first impression
 // shouldn't depend on ingestion order. Each one was checked against the
 // live system and gives a real, well-sourced answer, not just a
@@ -1655,7 +1655,7 @@ async function refreshSuggestedQuestionsForScope(headerNodes) {
 
 // Node labels that mean "this is an auto-generated log entry describing an
 // action" (see app/graph/entity_resolution.py's matching exclusion list)
-// rather than a real named thing -- "Submitted Plant 1 August throughput
+// rather than a real named thing: "Submitted Plant 1 August throughput
 // forecast" or "quarterly check-in call with Brightpeak Automation" reads
 // as a sentence fragment, not something a person would ask "what do we know
 // about ___?" of. Suggested questions are only worth showing when they read
@@ -1696,12 +1696,12 @@ function renderSuggestedQuestionChips(questions) {
 
 // Minimal dependency-free graph render: places nodes evenly around a circle
 // and draws a line for each relationship between them. No physics/force
-// layout -- a circle is legible without a library to load, as long as the
+// layout: a circle is legible without a library to load, as long as the
 // circle itself grows with the node count instead of staying a fixed size.
 function renderGraph(svg, nodes, rels) {
   const count = nodes.length;
   // A radius that worked for 4-6 nodes packs nodes (and their labels)
-  // shoulder to shoulder once there are 15-20 -- the arc length between
+  // shoulder to shoulder once there are 15-20: the arc length between
   // neighbors shrinks as more nodes share the same circle. Growing the
   // radius (and the canvas around it) with node count keeps that spacing
   // roughly constant instead.
@@ -1731,7 +1731,7 @@ function renderGraph(svg, nodes, rels) {
   // manages B vs. B manages A). Grouping by the pair and spreading each one
   // out to its own curve keeps their labels from landing on top of each
   // other. The perpendicular used to space them out has to be computed once
-  // per pair rather than per relationship -- otherwise a reversed edge flips
+  // per pair rather than per relationship: otherwise a reversed edge flips
   // its own offset's sign and lands right back on top of a different edge in
   // the same group instead of getting its own spot.
   const groups = {};
@@ -1766,7 +1766,7 @@ function renderGraph(svg, nodes, rels) {
     const p = positions[n.name];
     // Alternate how far the label sits from its node so two labels on
     // adjacent, closely-spaced nodes don't land at the same height and
-    // overlap -- only really visible once a graph has 15+ nodes on the circle.
+    // overlap: only really visible once a graph has 15+ nodes on the circle.
     const labelOffset = 12 + (i % 2) * 14;
     svgContent += `<circle class="gv-node" cx="${p.x}" cy="${p.y}" r="6">
       <title>${escapeXml(n.summary || n.name)}</title>
@@ -1793,7 +1793,7 @@ function escapeXml(s) {
 // shouldn't let the first, slower response overwrite the newer one.
 let askRequestId = 0;
 
-// How many results the fallback semantic search asks for -- see
+// How many results the fallback semantic search asks for: see
 // app/api/context.py's result_limit. Bumped only by clicking "See more
 // results" (see below), and reset back to the default on every new question,
 // so a broad question doesn't silently stay expensive after the user moves on.
@@ -1808,8 +1808,8 @@ async function runAskQuery(resultLimit) {
   const rawEl = document.getElementById("queryRaw");
   const seeMoreBtn = document.getElementById("seeMoreBtn");
   const statsEl = document.getElementById("queryStats");
-  // A prior "Explain why + recommend" answer has to be cleared here too --
-  // it's a separate result block (see runCausalQuery below) that only ever
+  // A prior "Explain why + recommend" answer has to be cleared here too.
+  // It's a separate result block (see runCausalQuery below) that only ever
   // gets touched by the causal button, so without this a stale
   // recommendation from a previous question stayed on screen underneath a
   // brand new plain-Ask answer, looking like it was still the answer to the
@@ -1837,7 +1837,7 @@ async function runAskQuery(resultLimit) {
   causalEl.innerHTML = "";
   try {
     // A document set scoped to several connectors at once takes priority over
-    // the single-connector picker in the header when one's selected -- see
+    // the single-connector picker in the header when one's selected: see
     // app/api/context.py, which doesn't support as_user alongside it yet.
     const docSet = getSelectedDocumentSet();
     const res = await fetch(`${API}/context/query`, {
@@ -1875,17 +1875,17 @@ async function runAskQuery(resultLimit) {
       : "Nothing on file matches that yet. Try asking a broader question, or add more information first.";
 
     // A single fact IS the answer verbatim in this case (no synthesis step ran
-    // for just one fact -- see orchestrator.py), but it's still shown below
+    // for just one fact: see orchestrator.py), but it's still shown below
     // too: that's the only place the current/superseded badge appears, and
     // always showing where an answer came from is the actual point of this
-    // tool -- collapsing it away for the single-fact case would quietly break
+    // tool: collapsing it away for the single-fact case would quietly break
     // that promise exactly when the answer is most directly traceable to one
     // specific fact.
     renderFacts(factsEl, facts);
     renderQueryStats(statsEl, data.metadata);
 
     // result_limit_hit means the fallback search returned exactly as many
-    // results as it was capped at -- a sign there may be lower-relevance
+    // results as it was capped at: a sign there may be lower-relevance
     // ones beyond it worth surfacing on request, rather than always paying
     // for a bigger default on every question. Once already showing the
     // expanded count, there's no further "more" to offer.
@@ -1901,7 +1901,7 @@ async function runAskQuery(resultLimit) {
 document.getElementById("askBtn").addEventListener("click", () => runAskQuery(DEFAULT_RESULT_LIMIT));
 document.getElementById("seeMoreBtn").addEventListener("click", () => runAskQuery(EXPANDED_RESULT_LIMIT));
 
-// "Explain why + recommend" -- the causal-reasoning mode (POST
+// "Explain why + recommend": the causal-reasoning mode (POST
 // /api/v1/context/query/causal, see app/context/orchestrator.py's
 // get_causal_context_packet), deliberately a separate button/call from
 // "Ask" above rather than a mode toggle on it: that endpoint is allowed to
@@ -1937,15 +1937,15 @@ async function runCausalQuery() {
     const data = await res.json();
     const rec = data.metadata?.recommendation;
     if (!rec) {
-      // No real causal chain -- either nothing at all to go on
+      // No real causal chain: either nothing at all to go on
       // (retrieval_path "none"/"causal_chain_empty"), or a fact-only
       // fallback with real evidence behind it: either a single entity's own
       // directly-known facts ("causal_fallback_direct_facts") or the actual
       // connecting path between two named entities that wasn't entirely
-      // causal-typed ("causal_path_between_entities") -- see
+      // causal-typed ("causal_path_between_entities"): see
       // get_causal_context_packet. Both fallback shapes used to render
-      // identically to a real causal answer -- same muted paragraph, no
-      // distinguishing label, no evidence list at all -- which made it
+      // identically to a real causal answer: same muted paragraph, no
+      // distinguishing label, no evidence list at all, which made it
       // look like the causal engine had actually explained something (and,
       // when the plain "Ask" answer happened to draw on the same facts,
       // made the two panels look like an outright bug/duplicate). Checking
@@ -1961,10 +1961,10 @@ async function runCausalQuery() {
         const factsHost = document.createElement("div");
         renderFacts(factsHost, facts);
         // Deliberately never shows metadata.summary here (unlike the API
-        // response, which keeps it -- see the MCP tool's documented
+        // response, which keeps it: see the MCP tool's documented
         // "summary" field). With a handful of facts, a synthesized sentence
         // stitched from them reads as a near-restatement of the same list
-        // right below it -- real information density is low on a dataset
+        // right below it: real information density is low on a dataset
         // this size, so the paragraph consistently added noise rather than
         // insight. The evidence list (each line now carrying its own real
         // source document, not just bare text) already says everything a
@@ -1977,7 +1977,7 @@ async function runCausalQuery() {
       return;
     }
     // Deliberately styled/labeled distinctly from the plain-facts answer
-    // above -- this is a generated suggestion, not a restated fact, and it
+    // above: this is a generated suggestion, not a restated fact, and it
     // should never read as one. See app/context/orchestrator.py's docstring
     // on why "recommendation" and "summary" are never blended.
     const decisionNote = data.metadata?.decision_id
@@ -2000,7 +2000,7 @@ async function runCausalQuery() {
 document.getElementById("causalBtn").addEventListener("click", runCausalQuery);
 
 // Every fact carries whether it's still true or was superseded by something
-// newer -- surfacing that plainly is the actual proof this system tracks
+// newer: surfacing that plainly is the actual proof this system tracks
 // history instead of just overwriting old information. Current facts are
 // shown first since they're what most people reading this actually want to
 // see; the superseded ones are still here for anyone who wants the history.
@@ -2020,18 +2020,18 @@ function renderFacts(container, facts) {
       const badge = current
         ? `<span class="fact-badge fact-badge-current">current</span>`
         : `<span class="fact-badge fact-badge-superseded">superseded*</span>`;
-      // Real provenance, not a guess -- group_id is the same field every
+      // Real provenance, not a guess: group_id is the same field every
       // query in this app is already scoped by (see graph_repository.py's
       // _entity_own_facts/search_graphiti_facts). Only shown when it maps
       // to a knowledge base this tenant can see, and only when a document
-      // set (multiple possible sources) is actually the scope in play --
+      // set (multiple possible sources) is actually the scope in play:
       // pointless noise on a single-connector query where it's always the
       // same source.
       const kbLabel = f.group_id ? knowledgeBaseDirectory.find((kb) => kb.id === f.group_id)?.label : null;
       const kbTag =
         kbLabel && getSelectedDocumentSet() ? `<span class="fact-source">${escapeXml(kbLabel)}</span>` : "";
       // The actual document/row this fact was extracted from (e.g.
-      // "orders.csv (Order)") -- resolved server-side from Graphiti's own
+      // "orders.csv (Order)"): resolved server-side from Graphiti's own
       // edge.episodes property (see graph_repository.py's
       // _resolve_episode_sources), never a guess. This is the piece that
       // makes "where this answer comes from" mean something beyond
@@ -2055,13 +2055,13 @@ const RETRIEVAL_PATH_LABELS = {
 };
 
 // Small, quiet observability line (v4): how this specific answer was
-// produced -- see app/context/orchestrator.py's retrieval_path and
+// produced: see app/context/orchestrator.py's retrieval_path and
 // app/context/query_service.py's cache_hit. Not meant to be the focus of
 // the page, just visible proof of the retrieval-efficiency story (skip
 // semantic search when a named entity already answers it, skip the whole
 // retrieval+synthesis call on a cache hit) for anyone who wants it.
 //
-// Deliberately does NOT include cost_usd -- what this app spends on LLM
+// Deliberately does NOT include cost_usd: what this app spends on LLM
 // calls is this operator's own internal cost, not something every tenant's
 // end user browsing the page needs to see next to their answer. It's still
 // in the raw API response for anyone building their own tooling against
@@ -2091,7 +2091,7 @@ document.getElementById("queryInput").addEventListener("keydown", (e) => {
 // --- Connect an AI agent (MCP) -----------------------------------------------
 // Purely local: the endpoint is always this same origin's /mcp (see
 // app/mcp/server.py) and the header is whatever access key is already saved
-// here -- no separate fetch needed, unlike the sections above.
+// here: no separate fetch needed, unlike the sections above.
 function renderMcpCard() {
   const card = document.getElementById("mcpCard");
   const key = getApiKey();
