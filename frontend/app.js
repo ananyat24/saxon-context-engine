@@ -2066,7 +2066,7 @@ const RETRIEVAL_PATH_LABELS = {
 // end user browsing the page needs to see next to their answer. It's still
 // in the raw API response for anyone building their own tooling against
 // it; the running total for whoever operates this deployment is behind
-// ADMIN_API_KEY (see the footer link, and GET /api/v1/admin/spend).
+// ADMIN_API_KEY, readable directly from GET /api/v1/admin/spend.
 function renderQueryStats(el, metadata) {
   if (!metadata) {
     el.hidden = true;
@@ -2106,16 +2106,10 @@ function renderMcpCard() {
     `Streamable HTTP transport -- add this URL and header in your MCP client's server settings.`;
 }
 
-// --- Admin: running spend (footer link) -------------------------------------
-// Deliberately separate from the tenant access key above -- this reads
-// GET /api/v1/admin/spend, gated by the operator-only ADMIN_API_KEY (see
-// app/security.py's require_admin), never a tenant's own key. Not meant to
-// be a real admin panel -- just enough to keep the running total out of the
-// per-query line every tenant's user sees, without losing visibility for
-// The "view running spend" button was removed from this page (spend is
-// still tracked and still reachable directly at GET /api/v1/admin/spend
-// with the operator's ADMIN_API_KEY, via curl or a REST client -- this
-// just stopped surfacing it as a clickable button on the page itself).
+// The "view running spend" button used to live here. It's gone from the
+// page now, but the data is still tracked: GET /api/v1/admin/spend still
+// works for anyone with the operator's ADMIN_API_KEY, just not as a
+// clickable button every visitor sees.
 
 // --- Init -------------------------------------------------------------------
 async function loadTenantData() {
@@ -2131,3 +2125,11 @@ async function loadTenantData() {
 
 loadHealth();
 loadTenantData();
+
+// Nothing on the page works without a key, so a first-time visitor (or
+// anyone whose stored key got cleared) gets the entry prompt immediately
+// instead of a page that looks broken until they notice the small
+// "Access key" button in the header.
+if (!getApiKey()) {
+  openKeyModal();
+}
