@@ -222,6 +222,109 @@ def finalize_oauth_files(
     return bool(rows) and rows[0]["updated"] > 0
 
 
+def create_foundry_iq_connector(
+    tenant_id: str,
+    name: str,
+    group_id: str,
+    search_endpoint: str,
+    knowledge_base: str,
+    api_key_enc: str,
+    repo: Optional[GraphRepository] = None,
+) -> dict:
+    """Creates a "foundry_iq" connector -- see app/retrieval/foundry_iq_retriever.py's
+    module docstring for why this is a live, query-time retriever config,
+    not an ingestion connector: there's no fetch()/content_hash/sync
+    lifecycle here, just three settings a query-time lookup
+    (find_foundry_iq_config_for_group below) reads back per query. `url`
+    stores search_endpoint, same "the address field is the address field"
+    convention sharepoint/google_drive already use. api_key_enc must
+    already be Fernet-encrypted (see app/graph/token_crypto.py) -- this
+    function stores exactly what it's given, same contract as
+    create_oauth_pending_connector above. status is set straight to
+    'never_synced' (not a distinct pending state) since there's no
+    multi-step setup flow like OAuth's picker step -- the connector is
+    immediately usable the moment it's created; "Sync now" for this type
+    runs a live connectivity check instead of an ingestion sync (see
+    app/api/connectors.py's _enqueue_sync)."""
+    repo = repo or GraphRepository()
+    connector_id = str(uuid.uuid4())
+    repo.execute_cypher(
+        """
+        CREATE (c:Connector {
+            id: $id, tenant_id: $tenant_id, name: $name, type: 'foundry_iq',
+            group_id: $group_id, url: $search_endpoint, status: 'never_synced',
+            last_synced_at: null, last_error: null, content_hash: null,
+            source_authority: 0, foundry_iq_knowledge_base: $knowledge_base,
+            foundry_iq_api_key_enc: $api_key_enc, created_at: datetime()
+        })
+        """,
+        {
+            "id": connector_id,
+            "tenant_id": tenant_id,
+            "name": name,
+            "group_id": group_id,
+            "search_endpoint": search_endpoint,
+            "knowledge_base": knowledge_base,
+            "api_key_enc": api_key_enc,
+        },
+    )
+    return {
+        "id": connector_id, "tenant_id": tenant_id, "name": name, "type": "foundry_iq",
+        "group_id": group_id, "url": search_endpoint, "status": "never_synced", "last_synced_at": None,
+        "last_error": None, "content_hash": None, "source_authority": 0,
+        "foundry_iq_knowledge_base": knowledge_base,
+    }
+
+
+def find_foundry_iq_config_for_group(
+    tenant_id: str, group_id: str, repo: Optional[GraphRepository] = None
+) -> Optional[dict]:
+    """The per-query lookup execute_context_query uses to build a
+    FoundryIQRetriever scoped to whichever knowledge base is actually being
+    queried, instead of one global deployment-wide config -- a tenant
+    configures this once, through the UI, per knowledge base, the same way
+    every other connector is configured. Returns None (not an error) when
+    no foundry_iq connector exists for this group_id -- the caller falls
+    back to the deployment-wide FOUNDRY_IQ_* env vars, if any (see
+    query_service.py). If more than one exists for the same group_id
+    (nothing prevents that today), the most recently created one wins --
+    same "first/most-recent match" tiebreak this codebase already uses
+    elsewhere rather than erroring on an edge case nothing depends on."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        """
+        MATCH (c:Connector {tenant_id: $tenant_id, group_id: $group_id, type: 'foundry_iq'})
+        RETURN c.url AS search_endpoint, c.foundry_iq_knowledge_base AS knowledge_base,
+               c.foundry_iq_api_key_enc AS api_key_enc
+        ORDER BY c.created_at DESC
+        LIMIT 1
+        """,
+        {"tenant_id": tenant_id, "group_id": group_id},
+    )
+    return rows[0] if rows else None
+
+
+def get_foundry_iq_credential(
+    tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None
+) -> Optional[dict]:
+    """The by-id counterpart to find_foundry_iq_config_for_group above --
+    used by the "Sync now" connectivity check (app/api/connectors.py's
+    _enqueue_sync), which already has this exact connector's own id and
+    needs to test THIS connector's credential, not "whichever foundry_iq
+    connector happens to be most recent for this group_id" (the group_id
+    lookup's own documented tiebreak, right for query time, wrong here)."""
+    repo = repo or GraphRepository()
+    rows = repo.execute_cypher(
+        """
+        MATCH (c:Connector {id: $id, tenant_id: $tenant_id, type: 'foundry_iq'})
+        RETURN c.url AS search_endpoint, c.foundry_iq_knowledge_base AS knowledge_base,
+               c.foundry_iq_api_key_enc AS api_key_enc
+        """,
+        {"id": connector_id, "tenant_id": tenant_id},
+    )
+    return rows[0] if rows else None
+
+
 def get_oauth_refresh_token(tenant_id: str, connector_id: str, repo: Optional[GraphRepository] = None) -> Optional[str]:
     """Returns the connector's still-encrypted refresh token (see
     app/graph/token_crypto.py for decrypting it) -- deliberately a separate

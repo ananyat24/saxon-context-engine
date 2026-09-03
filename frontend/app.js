@@ -411,6 +411,7 @@ const CONNECTOR_TYPE_LABELS = {
   database: "Database / CRM (mock)",
   documents: "Documents",
   email: "Email inbox (mock)",
+  foundry_iq: "Microsoft Foundry IQ",
 };
 
 // connectorDirectory itself stays the full, tenant-wide list (needed for
@@ -891,13 +892,14 @@ document.getElementById("connectGoogleDriveBtn").addEventListener("click", () =>
 // app/api/connectors.py's own _TYPES_REQUIRING_URL. The demo data types
 // (database/documents/email) read a fixed bundled sample server-side, so
 // their URL field stays hidden rather than asking for an input that's ignored.
-const CONNECTOR_TYPES_REQUIRING_URL = new Set(["web", "google_drive", "sharepoint", "gmail", "outlook_mail"]);
+const CONNECTOR_TYPES_REQUIRING_URL = new Set(["web", "google_drive", "sharepoint", "gmail", "outlook_mail", "foundry_iq"]);
 const CONNECTOR_URL_PLACEHOLDERS = {
   web: "https://example.com/page-to-pull-in",
   google_drive: "Drive folder link or id (share the folder with the service account first)",
   sharepoint: "https://yourtenant.sharepoint.com/sites/YourSite",
   gmail: "mailbox@yourdomain.com (needs Workspace domain-wide delegation)",
   outlook_mail: "mailbox@yourdomain.com (needs the Mail.Read Graph permission)",
+  foundry_iq: "https://<your-search-service>.search.windows.net",
 };
 
 function updateConnectorUrlVisibility() {
@@ -916,6 +918,11 @@ function updateConnectorUrlVisibility() {
   document.getElementById("connectorCsvHintDatabase").hidden = type !== "database";
   document.getElementById("connectorCsvHintEmail").hidden = type !== "email";
   if (uploadInfo) document.getElementById("connectorCsvFile").accept = uploadInfo.ext;
+
+  const isFoundryIq = type === "foundry_iq";
+  document.getElementById("connectorFoundryIqRow").hidden = !isFoundryIq;
+  document.getElementById("connectorFoundryIqKeyRow").hidden = !isFoundryIq;
+  document.getElementById("connectorFoundryIqHint").hidden = !isFoundryIq;
 }
 document.getElementById("connectorType").addEventListener("change", updateConnectorUrlVisibility);
 updateConnectorUrlVisibility();
@@ -928,9 +935,17 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
   const url = document.getElementById("connectorUrl").value.trim();
   const groupId = document.getElementById("connectorKbSelect").value;
   const sourceAuthority = Number(document.getElementById("connectorAuthority").value) || 0;
+  const isFoundryIq = type === "foundry_iq";
+  const foundryIqKnowledgeBase = document.getElementById("connectorFoundryIqKnowledgeBase").value.trim();
+  const foundryIqApiKey = document.getElementById("connectorFoundryIqApiKey").value.trim();
 
   if (!name || (needsUrl && !url)) {
     statusEl.textContent = needsUrl ? "Give the connector a name and a URL." : "Give the connector a name.";
+    statusEl.className = "status-line bad";
+    return;
+  }
+  if (isFoundryIq && (!foundryIqKnowledgeBase || !foundryIqApiKey)) {
+    statusEl.textContent = "Give it a knowledge base name and an API key too.";
     statusEl.className = "status-line bad";
     return;
   }
@@ -947,6 +962,8 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
         group_id: groupId,
         url: needsUrl ? url : undefined,
         source_authority: sourceAuthority,
+        foundry_iq_knowledge_base: isFoundryIq ? foundryIqKnowledgeBase : undefined,
+        foundry_iq_api_key: isFoundryIq ? foundryIqApiKey : undefined,
       }),
     });
     if (!res.ok) {
@@ -958,6 +975,8 @@ document.getElementById("createConnectorBtn").addEventListener("click", async ()
     const created = await res.json();
     document.getElementById("connectorName").value = "";
     document.getElementById("connectorUrl").value = "";
+    document.getElementById("connectorFoundryIqKnowledgeBase").value = "";
+    document.getElementById("connectorFoundryIqApiKey").value = "";
 
     const csvInput = document.getElementById("connectorCsvFile");
     const csvFiles = CONNECTOR_UPLOAD_TYPES[type] ? Array.from(csvInput.files || []) : [];

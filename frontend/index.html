@@ -254,6 +254,7 @@
                         <option value="database">Database / CRM (upload your own CSVs)</option>
                         <option value="documents">Documents (demo data)</option>
                         <option value="email">Email inbox (upload a JSON export)</option>
+                        <option value="foundry_iq">Microsoft Foundry IQ (Fabric IQ / Foundry IQ / Work IQ)</option>
                     </select>
                 </div>
                 <div class="row" id="connectorUrlRow">
@@ -272,6 +273,19 @@
                     connector is created.</span>
                     Nothing to upload yet? It starts out reading a small bundled demo dataset instead; you
                     can upload real files any time later from the connector's own row below.
+                </p>
+                <div class="row" id="connectorFoundryIqRow" hidden>
+                    <input id="connectorFoundryIqKnowledgeBase" type="text" placeholder="Knowledge base name" />
+                </div>
+                <div class="row" id="connectorFoundryIqKeyRow" hidden>
+                    <input id="connectorFoundryIqApiKey" type="password" placeholder="Azure AI Search API key" autocomplete="off" />
+                </div>
+                <p id="connectorFoundryIqHint" class="muted" style="font-size:0.8rem" hidden>
+                    One knowledge base covers all three -- Fabric IQ and Work IQ are knowledge sources
+                    Foundry IQ itself already orchestrates, so this connects your Fabric, Foundry, and
+                    Work IQ content in one step. The URL field above is your Azure AI Search resource's
+                    endpoint (https://&lt;your-search-service&gt;.search.windows.net). The API key is
+                    encrypted before it's stored and is never shown again after you save it.
                 </p>
                 <div class="row">
                     <select id="connectorKbSelect" class="kb-select connector-kb-select"></select>

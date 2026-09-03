@@ -170,6 +170,10 @@ def _patch_plain_query_scope(monkeypatch):
     monkeypatch.setattr(query_service.authorization, "resolve_as_user", lambda *a, **k: None)
     monkeypatch.setattr(query_service.settings, "llm_provider", "gemini")
     monkeypatch.setattr(query_service, "ContextOrchestrator", _FakeContextOrchestrator)
+    # No per-knowledge-base foundry_iq connector in these tests -- always
+    # falls through to the global env-var check, so foundry_iq_configured
+    # alone controls the outcome without touching Neo4j.
+    monkeypatch.setattr(query_service.connectors, "find_foundry_iq_config_for_group", lambda *a, **k: None)
 
 
 def test_foundry_iq_retriever_is_added_when_fully_configured(monkeypatch):
@@ -197,3 +201,55 @@ def test_foundry_iq_retriever_is_omitted_when_not_configured(monkeypatch):
         )
     )
     assert _FakeContextOrchestrator.calls[-1]["extra_retrievers"] is None
+
+
+# --- _resolve_foundry_iq_retriever's own priority logic -----------------
+# Unit-level, not through the full execute_context_query -- covers the
+# per-knowledge-base-connector-beats-global-env-var priority and the
+# undecryptable-credential fallback directly.
+
+
+def test_resolve_foundry_iq_retriever_prefers_a_per_group_connector_over_global_settings(monkeypatch):
+    monkeypatch.setattr(
+        query_service.connectors, "find_foundry_iq_config_for_group",
+        lambda tenant_id, group_id, repo=None: (
+            {"search_endpoint": "https://kb1.search.windows.net", "knowledge_base": "kb1-index", "api_key_enc": "enc-1"}
+            if group_id == "kb1" else None
+        ),
+    )
+    monkeypatch.setattr(query_service, "decrypt_token", lambda enc: f"decrypted-{enc}")
+    monkeypatch.setattr(query_service, "foundry_iq_configured", lambda: False)  # global not set -- connector must win
+
+    retriever = query_service._resolve_foundry_iq_retriever("t1", ["kb1"], repo=None)
+
+    assert retriever is not None
+    assert retriever.search_endpoint == "https://kb1.search.windows.net"
+    assert retriever.api_key == "decrypted-enc-1"
+    assert retriever.knowledge_base == "kb1-index"
+
+
+def test_resolve_foundry_iq_retriever_falls_back_to_global_settings_when_no_connector_matches(monkeypatch):
+    monkeypatch.setattr(query_service.connectors, "find_foundry_iq_config_for_group", lambda *a, **k: None)
+    monkeypatch.setattr(query_service, "foundry_iq_configured", lambda: True)
+
+    retriever = query_service._resolve_foundry_iq_retriever("t1", ["kb1"], repo=None)
+    assert retriever is not None
+
+
+def test_resolve_foundry_iq_retriever_skips_an_undecryptable_credential(monkeypatch):
+    from cryptography.fernet import InvalidToken
+
+    def _raise(enc):
+        raise InvalidToken()
+
+    monkeypatch.setattr(
+        query_service.connectors, "find_foundry_iq_config_for_group",
+        lambda tenant_id, group_id, repo=None: {
+            "search_endpoint": "https://x", "knowledge_base": "kb", "api_key_enc": "bad",
+        },
+    )
+    monkeypatch.setattr(query_service, "decrypt_token", _raise)
+    monkeypatch.setattr(query_service, "foundry_iq_configured", lambda: False)
+
+    retriever = query_service._resolve_foundry_iq_retriever("t1", ["kb1"], repo=None)
+    assert retriever is None  # undecryptable, and no global fallback configured either

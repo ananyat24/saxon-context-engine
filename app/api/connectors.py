@@ -38,6 +38,7 @@ from app.ingestion.google_oauth import exchange_code, refresh_access_token, revo
 from app.ingestion.outlook_mail_source import OutlookMailConnector
 from app.ingestion.sharepoint_source import SharePointConnector
 from app.ingestion.web_source import WebConnector
+from app.retrieval.foundry_iq_retriever import FoundryIQRetriever
 from app.security import require_tenant
 
 router = APIRouter()
@@ -85,6 +86,17 @@ _TYPES_REQUIRING_URL = {"web", "google_drive", "sharepoint", "gmail", "outlook_m
 # error.
 _OAUTH_ONLY_TYPES = {"google_drive_oauth"}
 
+# "foundry_iq" (app/retrieval/foundry_iq_retriever.py) is a live, per-query
+# retriever, not an ingestion connector -- it never implements
+# SourceConnector/fetch(), so it's deliberately never added to
+# _CONNECTOR_FACTORIES above. Handled as its own branch everywhere that dict
+# would otherwise be the single dispatch point: creation (below, its own
+# validation/storage instead of the generic URL-connector path) and "Sync
+# now" (_enqueue_sync, a live connectivity check instead of
+# run_connector_sync). One retriever covers Fabric IQ and Work IQ too --
+# see CLAUDE.md's v7 section for why.
+_RETRIEVER_ONLY_TYPES = {"foundry_iq"}
+
 # Real live connector types need an operator-wide credential configured
 # before a tenant can even create one -- checked here so that's a clear 400
 # at creation time, not a confusing failure the first time someone clicks
@@ -123,6 +135,12 @@ class CreateConnectorRequest(BaseModel):
     # filters a fact; every source's own facts stay visible regardless of
     # rank. 0 (the default) means "no special standing".
     source_authority: int = Field(default=0, ge=0, le=100)
+    # Only used when type == "foundry_iq" (see _RETRIEVER_ONLY_TYPES below)
+    # -- `url` above doubles as the Azure AI Search endpoint for this type,
+    # same "the address field is the address field" convention every other
+    # connector already follows.
+    foundry_iq_api_key: Optional[str] = Field(default=None, max_length=500)
+    foundry_iq_knowledge_base: Optional[str] = Field(default=None, max_length=200)
 
 
 # A connector past this many sync intervals since its last success is
@@ -227,10 +245,13 @@ def list_connectors(request: Request, tenant: TenantConfig = Depends(require_ten
 async def create_connector(
     req: CreateConnectorRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)
 ):
-    if req.type not in _CONNECTOR_FACTORIES:
+    if req.type not in _CONNECTOR_FACTORIES and req.type not in _RETRIEVER_ONLY_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported connector type '{req.type}'. Supported: {', '.join(sorted(_CONNECTOR_FACTORIES))}.",
+            detail=(
+                f"Unsupported connector type '{req.type}'. "
+                f"Supported: {', '.join(sorted(_CONNECTOR_FACTORIES | _RETRIEVER_ONLY_TYPES))}."
+            ),
         )
     if req.type in _OAUTH_ONLY_TYPES:
         raise HTTPException(
@@ -242,6 +263,9 @@ async def create_connector(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unknown knowledge base '{req.group_id}' for this tenant.",
         )
+
+    if req.type in _RETRIEVER_ONLY_TYPES:
+        return _create_foundry_iq_connector(req, request, tenant)
 
     config_check = _OPERATOR_CONFIG_CHECKS.get(req.type)
     if config_check is not None and not config_check():
@@ -273,6 +297,40 @@ async def create_connector(
     if req.type in _PUSH_CAPABLE_TYPES:
         await _try_enable_push(tenant, created, url, repo)
         created = connectors.get_connector(tenant.tenant_id, created["id"], repo=repo)
+    return _serialize(created)
+
+
+def _create_foundry_iq_connector(req: CreateConnectorRequest, request: Request, tenant: TenantConfig) -> dict:
+    """The foundry_iq branch of create_connector above -- its own
+    validation and storage instead of the generic SourceConnector-URL path,
+    since this type has three required fields (endpoint, api key,
+    knowledge base name) instead of one URL and stores an encrypted
+    credential instead of nothing secret at all. Synchronous (no network
+    call here -- the actual Foundry IQ connectivity check happens on
+    "Sync now", see _enqueue_sync below) so it's easy to call directly from
+    the async route without an extra await that does nothing."""
+    search_endpoint = (req.url or "").strip()
+    knowledge_base = (req.foundry_iq_knowledge_base or "").strip()
+    api_key = (req.foundry_iq_api_key or "").strip()
+    missing = [
+        label for label, value in (
+            ("an Azure AI Search endpoint (the URL field)", search_endpoint),
+            ("a knowledge base name", knowledge_base),
+            ("an API key", api_key),
+        ) if not value
+    ]
+    if missing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"foundry_iq needs {', and '.join(missing)}.")
+
+    try:
+        api_key_enc = encrypt_token(api_key)
+    except TokenEncryptionNotConfigured as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    repo = GraphRepository(neo4j_client=request.app.state.neo4j_client)
+    created = connectors.create_foundry_iq_connector(
+        tenant.tenant_id, req.name.strip(), req.group_id, search_endpoint, knowledge_base, api_key_enc, repo=repo,
+    )
     return _serialize(created)
 
 
@@ -414,8 +472,18 @@ async def _enqueue_sync(tenant: TenantConfig, connector: dict, request: Request,
     moment a user finishes picking files, without duplicating the queue
     plumbing. _CONNECTOR_FACTORIES is the one dispatch point -- every type
     from here down is handled generically via the SourceConnector interface."""
-    factory = _CONNECTOR_FACTORIES[connector["type"]]
     connectors.mark_sync_queued(tenant.tenant_id, connector["id"], repo=repo)
+
+    if connector["type"] in _RETRIEVER_ONLY_TYPES:
+        async def _job() -> None:
+            await _check_foundry_iq_connectivity(
+                tenant, connector, repo=GraphRepository(neo4j_client=request.app.state.neo4j_client)
+            )
+
+        await request.app.state.ingestion_queue.enqueue(_job)
+        return
+
+    factory = _CONNECTOR_FACTORIES[connector["type"]]
 
     async def _job() -> None:
         # A fresh GraphRepository, not the request-scoped `repo` above --
@@ -425,6 +493,56 @@ async def _enqueue_sync(tenant: TenantConfig, connector: dict, request: Request,
         await run_connector_sync(tenant, connector, factory, repo=GraphRepository(neo4j_client=request.app.state.neo4j_client))
 
     await request.app.state.ingestion_queue.enqueue(_job)
+
+
+async def _check_foundry_iq_connectivity(tenant: TenantConfig, connector: dict, repo: GraphRepository) -> None:
+    """"Sync now" for a foundry_iq connector -- there's nothing to ingest
+    (see app/retrieval/foundry_iq_retriever.py's module docstring), so this
+    is a real, live connectivity check instead: decrypt the stored
+    credential, run one trivial retrieval, and record whether it actually
+    reached the knowledge base. Never raises -- same "every failure mode
+    reported back via record_sync_result, not an exception the caller has
+    to handle" contract run_connector_sync already follows."""
+    credential = connectors.get_foundry_iq_credential(tenant.tenant_id, connector["id"], repo=repo)
+    if credential is None or not credential.get("api_key_enc"):
+        connectors.record_sync_result(
+            tenant.tenant_id, connector["id"], status="error", last_error="Connector configuration is missing.", repo=repo
+        )
+        return
+    try:
+        api_key = decrypt_token(credential["api_key_enc"])
+    except InvalidToken:
+        connectors.record_sync_result(
+            tenant.tenant_id, connector["id"], status="error",
+            last_error="Stored credential could not be decrypted -- it may have been saved under a different "
+            "TOKEN_ENCRYPTION_KEY. Delete and recreate this connector.",
+            repo=repo,
+        )
+        return
+
+    retriever = FoundryIQRetriever(
+        search_endpoint=credential["search_endpoint"], api_key=api_key, knowledge_base=credential["knowledge_base"],
+    )
+    facts = await retriever.retrieve("connectivity check", num_results=1)
+    # retrieve() never raises (see its own docstring) -- an unreachable
+    # endpoint or bad credential comes back as an empty list, same shape as
+    # "reached the knowledge base but it genuinely has nothing to say about
+    # this query" would. Good enough for "is this configured correctly"
+    # (a real misconfiguration -- wrong endpoint, wrong key, wrong
+    # knowledge base name -- fails on every query, not just this one), not
+    # precise enough to distinguish those two cases from each other; that
+    # would need retrieve() to surface its own error detail instead of
+    # swallowing it, real follow-up scope if this check's accuracy turns
+    # out to matter more than "reachable at all".
+    if facts:
+        connectors.record_sync_result(tenant.tenant_id, connector["id"], status="synced", repo=repo)
+    else:
+        connectors.record_sync_result(
+            tenant.tenant_id, connector["id"], status="error",
+            last_error="Could not retrieve anything from this knowledge base -- check the endpoint, API key, and "
+            "knowledge base name.",
+            repo=repo,
+        )
 
 
 # --- Google Drive one-click connect (see app/ingestion/google_oauth.py and

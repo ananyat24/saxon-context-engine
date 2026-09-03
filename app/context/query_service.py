@@ -6,21 +6,54 @@
 # directly rather than each re-implementing scope resolution, so the two
 # surfaces can never drift on what a given (tenant, query, scope) actually
 # returns.
+import logging
 from typing import Optional
 
+from cryptography.fernet import InvalidToken
 from fastapi import HTTPException, status
 
 from app.config import TenantConfig, settings
 from app.context.orchestrator import ContextOrchestrator
 from app.context.response_cache import get_response_cache
-from app.graph import authorization, document_sets
+from app.graph import authorization, connectors, document_sets
 from app.graph.graph_repository import GraphRepository
 from app.graph.neo4j_client import Neo4jClient
 from app.graph.spend_limiter import SpendLimitExceeded, get_limiter
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
+from app.graph.token_crypto import decrypt_token
 from app.models.context_packet import ContextPacket
 from app.retrieval.foundry_iq_retriever import FoundryIQRetriever, foundry_iq_configured
 from app.security import resolve_knowledge_base
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_foundry_iq_retriever(
+    tenant_id: str, group_ids: list[str], repo: GraphRepository
+) -> Optional[FoundryIQRetriever]:
+    """A per-knowledge-base "foundry_iq" connector (configured through the
+    UI -- see app/api/connectors.py's _create_foundry_iq_connector) takes
+    priority over the deployment-wide FOUNDRY_IQ_* env vars, so different
+    knowledge bases (different clients, on a multi-tenant deployment) can
+    each point at their own Foundry IQ knowledge base rather than sharing
+    one operator-configured default. Checks each of this query's group_ids
+    in order and uses the first match; falls back to the global env-var
+    config (foundry_iq_configured()) if none of them has one configured;
+    returns None if neither does, so the caller adds nothing to
+    extra_retrievers rather than a retriever that would fail every call."""
+    for group_id in group_ids:
+        config = connectors.find_foundry_iq_config_for_group(tenant_id, group_id, repo=repo)
+        if config is None:
+            continue
+        try:
+            api_key = decrypt_token(config["api_key_enc"])
+        except InvalidToken:
+            logger.warning(f"Foundry IQ connector for group '{group_id}' has an undecryptable credential; skipping it.")
+            continue
+        return FoundryIQRetriever(
+            search_endpoint=config["search_endpoint"], api_key=api_key, knowledge_base=config["knowledge_base"],
+        )
+    return FoundryIQRetriever() if foundry_iq_configured() else None
 
 # Only anthropic/azure_openai calls are ever recorded against the spend
 # limiter (see app/graph/graphiti_adapter.py) -- a Gemini-provider tenant's
@@ -71,12 +104,15 @@ async def execute_context_query(
         return cached.model_copy(update={"metadata": {**cached.metadata, "cache_hit": True}})
 
     graphiti = await graphiti_pool.get_or_create(tenant)
-    # Only added when fully configured (see foundry_iq_configured's own
-    # docstring) -- an unconfigured tenant's queries run exactly as they
-    # did before this integration existed, not against a retriever that
-    # would fail every call. Plain Ask only, deliberately not threaded into
-    # execute_causal_query below -- see this module's own note there.
-    extra_retrievers = [FoundryIQRetriever()] if foundry_iq_configured() else None
+    # Only added when a foundry_iq connector exists for one of these
+    # group_ids, or the deployment-wide env vars are set (see
+    # _resolve_foundry_iq_retriever above) -- an unconfigured tenant's
+    # queries run exactly as they did before this integration existed, not
+    # against a retriever that would fail every call. Plain Ask only,
+    # deliberately not threaded into execute_causal_query below -- see this
+    # module's own note there.
+    foundry_iq_retriever = _resolve_foundry_iq_retriever(tenant.tenant_id, group_ids, repo)
+    extra_retrievers = [foundry_iq_retriever] if foundry_iq_retriever else None
     orchestrator = ContextOrchestrator(graphiti, neo4j_client=neo4j_client, extra_retrievers=extra_retrievers)
     limiter = get_limiter()
     spent_before = limiter.spent("query")
