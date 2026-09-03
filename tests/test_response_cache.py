@@ -1,4 +1,4 @@
-# Tests app/context/response_cache.py -- pure in-process logic, no database,
+# Tests app/context/response_cache.py: pure in-process logic, no database,
 # no network. Uses its own ResponseCache instances (not the shared
 # get_response_cache() singleton) so tests can't interfere with each other.
 import time
@@ -44,7 +44,7 @@ def test_different_tenants_never_share_a_cache_entry():
 
 def test_different_as_user_never_share_a_cache_entry():
     # Role-based visibility means the same question can have a different
-    # answer depending on who's asking -- these must never collide.
+    # answer depending on who's asking: these must never collide.
     cache = ResponseCache(ttl_seconds=60)
     key_rep = cache.make_key("tenant-a", ["kb1"], "user-rep", "q", 8)
     key_exec = cache.make_key("tenant-a", ["kb1"], "user-exec", "q", 8)
@@ -78,7 +78,7 @@ def test_invalidate_group_drops_only_matching_entries():
 
 
 def test_invalidate_group_matches_a_document_set_spanning_the_group():
-    # A document-set-scoped query's key holds multiple group_ids -- syncing
+    # A document-set-scoped query's key holds multiple group_ids: syncing
     # any one of that set's connectors should invalidate it.
     cache = ResponseCache(ttl_seconds=60)
     key = cache.make_key("tenant-a", ["kb1", "kb2", "kb3"], None, "q", 8)

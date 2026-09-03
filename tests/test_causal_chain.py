@@ -1,9 +1,9 @@
-# Needs a real, reachable Neo4j -- same caveat as test_entity_reconciliation.py.
+# Needs a real, reachable Neo4j: same caveat as test_entity_reconciliation.py.
 # Creates and cleans up its own throwaway :Entity nodes under a randomly-
 # suffixed group_id.
 #
 # Covers GraphRepository.causal_chain_for_query/_causal_chain_facts_from/
-# _relationship_path_full_facts/is_entirely_causal -- the causal-reasoning
+# _relationship_path_full_facts/is_entirely_causal: the causal-reasoning
 # retriever added for the Context Graph/Layer/Engine pivot (see CLAUDE.md).
 # Built to walk the pivot's own illustrative example: an at-risk Order -> its
 # Product -> a Component -> the Supplier -> an open QualityEvent.
@@ -78,7 +78,7 @@ def test_a_produces_and_triggered_by_chain_is_now_walked(repo):
     # Real bug found by testing against real ingested data: a root-cause
     # chain routinely runs through PRODUCES ("supplier PRODUCES a lot,
     # that lot PRODUCES a defective component") and TRIGGERED_BY
-    # ("corrective action TRIGGERED_BY the defect") -- neither was flagged
+    # ("corrective action TRIGGERED_BY the defect"): neither was flagged
     # causal in ontology/core.yaml, so the walker dead-ended one hop short
     # of a root cause that was fully present and connected in the graph.
     # Mirrors the actual shape found live: Order -AFFECTS-> QualityEvent
@@ -112,7 +112,7 @@ def test_a_produces_and_triggered_by_chain_is_now_walked(repo):
 def test_redundant_duplicate_edges_do_not_crowd_out_a_deeper_real_fact(repo):
     # Real bug found by testing against real ingested data: the LIMIT was
     # applied to raw Cypher path-instances, before Python's own (source,
-    # type, target) dedup ever ran -- and Graphiti's extraction routinely
+    # type, target) dedup ever ran, and Graphiti's extraction routinely
     # produces several near-duplicate edges between the same two nodes
     # (worded slightly differently). Each duplicate multiplies how many
     # distinct multi-hop PATHS exist through that pair, so with the limit
@@ -180,12 +180,12 @@ def test_non_causal_relationship_types_are_not_walked(repo):
 def test_causal_walk_never_crosses_into_another_groups_node(repo):
     # Regression: the multi-hop MATCH originally constrained only the anchor
     # node's uuid and the relationship types, with no group_id check on any
-    # node along the path -- unlike every other relationship traversal in
+    # node along the path: unlike every other relationship traversal in
     # this codebase (see app/graph/authorization.py, app/api/odata.py's
     # list_facts_odata). In practice a RELATES_TO edge shouldn't naturally
     # span two knowledge bases, but that was an unenforced assumption on the
     # one multi-hop traversal in the codebase, and a causal answer also gets
-    # written into a permanent, auditable :Decision node -- so this proves
+    # written into a permanent, auditable :Decision node, so this proves
     # the walk actually stops at a group_id boundary rather than relying on
     # the assumption holding.
     group_id = f"test_causal_cross_{uuid.uuid4().hex[:8]}"
@@ -211,7 +211,7 @@ def test_causal_walk_never_crosses_into_another_groups_node(repo):
 
 def test_unresolved_query_returns_no_anchor_and_no_facts(repo):
     # "Totally Unknown Causal Entity" IS a proper-noun-shaped candidate that
-    # fails to resolve (saw_unresolved=True) -- a confident non-match, which
+    # fails to resolve (saw_unresolved=True): a confident non-match, which
     # must still hard-fail rather than fall through to semantic search (see
     # the new fallback tests below for the case that SHOULD fall through).
     anchor, second_entity, facts = asyncio.run(
@@ -223,7 +223,7 @@ def test_unresolved_query_returns_no_anchor_and_no_facts(repo):
 
 
 # --- Semantic-search fallback for a query with no name candidate at all ----
-# Regression: found live -- "Who approved the expedited fix, and what did it
+# Regression: found live: "Who approved the expedited fix, and what did it
 # cost?" has no proper-noun/id candidate for the entity resolver to try at
 # all, so this endpoint used to report a flat "not found" (anchor is None,
 # facts is []) even though the plain Ask path (search_graphiti_facts) could
@@ -269,7 +269,7 @@ def test_proper_noun_that_fails_to_resolve_never_falls_through_to_search(repo):
     )
     assert anchor is None
     assert facts == []
-    # The confident-non-match short-circuit must win -- semantic search is
+    # The confident-non-match short-circuit must win: semantic search is
     # never even attempted.
     repo.graphiti.search.assert_not_awaited()
 
@@ -293,13 +293,13 @@ def test_visibility_filter_excludes_a_hop_through_a_hidden_node(repo):
 
 
 # --- Two-entity "how is X connected to Y" case -------------------------------
-# Regression: this case didn't exist at all before -- a query naming two
+# Regression: this case didn't exist at all before: a query naming two
 # entities silently anchored on whichever ONE happened to resolve first
 # (candidate order, not query semantics) and returned that entity's own
 # unrelated facts as if they explained a connection to the other. Found for
 # real against production data: "How is Industrial Automation connected to
 # Diego Alvarez?" returned "Vantus Robotics operates in the Industrial
-# Automation industry" -- a fact that doesn't even mention Diego Alvarez.
+# Automation industry": a fact that doesn't even mention Diego Alvarez.
 
 
 def test_two_entities_resolve_a_connecting_path_not_just_the_first_ones_own_facts(repo):
@@ -315,7 +315,7 @@ def test_two_entities_resolve_a_connecting_path_not_just_the_first_ones_own_fact
             "Causal Twoent Brightpeak Automation has Causal Twoent Diego Alvarez as its account manager.",
             group_id, rel_type="MANAGED_BY",
         )
-        # The industry's own edge, unrelated to Diego -- this is the
+        # The industry's own edge, unrelated to Diego: this is the
         # irrelevant fact the old behavior could have surfaced instead if
         # candidate ordering had gone the other way.
         _non_causal_edge(
@@ -336,11 +336,11 @@ def test_two_entities_resolve_a_connecting_path_not_just_the_first_ones_own_fact
             "Causal Twoent Industrial Automation", "Causal Twoent Diego Alvarez",
         }
         fact_texts = {f["fact"] for f in facts}
-        # The real connecting path -- both hops, not just one entity's own
+        # The real connecting path: both hops, not just one entity's own
         # unrelated edge.
         assert "Causal Twoent Brightpeak Automation has Causal Twoent Diego Alvarez as its account manager." in fact_texts
         assert "Causal Twoent Brightpeak Automation operates in Causal Twoent Industrial Automation." in fact_texts
-        # MANAGED_BY/IS_A aren't causal types -- this path should NOT be
+        # MANAGED_BY/IS_A aren't causal types: this path should NOT be
         # treated as a genuine causal chain.
         assert not GraphRepository.is_entirely_causal(facts)
     finally:

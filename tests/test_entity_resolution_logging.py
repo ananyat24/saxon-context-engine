@@ -1,7 +1,7 @@
 # Real bugs this session were found by re-deriving "why didn't this
 # resolve" from production behavior, because nothing logged the actual
 # match/no-match decision at the time it was made. entity_resolution.py's
-# whole point is to make that decision inspectable -- these tests assert
+# whole point is to make that decision inspectable: these tests assert
 # the logging actually fires, not just that the module docstring claims it
 # does. Pure-logic (a fake execute_cypher), no Neo4j needed.
 import asyncio

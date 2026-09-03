@@ -1,5 +1,5 @@
 # Needs a real, reachable Neo4j. Covers app/graph/decisions.py's
-# record_decision() -- the causal-chain retriever's recommendation gets
+# record_decision(): the causal-chain retriever's recommendation gets
 # logged as a real :Entity:Decision node (ontology/core.yaml's Decision
 # type, previously defined but never written to the graph), so it's an
 # auditable fact, not a throwaway string. See CLAUDE.md's pivot notes.

@@ -1,20 +1,20 @@
 # Regression coverage for a real bug found by testing against real ingested
 # data: ontology/core.yaml's `Decision` entity type is a legitimate general-
 # purpose business entity ("a decision, approval, rejection, or
-# recommendation") -- a real client dataset can and does contain its own
+# recommendation"): a real client dataset can and does contain its own
 # genuine Decision records (a CSV literally named "decisions.csv" auto-infers
 # that exact type name via app/ingestion/database_source.py's _infer_spec).
 # Every "hide Saxon's own generated recommendation audit trail" exclusion in
 # this codebase used to filter on the ontology label `:Decision` directly --
 # which silently hid a client's own real Decision entities too, permanently,
 # system-wide. Fixed by tagging only Saxon's own generated nodes with a
-# second, narrower label (:SaxonRecommendation -- see app/graph/decisions.py)
+# second, narrower label (:SaxonRecommendation: see app/graph/decisions.py)
 # and filtering on that instead everywhere. This file proves the actual fix:
 # a plain :Entity:Decision node with NO :SaxonRecommendation label (what a
 # real client's own decisions.csv row looks like once ingested) is fully
 # retrievable, unlike before.
 #
-# Needs a real, reachable Neo4j -- same pattern as test_decision_isolation.py.
+# Needs a real, reachable Neo4j: same pattern as test_decision_isolation.py.
 import asyncio
 import uuid
 
@@ -31,7 +31,7 @@ def _fake_repo():
 
 def _real_business_decision(repo, group_id, decision_id, approver, amount):
     """A node shaped exactly like what _infer_spec + Graphiti extraction
-    would produce from a real decisions.csv row -- :Entity:Decision, no
+    would produce from a real decisions.csv row: :Entity:Decision, no
     :SaxonRecommendation label, a real decision_id/approver/amount."""
     node_uuid = str(uuid.uuid4())
     repo.execute_cypher(
@@ -86,7 +86,7 @@ def test_a_stale_pre_fix_saxon_decision_gets_backfilled_and_stays_hidden():
     # Real bug found live, right after deploying the label fix: a
     # :Decision node this app itself generated *before* the
     # :SaxonRecommendation label existed had no way to get the new label
-    # retroactively -- so it was indistinguishable from a real client
+    # retroactively, so it was indistinguishable from a real client
     # Decision entity and got resolved as if it were one, on a repeat of
     # the exact query that had generated it. ensure_decision_indexes' new
     # backfill step (app/graph/decisions.py) is what's supposed to fix
@@ -96,7 +96,7 @@ def test_a_stale_pre_fix_saxon_decision_gets_backfilled_and_stays_hidden():
     group_id = f"test_stale_decision_{uuid.uuid4().hex[:8]}"
     try:
         # Shaped exactly like a Decision record_decision() created BEFORE
-        # the :SaxonRecommendation label was added -- :Entity:Decision,
+        # the :SaxonRecommendation label was added: :Entity:Decision,
         # source_system set (that was never gated on the label), no
         # :SaxonRecommendation.
         stale_uuid = str(uuid.uuid4())

@@ -1,4 +1,4 @@
-# Needs a real, reachable Neo4j -- same caveat as test_entity_reconciliation.py.
+# Needs a real, reachable Neo4j: same caveat as test_entity_reconciliation.py.
 # Covers app/graph/scheduler_lock.py: the distributed lease lock that keeps
 # more than one replica of this app from redundantly running the same
 # connector-sync tick at once (see connector_scheduler.py's _tick).
@@ -15,7 +15,7 @@ from app.graph.scheduler_lock import ensure_scheduler_lock_indexes, release_lock
 def repo():
     from unittest.mock import Mock
     repo = GraphRepository(graphiti_instance=Mock())
-    # Idempotent (IF NOT EXISTS) -- the concurrent-acquire test below
+    # Idempotent (IF NOT EXISTS): the concurrent-acquire test below
     # specifically depends on this constraint existing to be a meaningful
     # test at all (see that test's docstring and this module's own).
     ensure_scheduler_lock_indexes(repo.execute_cypher)
@@ -44,7 +44,7 @@ def test_the_same_holder_can_renew_its_own_lease(repo):
     try:
         assert try_acquire_lock(repo.execute_cypher, lock_id, "holder-a", lease_seconds=60) is True
         # A later tick from the SAME replica must not be treated as "someone
-        # else holds it" -- that would starve the very replica that's
+        # else holds it": that would starve the very replica that's
         # supposed to keep running this job every interval.
         assert try_acquire_lock(repo.execute_cypher, lock_id, "holder-a", lease_seconds=60) is True
     finally:
@@ -65,7 +65,7 @@ def test_release_lock_only_releases_its_own_holders_lock(repo):
     lock_id = f"test_lock_{uuid.uuid4().hex[:8]}"
     try:
         assert try_acquire_lock(repo.execute_cypher, lock_id, "holder-a", lease_seconds=60) is True
-        # Not the real holder -- must be a no-op, not clear someone else's
+        # Not the real holder: must be a no-op, not clear someone else's
         # still-live lease.
         release_lock(repo.execute_cypher, lock_id, "holder-b")
         assert try_acquire_lock(repo.execute_cypher, lock_id, "holder-c", lease_seconds=60) is False

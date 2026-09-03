@@ -1,5 +1,5 @@
 # app/api/connectors.py's microsoft_oauth_start/microsoft_oauth_finish
-# routes -- validation and the happy-path wiring. No real Microsoft
+# routes: validation and the happy-path wiring. No real Microsoft
 # tenant: ms_exchange_code is monkeypatched; state encode/decode uses real
 # Fernet (fast, no network). Needs a real, reachable Neo4j for the
 # connector-creation step, same pattern as test_foundry_iq_connector_api.py.

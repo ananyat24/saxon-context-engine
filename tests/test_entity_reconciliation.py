@@ -1,4 +1,4 @@
-# Needs a real, reachable Neo4j -- same caveat as test_graph.py. Creates and
+# Needs a real, reachable Neo4j: same caveat as test_graph.py. Creates and
 # cleans up its own throwaway :Entity nodes under randomly-suffixed group_ids,
 # so this never touches real ingested data and is safe to run repeatedly.
 #
@@ -71,7 +71,7 @@ def test_same_name_across_two_groups_pools_facts_from_both(repo):
 
 def test_two_distinct_entities_still_resolve_a_connection_path(repo):
     # Regression check: reconciliation must not confuse "one name matched
-    # across two connectors" with "two differently-named entities" -- a
+    # across two connectors" with "two differently-named entities": a
     # genuine two-entity connection query should still work.
     group_id = f"test_reconcile_path_{uuid.uuid4().hex[:8]}"
     try:
@@ -118,8 +118,8 @@ def test_normalize_only_strips_a_trailing_suffix_not_one_mid_name():
 
 def test_legal_suffix_variant_reconciles_across_groups(repo):
     # The exact same real-world entity, named with a legal suffix in one
-    # connector's data and without it in another -- e.g. a CRM export vs. a
-    # hand-written document -- should still pool as one entity.
+    # connector's data and without it in another (e.g. a CRM export vs. a
+    # hand-written document) should still pool as one entity.
     group_a = f"test_reconcile_suffix_a_{uuid.uuid4().hex[:8]}"
     group_b = f"test_reconcile_suffix_b_{uuid.uuid4().hex[:8]}"
     try:
@@ -162,7 +162,7 @@ def test_normalization_does_not_merge_genuinely_different_entities(repo):
 
 
 # --- Lowercase/casual entity names still resolve precisely instead of
-# falling through to unconstrained semantic search -- found for real in
+# falling through to unconstrained semantic search: found for real in
 # production: "what do we know about diego" pulled in several unrelated
 # orders/shipments/quality events as "context" alongside the two real Diego
 # Alvarez facts, while the identical question typed as "Diego Alvarez"
@@ -175,7 +175,7 @@ def test_lowercase_query_still_resolves_precisely_not_via_semantic_search(repo):
         anchor = _make_node(repo, group_id, "Diego Reconciliation Alvarez")
         other = _make_node(repo, group_id, "Brightpeak Reconciliation Automation")
         _make_edge(repo, anchor, other, "Diego Reconciliation Alvarez is the account manager for Brightpeak Reconciliation Automation.")
-        # An unrelated entity in the same group_id -- must NOT show up in the
+        # An unrelated entity in the same group_id: must NOT show up in the
         # answer just because a broad semantic search would have padded it
         # in (the exact behavior this fix replaces).
         unrelated_a = _make_node(repo, group_id, "Reconciliation Order SO-1")
@@ -200,7 +200,7 @@ def test_lowercase_query_still_resolves_precisely_not_via_semantic_search(repo):
 def test_possessive_query_still_resolves_the_real_entity(repo):
     # Real bug found by testing against real ingested data: "Ferrotek's"
     # (a natural possessive reference in a question) failed to resolve to
-    # "Ferrotek Components" at all -- and because a sentence-initial
+    # "Ferrotek Components" at all, and because a sentence-initial
     # auxiliary word ("Has") glued onto it into one spurious two-word
     # proper-noun candidate ("Has Ferrotek's"), the failure hard-short-
     # circuited the whole query into a false "not found" rather than
@@ -235,7 +235,7 @@ def test_possessive_query_still_resolves_the_real_entity(repo):
 # Real bug found live: "Who approved the expedited fix, and what did it
 # cost?" has no proper-noun/id candidate at all, so every remaining word
 # ("approved", "expedited", "fix", "cost") went through the lenient
-# lowercase-word fallback -- and "expedited" happened to CONTAINS-match a
+# lowercase-word fallback, and "expedited" happened to CONTAINS-match a
 # :Task node Graphiti had auto-named "expedited qualification lot" (from an
 # activity-log row), silently anchoring the whole causal walk on an
 # unrelated part of the story instead of falling through to search (which
@@ -269,7 +269,7 @@ def test_lowercase_word_does_not_hijack_onto_an_action_log_task_node(repo):
                 visible_uuids=None,
             )
         )
-        # The Task node's own name must NOT have grounded this query -- with
+        # The Task node's own name must NOT have grounded this query: with
         # the bug, its own edge fact (above) would come back as if it were
         # the answer. Fixed, nothing resolves via name matching and this
         # falls through to (stubbed) semantic search instead.
@@ -281,7 +281,7 @@ def test_lowercase_word_does_not_hijack_onto_an_action_log_task_node(repo):
 
 def test_lowercase_word_fallback_still_matches_a_real_non_task_entity(repo):
     # Regression guard: the existing "diego"-style lowercase fallback (a
-    # casually-typed person/company name) must keep working -- this fix only
+    # casually-typed person/company name) must keep working: this fix only
     # narrows matching for Task/Event/Activity/... typed nodes, nothing else.
     group_id = f"test_reconcile_lowercase_still_works_{uuid.uuid4().hex[:8]}"
     try:
@@ -327,7 +327,7 @@ def test_proper_noun_candidate_can_still_match_a_task_node(repo):
 
 
 def test_generic_lowercase_query_with_no_real_entity_still_falls_through_to_search(repo):
-    # No proper noun, no matching lowercase word either -- this must NOT
+    # No proper noun, no matching lowercase word either: this must NOT
     # short-circuit to a false "not found" (the lenient candidates never set
     # saw_unresolved), it should just fall through to normal search like any
     # other open-ended question. graphiti.search itself is stubbed (this repo
@@ -352,7 +352,7 @@ def test_generic_lowercase_query_with_no_real_entity_still_falls_through_to_sear
 
 def test_partial_name_match_does_not_merge_across_groups(repo):
     # A CONTAINS-only (non-exact) match must stay single-row, even across
-    # multiple candidate group_ids -- merging on a loose partial match would
+    # multiple candidate group_ids: merging on a loose partial match would
     # risk conflating two genuinely different entities.
     group_a = f"test_reconcile_partial_a_{uuid.uuid4().hex[:8]}"
     group_b = f"test_reconcile_partial_b_{uuid.uuid4().hex[:8]}"

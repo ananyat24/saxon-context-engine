@@ -1,4 +1,4 @@
-# Tests app/graph/ingestion_queue.py -- pure asyncio logic, no database, no
+# Tests app/graph/ingestion_queue.py: pure asyncio logic, no database, no
 # network. Covers: jobs actually run, concurrency is bounded by
 # max_concurrent, and one job's exception doesn't take down the dispatcher
 # or block jobs queued after it.

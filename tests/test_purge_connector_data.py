@@ -1,10 +1,10 @@
-# app/graph/connectors.py's purge_connector_data -- undoes what a specific
+# app/graph/connectors.py's purge_connector_data: undoes what a specific
 # connector's own syncs wrote (entities, facts, episodes) without touching
 # the connector row or anything another connector/sync contributed. Built
 # for real incident recovery (a bad sync that wrote wrong or partial data)
 # so a retry starts genuinely clean instead of layering on top of a mess.
 #
-# Needs a real, reachable Neo4j -- same pattern as test_graph_connector_scope.py.
+# Needs a real, reachable Neo4j: same pattern as test_graph_connector_scope.py.
 import uuid
 
 import pytest
@@ -87,7 +87,7 @@ def test_purge_removes_only_this_connectors_own_entities_and_facts(repo):
 def test_purge_only_strips_this_connectors_episode_from_a_shared_fact_not_the_whole_fact(repo):
     # A fact two different connectors' episodes both touched (e.g. the same
     # relationship re-confirmed by a later sync) must survive purging just
-    # ONE of those connectors -- it's still real, sourced by the other one.
+    # ONE of those connectors: it's still real, sourced by the other one.
     group_id = f"test_purge_shared_{uuid.uuid4().hex[:8]}"
     connector_a = f"conn_a_{uuid.uuid4().hex[:8]}"
     connector_b = f"conn_b_{uuid.uuid4().hex[:8]}"

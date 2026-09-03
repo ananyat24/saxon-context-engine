@@ -1,4 +1,4 @@
-# Integration tests for role-based visibility -- these need a real, reachable
+# Integration tests for role-based visibility: these need a real, reachable
 # Neo4j (same as tests/test_graph.py). They build a small synthetic org chart
 # and business entity under a throwaway group_id, assert on visibility, then
 # clean up everything they created so repeated runs don't accumulate data.

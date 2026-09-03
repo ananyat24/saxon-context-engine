@@ -1,4 +1,4 @@
-# Tests app/graph/caching_anthropic_client.py -- no real network, the
+# Tests app/graph/caching_anthropic_client.py: no real network, the
 # underlying anthropic client is a mock. Confirms the one real behavioral
 # difference from graphiti_core's own AnthropicClient: the system prompt is
 # sent as a cache_control-marked block, not a plain string, which is what
@@ -60,7 +60,7 @@ def test_generate_response_sends_cache_control_on_system_prompt():
 
 def test_generate_response_still_extracts_from_plain_text_fallback():
     # Same "no tool_use content" fallback path graphiti_core's own client
-    # has -- confirms the override didn't drop that behavior.
+    # has: confirms the override didn't drop that behavior.
     text_item = MagicMock()
     text_item.type = "text"
     text_item.text = '{"answer": "from text"}'

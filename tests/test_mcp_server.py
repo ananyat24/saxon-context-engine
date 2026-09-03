@@ -1,5 +1,5 @@
 # Tests app/mcp/server.py's own auth boundary and HTTPException->ToolError
-# translation -- no live MCP transport, no network. See tests/test_connector_sync.py
+# translation: no live MCP transport, no network. See tests/test_connector_sync.py
 # etc. for the equivalent HTTP-route-level pattern this mirrors for the MCP surface.
 import asyncio
 
@@ -12,7 +12,7 @@ from app.mcp import server as mcp_server_module
 
 
 class _FakeContext:
-    """Stands in for mcp.server.mcpserver.Context -- _authenticate only ever
+    """Stands in for mcp.server.mcpserver.Context: _authenticate only ever
     reads .headers off it, so a minimal stub is enough."""
 
     def __init__(self, headers: dict | None):
@@ -39,7 +39,7 @@ def test_authenticate_no_headers_at_all_raises_tool_error():
 
 def test_authenticate_unknown_key_raises_tool_error(monkeypatch):
     # Not in the static config, so this also exercises the Neo4j-backed
-    # tenant fallback (see app/graph/tenants.py) -- monkeypatched here to
+    # tenant fallback (see app/graph/tenants.py): monkeypatched here to
     # keep this test network-free, same as the rest of this file.
     monkeypatch.setattr(settings, "tenant_api_keys", {})
     monkeypatch.setattr("app.graph.tenants.find_tenant_by_api_key", lambda api_key, repo=None: None)

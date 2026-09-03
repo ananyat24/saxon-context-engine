@@ -1,5 +1,5 @@
 # app/graph/connectors.py's foundry_iq-specific storage (create_foundry_iq_connector,
-# find_foundry_iq_config_for_group, get_foundry_iq_credential) -- needs a
+# find_foundry_iq_config_for_group, get_foundry_iq_credential): needs a
 # real, reachable Neo4j, same pattern as test_purge_connector_data.py.
 import uuid
 

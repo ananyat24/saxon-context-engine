@@ -3,21 +3,21 @@
 # re-synced record changes a status-style field, Graphiti's own LLM-driven
 # edge dedup/contradiction judgment sometimes treats the new, genuinely
 # different sentence as "the same fact" as the old one instead of a
-# contradiction that should invalidate it -- so the old, now-false fact never
+# contradiction that should invalidate it, so the old, now-false fact never
 # gets invalidated. That was found on a real "held for inspection" ->
 # "released" shipment status transition; this test reproduces the same shape
 # (same entity, one status word changed) directly.
 #
 # This is Graphiti's own extraction/resolution behavior, not this app's code,
-# so there's nothing here to assert "must pass" -- xfail(strict=False) is
+# so there's nothing here to assert "must pass": xfail(strict=False) is
 # the point: if Graphiti ever gets more reliable at this and the invalidation
 # starts happening, this test flips to XPASS, which is a visible signal
-# ("the upstream gap CLAUDE.md documents may no longer apply -- worth
+# ("the upstream gap CLAUDE.md documents may no longer apply: worth
 # rechecking whether it's still a real limitation") rather than a silent
 # nothing. If it stays broken, it stays a quiet, expected xfail.
 #
 # Needs a real, reachable Neo4j AND a real LLM (extraction + dedup calls cost
-# money and can take a while) -- unlike every other test in this suite, which
+# money and can take a while): unlike every other test in this suite, which
 # either mocks Graphiti/the LLM entirely or only issues raw Cypher. Excluded
 # from the default run via pyproject.toml's `-m "not real_llm"` addopts; run
 # it explicitly with:

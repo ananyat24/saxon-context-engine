@@ -1,4 +1,4 @@
-# Tests app/graph/connector_scheduler.py -- no real APScheduler timers fire
+# Tests app/graph/connector_scheduler.py: no real APScheduler timers fire
 # (start_connector_scheduler is only checked for the enabled/disabled
 # decision), and _sync_all_connectors's own dependencies (connectors.list_
 # connectors, the connector-type dispatch table, run_connector_sync) are all
@@ -57,13 +57,13 @@ def test_sync_all_connectors_calls_run_connector_sync_for_every_tenant_connector
 
     asyncio.run(connector_scheduler._sync_all_connectors(neo4j_client=None))
 
-    # c2's type isn't in the (patched) dispatch table -- skipped, not crashed.
+    # c2's type isn't in the (patched) dispatch table: skipped, not crashed.
     assert calls == [("t1", "c1")]
 
 
 def test_sync_all_connectors_also_syncs_dynamically_created_tenants(monkeypatch):
     # A tenant onboarded via the admin API (app/api/admin.py) lives only in
-    # Neo4j, not settings.tenant_api_keys -- the scheduler has to reach it
+    # Neo4j, not settings.tenant_api_keys: the scheduler has to reach it
     # too, or "add a connector" for that tenant would silently never
     # auto-sync in the background.
     monkeypatch.setattr(settings, "tenant_api_keys", {})
@@ -119,7 +119,7 @@ def test_sync_all_connectors_survives_one_connector_raising(monkeypatch):
 
     monkeypatch.setattr("app.ingestion.connector_sync.run_connector_sync", fake_run)
 
-    # Doesn't raise -- c1's failure is logged and swallowed, c2 still runs.
+    # Doesn't raise: c1's failure is logged and swallowed, c2 still runs.
     asyncio.run(connector_scheduler._sync_all_connectors(neo4j_client=None))
 
     assert calls == ["c1", "c2"]

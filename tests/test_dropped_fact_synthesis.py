@@ -1,7 +1,7 @@
 # Regression coverage for a real bug found by testing against real ingested
 # data: ContextOrchestrator.get_context_packet's summary-line construction
 # only ever included a fact if it was currently valid, OR if _find_transitions
-# could pair it (as the "old" side) with whatever fact replaced it -- an
+# could pair it (as the "old" side) with whatever fact replaced it: an
 # invalidated fact that DIDN'T get paired (its replacement wasn't in this
 # particular retrieval batch) was silently dropped: not a plain line, not a
 # transition line, just gone. metadata.facts (the raw response) still had it,
@@ -11,7 +11,7 @@
 # unpaired invalidated fact, explicitly marked as no longer current rather
 # than silently dropped.
 #
-# No real Neo4j needed -- same stub-retriever pattern as
+# No real Neo4j needed: same stub-retriever pattern as
 # test_orchestrator_observability.py.
 import asyncio
 
@@ -48,7 +48,7 @@ def _fact(text: str, **overrides) -> dict:
 
 def test_a_lone_unpaired_invalidated_fact_is_kept_not_dropped():
     # The exact real-world shape: only fact retrieved is invalidated, and
-    # its replacement (if one even exists) isn't in this batch -- used to
+    # its replacement (if one even exists) isn't in this batch: used to
     # produce "No matching graph context found." despite this real,
     # relevant fact being available the whole time.
     invalidated = _fact(
@@ -64,7 +64,7 @@ def test_a_lone_unpaired_invalidated_fact_is_kept_not_dropped():
 
 
 def test_a_paired_transition_is_still_described_not_duplicated():
-    # The old/paired case must keep working exactly as before -- a real
+    # The old/paired case must keep working exactly as before: a real
     # replacement in the same batch still produces one clean "this changed"
     # line, not the raw old fact ALSO appearing separately.
     old = _fact("Priya Nadeem manages the account.", is_valid=False, invalid_at="2026-08-22T09:00:00Z", source_node_uuid="s1")

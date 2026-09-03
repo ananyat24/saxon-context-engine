@@ -1,7 +1,7 @@
 # Tests ContextOrchestrator.get_context_packet()'s new observability fields
-# (retrieval_path -- see app/context/orchestrator.py) via a stub retriever,
+# (retrieval_path: see app/context/orchestrator.py) via a stub retriever,
 # no real Graphiti/Neo4j. cost_usd/cache_hit are added one layer up in
-# app/context/query_service.py, not here -- see test_query_service_observability.py.
+# app/context/query_service.py, not here: see test_query_service_observability.py.
 import asyncio
 
 from app.context.orchestrator import ContextOrchestrator
@@ -17,7 +17,7 @@ class _StubRetriever:
 
 def _orchestrator_with_facts(facts: list[dict]) -> ContextOrchestrator:
     # ContextOrchestrator's constructor only stores graphiti_instance on the
-    # GraphRetriever it builds -- never calls it -- so a plain object() is a
+    # GraphRetriever it builds, never calls it, so a plain object() is a
     # safe stand-in as long as the stub retriever below replaces it entirely.
     orchestrator = ContextOrchestrator(graphiti_instance=object())
     orchestrator.retrievers = [_StubRetriever(facts)]

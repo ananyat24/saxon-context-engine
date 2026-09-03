@@ -1,4 +1,4 @@
-# Tests app/config.py's mcp_allowed_hosts_list() -- pure function, no
+# Tests app/config.py's mcp_allowed_hosts_list(): pure function, no
 # database, no network. See app/main.py for why this exists: the MCP SDK's
 # DNS-rebinding protection 421s any request whose Host header isn't in this
 # list, regardless of API key.

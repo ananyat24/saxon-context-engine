@@ -3,13 +3,13 @@
 # "never add, infer, or assume anything not explicitly stated," but the
 # model still answered "Grace Okafor approved the expedited fix, and it
 # cost $38,400" when the only retrieved fact was "Owen Whitfield requests a
-# budget exception from Grace Okafor for ... $38,400" -- a request ADDRESSED
+# budget exception from Grace Okafor for ... $38,400": a request ADDRESSED
 # TO Grace got read as an action BY Grace. The real approval fact (a
 # different person entirely) simply wasn't in the retrieved set at all, and
 # the model guessed rather than saying so.
 #
 # An LLM's actual compliance with a prompt can't be asserted deterministically
-# in a unit test (that needs the real model) -- what this DOES protect
+# in a unit test (that needs the real model): what this DOES protect
 # against is someone quietly weakening or removing the specific guardrail
 # sentence later without noticing it exists for a reason. Also proves the
 # synthesis call is wired correctly (right messages, right fallback).

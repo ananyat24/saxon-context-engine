@@ -1,4 +1,4 @@
-# Needs a real, reachable Neo4j -- same caveat as test_graph.py/
+# Needs a real, reachable Neo4j: same caveat as test_graph.py/
 # test_entity_reconciliation.py. Creates and cleans up its own throwaway
 # :Tenant nodes under randomly-suffixed tenant_ids, so this never touches a
 # real tenant and is safe to run repeatedly.
@@ -38,8 +38,8 @@ def test_create_then_find_tenant_by_the_returned_api_key(repo):
 
 def test_find_tenant_by_api_key_never_matches_the_raw_key_against_a_stored_hash(repo):
     # The point of hashing (see app/graph/tenants.py's module docstring):
-    # looking up by anything other than the actual raw key -- including the
-    # hash itself -- must never resolve to the tenant.
+    # looking up by anything other than the actual raw key: including the
+    # hash itself: must never resolve to the tenant.
     tenant_id = f"test_tenant_nohash_{uuid.uuid4().hex[:8]}"
     try:
         raw_key, _ = tenants.create_tenant(

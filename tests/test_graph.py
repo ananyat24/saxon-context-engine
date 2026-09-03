@@ -15,7 +15,7 @@ def test_neo4j_client_connection():
 
 def test_graph_repository_cypher():
     # "RETURN 1 AS test_val" is a trivial Cypher query (Neo4j's query language) that
-    # doesn't touch any stored data -- it just confirms a query round-trip works.
+    # doesn't touch any stored data: it just confirms a query round-trip works.
     repo = GraphRepository()
     res = repo.execute_cypher("RETURN 1 AS test_val")
     assert len(res) == 1

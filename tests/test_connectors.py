@@ -1,5 +1,5 @@
 # Tests the SourceConnector interface itself (app/ingestion/connector_base.py),
-# not just the one connector type built on it -- so a future connector type
+# not just the one connector type built on it, so a future connector type
 # (SharePoint, Google Drive, ...) has a contract to test against, per the
 # CLAUDE.md v0.5 exit criteria: adding a type should only mean implementing
 # this interface and registering it in app/api/connectors.py's dispatch
@@ -17,7 +17,7 @@ from app.ingestion.web_source import WebConnector, WebFetchError, content_hash, 
 
 
 def test_source_connector_is_abstract():
-    # Can't instantiate the interface directly -- forces every real connector
+    # Can't instantiate the interface directly: forces every real connector
     # to actually implement fetch()/content_hash()/source_description().
     with pytest.raises(TypeError):
         SourceConnector()
@@ -36,14 +36,14 @@ def test_incomplete_connector_cannot_be_instantiated():
 
 def test_web_fetch_error_is_a_connector_fetch_error():
     # app/api/connectors.py's sync route catches ConnectorFetchError generically
-    # so it isn't tied to any one connector type's own exception -- a type-specific
+    # so it isn't tied to any one connector type's own exception: a type-specific
     # error therefore has to actually be one.
     assert issubclass(WebFetchError, ConnectorFetchError)
 
 
 class _FakeConnector(SourceConnector):
     """A minimal second implementation, standing in for a future connector
-    type, used to prove the interface -- not just WebConnector -- is what
+    type, used to prove the interface (not just WebConnector) is what
     app/api/connectors.py's dispatch table actually depends on."""
 
     def __init__(self, records: list[SourceRecord]):
@@ -86,7 +86,7 @@ def test_web_connector_fetch_wraps_fetch_web_record(monkeypatch):
 
 
 def test_web_connector_content_hash_matches_the_plain_function():
-    # WebConnector.content_hash() is meant to be a thin wrapper -- same
+    # WebConnector.content_hash() is meant to be a thin wrapper: same
     # fingerprint the earlier function-based dedup check already relied on,
     # not a second, divergent hashing scheme.
     record = SourceRecord(name="web-abc", body="same text", source_description="Web page")
@@ -101,7 +101,7 @@ def test_web_connector_content_hash_empty_list():
 
 
 def test_fetch_web_record_rejects_non_text_content(monkeypatch):
-    # No real network call -- monkeypatches httpx to return a non-text
+    # No real network call: monkeypatches httpx to return a non-text
     # content-type, confirming the connector layer surfaces a clear
     # ConnectorFetchError rather than trying to extract text from a PDF/image.
     # socket.getaddrinfo is also monkeypatched so the SSRF guard's DNS lookup
@@ -141,7 +141,7 @@ def test_fetch_web_record_rejects_non_text_content(monkeypatch):
 
 # --- Demo connector types (database/documents/email) -------------------------
 # These read bundled mock data under data/samples/mock_*/ rather than a live
-# source (see each module's docstring for why) -- these tests confirm the
+# source (see each module's docstring for why): these tests confirm the
 # bundled data actually round-trips into valid SourceRecords via the same
 # interface WebConnector implements, using real repo-bundled files rather
 # than mocks, since reading them is free (no network, no LLM call).
@@ -193,8 +193,8 @@ def test_email_connector_source_description():
 
 def test_document_connector_reads_a_dropped_in_docx(tmp_path, monkeypatch):
     # Drive/SharePoint already ingest PDF/DOCX; this confirms the local mock
-    # documents connector -- what "drop your own mock data in" actually
-    # targets -- picked up the same capability rather than staying .txt-only.
+    # documents connector: what "drop your own mock data in" actually
+    # targets: picked up the same capability rather than staying .txt-only.
     import app.ingestion.document_source as document_source
     from docx import Document
 
@@ -247,14 +247,14 @@ def test_web_connector_rejects_cloud_metadata_address():
 
 def test_web_connector_allows_a_public_address():
     # 93.184.216.34 is example.com's (public, IANA-reserved-for-documentation
-    # in the DNS sense, but a real routable unicast address) -- just needs to
+    # in the DNS sense, but a real routable unicast address): just needs to
     # not be loopback/private/link-local/reserved/multicast.
     _assert_fetchable("https://93.184.216.34/")
 
 
 def test_fetch_web_record_rejects_redirect_to_internal_address(monkeypatch):
     # A public URL that 302s to an internal address is the classic SSRF
-    # bypass for a check that only validates the original URL -- this proves
+    # bypass for a check that only validates the original URL: this proves
     # each redirect hop is re-validated, not just the first one. socket.
     # getaddrinfo is monkeypatched so this doesn't depend on real DNS.
     import socket as socket_module
@@ -293,7 +293,7 @@ def test_fetch_web_record_rejects_redirect_to_internal_address(monkeypatch):
 
 
 def test_database_connector_picks_up_a_second_csv_with_no_known_spec(tmp_path, monkeypatch):
-    # Simulates "drop your own mock data in" -- a CSV that isn't accounts.csv
+    # Simulates "drop your own mock data in": a CSV that isn't accounts.csv
     # and has no hand-picked FileSourceSpec should still ingest via the
     # inferred id/name columns, not be silently skipped.
     import app.ingestion.database_source as database_source
@@ -328,7 +328,7 @@ def test_database_connector_errors_clearly_when_folder_has_no_csvs(tmp_path, mon
 
 
 # --- Database connector: per-connector uploaded CSVs (the "easily droppable
-# CSV" fix) -- a connector reads from its OWN upload folder, populated only
+# CSV" fix): a connector reads from its OWN upload folder, populated only
 # by POST /connectors/{id}/files, falling back to the shared demo dataset
 # when nothing's been uploaded to it. ----------------------------------------
 
@@ -381,11 +381,11 @@ def test_database_connector_with_no_id_always_uses_demo_data(tmp_path, monkeypat
     assert connector.source_description() == "Demo CRM accounts (mock structured data)"
 
 
-# --- POST /connectors/{id}/files -- the HTTP side of "easily droppable CSV" -
+# --- POST /connectors/{id}/files: the HTTP side of "easily droppable CSV" -
 # Needs a real, reachable Neo4j (same caveat as test_source_authority.py):
 # creates and cleans up its own throwaway :Connector node. Calls the route
 # function directly with a fake Request and Depends() resolved by hand (same
-# pattern test_odata.py uses), rather than a full TestClient -- an UploadFile
+# pattern test_odata.py uses), rather than a full TestClient: an UploadFile
 # can be constructed directly (FastAPI supports this), so no ASGI/HTTP layer
 # is needed to exercise the real filesystem-write + validation logic.
 import io
@@ -463,7 +463,7 @@ def test_upload_strips_any_path_traversal_from_the_filename(tmp_path, monkeypatc
                 connector["id"], _csv_upload("../../evil.csv"), _FakeUploadRequest(), tenant=_upload_tenant(tenant_id),
             )
         )
-        # The traversal components are stripped -- it lands as a normal file
+        # The traversal components are stripped: it lands as a normal file
         # under this connector's own folder, never above it.
         assert result["filename"] == "evil.csv"
         assert (database_source.connector_upload_dir(connector["id"]) / "evil.csv").exists()

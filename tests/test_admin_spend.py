@@ -1,8 +1,8 @@
-# Pure-logic test for GET /api/v1/admin/spend (app/api/admin.py) -- the
+# Pure-logic test for GET /api/v1/admin/spend (app/api/admin.py): the
 # spend-limiter is faked (see test conventions elsewhere: real Neo4j only
 # where a test actually needs it) so this doesn't touch the real, persisted
 # data/processed/azure_openai_spend.json. Auth itself (require_admin) is a
-# FastAPI Depends(), not exercised here -- see test_odata.py for the same
+# FastAPI Depends(), not exercised here: see test_odata.py for the same
 # "call the route function directly" convention this follows.
 from app.api import admin
 

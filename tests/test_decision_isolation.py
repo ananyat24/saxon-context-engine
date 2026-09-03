@@ -1,4 +1,4 @@
-# Needs a real, reachable Neo4j -- same caveat as test_decisions.py.
+# Needs a real, reachable Neo4j: same caveat as test_decisions.py.
 #
 # Regression coverage for a real bug found in production: a :Decision node
 # (app/graph/decisions.py's record_decision) is labeled :Entity too (the
@@ -100,10 +100,10 @@ def test_a_decisions_own_name_never_resolves_as_a_query_anchor(repo):
         assert decision_name == f"Recommendation for: {query_text}"
 
         # A query naming the Decision's own auto-generated name must not
-        # resolve the Decision node itself -- it's an audit record, not
+        # resolve the Decision node itself: it's an audit record, not
         # something a person is asking about. The Decision's name happens to
         # embed the real anchor's name too (it's built from the original
-        # query text), so the *real* entity correctly still resolves -- this
+        # query text), so the *real* entity correctly still resolves: this
         # asserts specifically that the Decision node never does, not that
         # nothing does.
         anchor_result, _second, _facts = asyncio.run(

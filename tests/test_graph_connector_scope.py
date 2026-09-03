@@ -1,13 +1,13 @@
 # The bug this pins: GET /graph/nodes and /graph/relationships only ever
 # filtered by knowledge_base (group_id), so the connector preview modal
 # ("what's been pulled into the graph from this connector") actually showed
-# every OTHER connector feeding the same knowledge base too -- a knowledge
+# every OTHER connector feeding the same knowledge base too: a knowledge
 # base commonly has more than one connector. Fixed via an optional
 # ?connector_id= filter, backed by the Episodic.connector_id tag
 # app/ingestion/connector_sync.py now writes on every synced episode (see
 # that module and tests/test_connector_sync.py for the write side).
 #
-# Needs a real, reachable Neo4j (same caveat as test_odata.py) -- builds a
+# Needs a real, reachable Neo4j (same caveat as test_odata.py): builds a
 # small real graph shaped the way Graphiti actually writes it (:Episodic
 # -[:MENTIONS]-> :Entity, and a RELATES_TO edge's own `episodes` property),
 # rather than mocking Cypher results, since the whole point is the join
@@ -74,7 +74,7 @@ def test_connector_id_filter_excludes_another_connectors_facts_in_the_same_kb(re
             {"a": node_a, "ep": ep_a},
         )
 
-        # Connector B, feeding the SAME knowledge base -- this is the exact
+        # Connector B, feeding the SAME knowledge base: this is the exact
         # shape of the bug: same group_id, different connector.
         repo.execute_cypher(
             "CREATE (e:Episodic {uuid: $ep, group_id: $g, connector_id: $c, name: 'ep-b'})",
@@ -99,12 +99,12 @@ def test_connector_id_filter_excludes_another_connectors_facts_in_the_same_kb(re
         request = _FakeRequest()
         tenant = _tenant(group_id)
 
-        # Without connector_id: the pre-fix behavior -- sees everything in
+        # Without connector_id (the pre-fix behavior), sees everything in
         # the knowledge base, both connectors' entities.
         all_nodes = graph_api.get_nodes(request, knowledge_base=group_id, tenant=tenant)
         assert {n["name"] for n in all_nodes} == {"Connector A Widget", "Connector B Gadget", "Connector B Gizmo"}
 
-        # With connector_id=A: only A's own entity and fact -- not B's,
+        # With connector_id=A, only A's own entity and fact, not B's,
         # despite B feeding the same group_id.
         a_nodes = graph_api.get_nodes(request, knowledge_base=group_id, connector_id=connector_a, tenant=tenant)
         assert [n["name"] for n in a_nodes] == ["Connector A Widget"]
@@ -121,7 +121,7 @@ def test_connector_id_filter_excludes_another_connectors_facts_in_the_same_kb(re
         assert len(b_rels) == 1
         assert b_rels[0]["fact"] == "B fact"
 
-        # An id with no episodes at all -- genuinely nothing, not an error.
+        # An id with no episodes at all: genuinely nothing, not an error.
         assert graph_api.get_nodes(request, knowledge_base=group_id, connector_id="no-such-connector", tenant=tenant) == []
         assert (
             graph_api.get_relationships(request, knowledge_base=group_id, connector_id="no-such-connector", tenant=tenant)

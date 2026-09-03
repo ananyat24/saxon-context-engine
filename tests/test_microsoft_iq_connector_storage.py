@@ -1,6 +1,6 @@
 # app/graph/connectors.py's fabric_iq_ontology/work_iq storage
 # (create_fabric_iq_ontology_connector, create_work_iq_connector,
-# find_microsoft_iq_config_for_group, get_microsoft_iq_credential) -- needs
+# find_microsoft_iq_config_for_group, get_microsoft_iq_credential): needs
 # a real, reachable Neo4j, same pattern as test_foundry_iq_connector_storage.py.
 import uuid
 
@@ -49,7 +49,7 @@ def test_get_microsoft_iq_credential_is_scoped_to_the_requested_type(repo):
     tenant_id, group_id = _ids()
     created = connectors.create_work_iq_connector(tenant_id, "My Work IQ", group_id, "enc", repo=repo)
     # Asking for the wrong type at the same id must not return this
-    # connector's credential -- type is part of the match, not just id/tenant.
+    # connector's credential: type is part of the match, not just id/tenant.
     assert connectors.get_microsoft_iq_credential(tenant_id, created["id"], "fabric_iq_ontology", repo=repo) is None
 
 

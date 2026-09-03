@@ -1,4 +1,4 @@
-# Pure-function tests for _not_yet_invalidated() -- no database needed. Covers
+# Pure-function tests for _not_yet_invalidated(): no database needed. Covers
 # the bug found while demoing the v1 connectors: a CRM row's "renewal date"
 # column got extracted as an edge's own invalid_at, and since that date was
 # still in the future, treating any invalid_at as already-invalid made an
@@ -35,7 +35,7 @@ def test_past_iso_string_is_invalidated():
 
 def test_naive_datetime_is_treated_as_utc():
     # Graphiti/neo4j datetimes are normally tz-aware, but a naive one
-    # shouldn't crash the comparison -- it's treated as UTC rather than
+    # shouldn't crash the comparison: it's treated as UTC rather than
     # raising on offset-naive vs. offset-aware comparison.
     future_naive = (datetime.now(timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
     assert _not_yet_invalidated(future_naive) is True

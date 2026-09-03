@@ -1,7 +1,7 @@
 # Needs a real, reachable Neo4j. Calls app/api/odata.py's route functions
 # directly against a fake Request (same "fake Request, real Neo4j" pattern
 # test_webhooks.py uses for app.state), rather than a full FastAPI
-# TestClient -- these are plain functions with FastAPI Depends() resolved
+# TestClient: these are plain functions with FastAPI Depends() resolved
 # by hand (tenant/knowledge_base passed straight in), so no ASGI app/HTTP
 # layer is needed to exercise the actual Cypher + OData-shape logic.
 #

@@ -1,4 +1,4 @@
-# Pure-logic tests for ContextOrchestrator.get_causal_context_packet -- a
+# Pure-logic tests for ContextOrchestrator.get_causal_context_packet: a
 # fake GraphRepository (swapped onto orchestrator._repo) and a fake Graphiti
 # llm_client stand in for real Neo4j/LLM calls, same "stub the collaborator"
 # convention as test_orchestrator_observability.py.
@@ -31,7 +31,7 @@ class _FakeCausalRepo:
         self._anchor = anchor
         self._facts = facts
         self._second_entity = second_entity
-        # The chain-empty fallback's direct_facts_for lookup -- defaults to
+        # The chain-empty fallback's direct_facts_for lookup: defaults to
         # empty so existing tests that don't care about it keep behaving
         # exactly as before (empty chain + no direct facts = truly nothing).
         self.direct_facts = direct_facts if direct_facts is not None else []
@@ -42,7 +42,7 @@ class _FakeCausalRepo:
     def direct_facts_for(self, uuid, visible_uuids):
         return self.direct_facts
 
-    # Delegates to the real implementation -- it's pure logic (no Neo4j/LLM
+    # Delegates to the real implementation: it's pure logic (no Neo4j/LLM
     # call), so there's no reason to fake it, and doing so keeps this fake
     # honest about what actually decides "real causal chain" vs "fact-only
     # fallback" in get_causal_context_packet.
@@ -133,7 +133,7 @@ def test_unresolved_anchor_returns_none_recommendation_and_no_decision(monkeypat
 def test_semantic_fallback_facts_with_no_anchor_are_fact_only_not_a_recommendation(monkeypatch):
     # GraphRepository.causal_chain_for_query can now return (None, None,
     # facts) for its own semantic-search fallback (no name candidate at all
-    # in the query) -- the orchestrator must route that through the same
+    # in the query): the orchestrator must route that through the same
     # fact-only synthesis every other non-causal path uses, never a
     # fabricated recommendation/:Decision from an anchor that was never
     # actually resolved.
@@ -171,12 +171,12 @@ def test_empty_chain_skips_synthesis_and_decision(monkeypatch):
 # --- Chain-empty fallback to the anchor's own direct facts -----------------
 # When there's no causal-typed chain, "Explain why" used to just say nothing
 # was found even for a question a direct, non-causal fact (e.g. a LOCATED_AT
-# edge) could actually answer -- like "where is X located?". This falls back
+# edge) could actually answer: like "where is X located?". This falls back
 # to that entity's own direct facts, answered the same fact-only way the
 # plain Ask path would: no recommendation, no :Decision, and an irrelevant
 # direct fact simply doesn't make it into the synthesized answer (the same
 # relevance-to-the-question behavior _synthesize_answer already has on the
-# plain path -- not re-tested here, see test_orchestrator_observability.py).
+# plain path: not re-tested here, see test_orchestrator_observability.py).
 
 
 def test_empty_causal_chain_falls_back_to_a_single_direct_fact(monkeypatch):
@@ -240,7 +240,7 @@ def test_synthesis_failure_still_returns_the_chain_without_recommendation():
     anchor = {"uuid": "anchor-1", "name": "Fragile Order"}
     facts = [{"fact": "Fragile Order depends on something.", "is_valid": True, "relationship_type": "DEPENDS_ON"}]
     # A response that doesn't fit _CausalRecommendation's schema simulates a
-    # malformed/failed LLM call -- should degrade gracefully, not crash the query.
+    # malformed/failed LLM call: should degrade gracefully, not crash the query.
     orchestrator = _orchestrator(anchor, facts, llm_response={"not": "the right shape"})
 
     packet = asyncio.run(orchestrator.get_causal_context_packet("Why is Fragile Order at risk?", group_ids=["kb1"]))
@@ -251,11 +251,11 @@ def test_synthesis_failure_still_returns_the_chain_without_recommendation():
 
 # --- Two-entity "how is X connected to Y" routing ---------------------------
 # Regression: this case previously didn't exist in get_causal_context_packet
-# at all -- causal_chain_for_query only ever returned one anchor, so a
+# at all: causal_chain_for_query only ever returned one anchor, so a
 # two-entity query silently got that single entity's own unrelated facts
 # treated as "the explanation." Found for real against production data: "How
 # is Industrial Automation connected to Diego Alvarez?" returned "Vantus
-# Robotics operates in the Industrial Automation industry" -- a fact that
+# Robotics operates in the Industrial Automation industry": a fact that
 # doesn't even mention Diego Alvarez. See CLAUDE.md and test_causal_chain.py
 # for the GraphRepository-level fix this exercises at the orchestrator level.
 
@@ -291,7 +291,7 @@ def test_domain_specific_causal_types_produce_a_real_recommendation_too(monkeypa
     # written specifically to represent the reference architecture's own
     # worked example (Order -> Product -> Component -> Supplier ->
     # QualityEvent), using its own relationship names (SUPPLIES/COMPOSED_OF/
-    # FLAGGED_BY) rather than core.yaml's 5 generic causal types -- so even
+    # FLAGGED_BY) rather than core.yaml's 5 generic causal types, so even
     # a perfectly-extracted version of that exact example used to fall
     # through to the fact-only path (is_entirely_causal saw none of these
     # names as "causal" and rejected the chain), never producing the rich
@@ -352,16 +352,16 @@ def test_two_entity_path_not_entirely_causal_is_fact_only_with_full_evidence(mon
     assert packet.metadata["summary"] == "Industrial Automation connects to Diego Alvarez through Brightpeak Automation."
     assert packet.metadata["recommendation"] is None
     assert packet.metadata["decision_id"] is None
-    assert called == []  # no :Decision -- this was never treated as a causal inference
+    assert called == []  # no :Decision: this was never treated as a causal inference
     assert packet.metadata["retrieval_path"] == "causal_path_between_entities"
 
 
 # --- Invalidated-but-real facts must still reach the recommendation --------
 # Regression: found live right after fixing the LIMIT-before-dedup bug in
-# _causal_chain_facts_from -- the root-cause fact (a defect that got
+# _causal_chain_facts_from: the root-cause fact (a defect that got
 # invalidated once the affected lot was quarantined) DID survive dedup into
 # chain_facts, but get_causal_context_packet used to build chain_lines from
-# `[f["fact"] for f in valid_chain_facts]` -- an is_valid-only filter -- so
+# `[f["fact"] for f in valid_chain_facts]`, an is_valid-only filter, so
 # the real, relevant, but-since-superseded fact never reached the
 # recommendation LLM call at all. Fixed by routing chain_facts through
 # _build_answer_lines (same helper the plain Ask path already used for this
@@ -380,7 +380,7 @@ def test_an_invalidated_but_real_fact_still_feeds_the_recommendation(monkeypatch
         },
         {
             # The root cause: real, but superseded (is_valid=False) once the
-            # lot was quarantined -- must NOT be dropped from chain_lines.
+            # lot was quarantined: must NOT be dropped from chain_lines.
             "fact": "Production lot LOT-9 has a solder-joint defect causing elevated failure rates.",
             "is_valid": False, "relationship_type": "PRODUCES",
             "source_node_uuid": "supplier-1", "target_node_uuid": "component-1",
@@ -407,7 +407,7 @@ def test_an_invalidated_but_real_fact_still_feeds_the_recommendation(monkeypatch
 
 
 # --- A single thin causal fact must not silence richer direct context -----
-# Regression: found live -- "Who owns the Brightpeak Automation account
+# Regression: found live: "Who owns the Brightpeak Automation account
 # right now, and does that affect whether it's at risk?" walked to exactly
 # one causal-typed fact for the anchor, and committing straight to a
 # recommendation from that one fact meant the real ownership-handoff facts
@@ -451,7 +451,7 @@ def test_single_thin_causal_fact_defers_to_direct_facts_when_more_exists(monkeyp
 
 def test_single_thin_causal_fact_still_gets_a_recommendation_when_nothing_else_exists(monkeypatch):
     # The common, already-well-tested case: a lone causal fact IS the whole
-    # story (direct_facts_for turns up nothing new) -- must keep working
+    # story (direct_facts_for turns up nothing new): must keep working
     # exactly as before, no fallback override.
     recorded = {}
     monkeypatch.setattr(
@@ -461,7 +461,7 @@ def test_single_thin_causal_fact_still_gets_a_recommendation_when_nothing_else_e
     anchor = {"uuid": "anchor-1", "name": "Test Order 501"}
     facts = [{"fact": "Test Order 501 depends on Test Widget.", "is_valid": True, "relationship_type": "DEPENDS_ON"}]
     orchestrator = _orchestrator(anchor, facts)
-    # direct_facts defaults to [] -- nothing extra for the override to find.
+    # direct_facts defaults to []: nothing extra for the override to find.
 
     packet = asyncio.run(
         orchestrator.get_causal_context_packet("Why is Test Order 501 at risk?", group_ids=["kb1"], tenant_id="t1")

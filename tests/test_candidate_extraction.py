@@ -1,5 +1,5 @@
 # Tests _extract_candidate_entities (the proper-noun regex used for named-
-# entity resolution -- see entity_resolution.py's module docstring). No
+# entity resolution: see entity_resolution.py's module docstring). No
 # database needed, pure regex.
 from app.graph.entity_resolution import (
     _extract_candidate_entities,
@@ -41,7 +41,7 @@ def test_does_not_extend_past_a_lowercase_word_that_is_not_a_connector():
     assert result == ["Fenwick Legal"]
 
 
-# --- _extract_lowercase_word_candidates -- the lenient, single-word
+# --- _extract_lowercase_word_candidates: the lenient, single-word
 # fallback for a casually-typed, uncapitalized name (e.g. "what do we know
 # about diego" instead of "...Diego Alvarez?"), which _extract_candidate_entities
 # above never matches at all (it requires capitalized, multi-word phrases).
@@ -59,7 +59,7 @@ def test_excludes_ordinary_filler_words():
 
 
 def test_excludes_short_words():
-    # Below the 3-char floor -- these show up in almost every sentence
+    # Below the 3-char floor: these show up in almost every sentence
     # ("is", "at", "up") and would just be noise as query candidates.
     result = _extract_lowercase_word_candidates("is he at risk up here")
     assert "is" not in result
@@ -74,7 +74,7 @@ def test_dedupes_and_is_case_insensitive():
 # --- Real bug found by testing against real data: a sentence-initial
 # auxiliary verb ("Has", "Should", ...), capitalized only because it starts
 # the sentence, glued onto an immediately adjacent real proper noun and got
-# extracted as part of the same candidate ("Has Ferrotek's") -- which then
+# extracted as part of the same candidate ("Has Ferrotek's"), which then
 # failed to resolve and, because it's still treated as a proper-noun
 # candidate, hard-short-circuited the whole query into a false "no entity
 # matching that name was found", even though "Ferrotek" two words later
@@ -94,7 +94,7 @@ def test_strips_a_leading_modal_verb_too():
 
 def test_a_genuine_single_capitalized_word_after_stripping_still_extracts():
     # "Has Ferrotek's" is two capitalized tokens (the regex requires at
-    # least two to match at all) -- stripping "Has" leaves one real word,
+    # least two to match at all): stripping "Has" leaves one real word,
     # which must still come back as a candidate, not be discarded for
     # being "too short" now.
     result = _extract_candidate_entities("Has Ferrotek's certification been restored?")
@@ -108,7 +108,7 @@ def test_does_not_strip_a_real_word_that_only_coincidentally_matches_a_stopword_
     assert result == ["Bank of America Corp"]
 
 
-# --- _normalize_entity_name's possessive handling -- the other half of the
+# --- _normalize_entity_name's possessive handling: the other half of the
 # same real bug: even once a candidate like "Ferrotek's" extracts cleanly on
 # its own, matching still has to recognize it as referring to "Ferrotek
 # Components".

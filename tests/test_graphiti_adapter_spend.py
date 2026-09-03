@@ -4,7 +4,7 @@
 # bills as separate line items the plain input_tokens count doesn't
 # include. Now that app/graph/caching_anthropic_client.py turns caching on
 # for every Anthropic call, ignoring these would silently under-count real
-# spend -- this test exists to catch exactly that regression.
+# spend: this test exists to catch exactly that regression.
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 

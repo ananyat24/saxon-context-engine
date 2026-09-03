@@ -2,7 +2,7 @@
 # _create_foundry_iq_connector's validation/storage and
 # _check_foundry_iq_connectivity's "Sync now" behavior. Needs a real,
 # reachable Neo4j (GraphRepository(neo4j_client=None) opens a short-lived
-# client per call -- see GraphRepository's own docstring), same pattern as
+# client per call: see GraphRepository's own docstring), same pattern as
 # test_purge_connector_data.py; FoundryIQRetriever itself is monkeypatched
 # (its own request/response behavior is covered by test_foundry_iq_retriever.py).
 import asyncio
@@ -129,4 +129,4 @@ def test_check_foundry_iq_connectivity_handles_a_missing_credential(repo):
     asyncio.run(connectors_api._check_foundry_iq_connectivity(tenant, fake_connector, repo=repo))
 
     updated = connectors.get_connector(tenant.tenant_id, fake_connector["id"], repo=repo)
-    assert updated is None  # nothing to update -- the connector never existed; just must not raise
+    assert updated is None  # nothing to update: the connector never existed; just must not raise

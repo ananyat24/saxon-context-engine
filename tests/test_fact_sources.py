@@ -1,13 +1,13 @@
-# Needs a real, reachable Neo4j -- same caveat as test_decision_isolation.py.
+# Needs a real, reachable Neo4j: same caveat as test_decision_isolation.py.
 #
 # Regression/feature coverage for real source-document traceability: a fact
 # used to only ever say WHICH knowledge base it came from (group_id), never
-# the actual document/row it was extracted from -- exactly what the user
+# the actual document/row it was extracted from: exactly what the user
 # meant by "traceability and explainability" needing "a connection to
 # SOURCES, specific places the data was found". Graphiti already stores this
 # on every RELATES_TO edge as `episodes` (a list of Episodic-node uuids), and
 # every Episodic node carries the ingest-time `source_description` (e.g.
-# "orders.csv (Order)" -- see app/ingestion/file_source.py's SourceRecord).
+# "orders.csv (Order)": see app/ingestion/file_source.py's SourceRecord).
 # GraphRepository._resolve_episode_sources resolves that property back to
 # each fact as a "sources" list; this file checks it actually lands there
 # across every fact-building path, not just the helper in isolation.
@@ -23,7 +23,7 @@ from app.graph.graph_repository import GraphRepository
 @pytest.fixture
 def repo():
     # search_graphiti_facts short-circuits to [] when self.graphiti is falsy
-    # (see its own early-return guard) -- a Mock() satisfies that without
+    # (see its own early-return guard): a Mock() satisfies that without
     # ever needing a real Graphiti/LLM client, same convention as
     # test_decision_isolation.py's fixture.
     return GraphRepository(graphiti_instance=Mock())

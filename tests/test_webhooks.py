@@ -1,7 +1,7 @@
-# app/api/webhooks.py's own logic -- app.state.ingestion_queue and the
+# app/api/webhooks.py's own logic: app.state.ingestion_queue and the
 # connector/tenant lookups it depends on are all monkeypatched or stubbed,
 # so this never touches Neo4j or a real ingestion queue. No FastAPI
-# TestClient/real HTTP -- _handle_one (the per-notification logic) and the
+# TestClient/real HTTP: _handle_one (the per-notification logic) and the
 # route function's validation-handshake branch are each exercised directly,
 # same "call the module's own functions" convention as the rest of this
 # test suite.

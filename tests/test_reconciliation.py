@@ -1,11 +1,11 @@
-# Needs a real, reachable Neo4j -- same caveat as test_entity_reconciliation.py.
+# Needs a real, reachable Neo4j: same caveat as test_entity_reconciliation.py.
 # Creates and cleans up its own throwaway :Entity/:SAME_AS/:ProposedMerge
 # data under randomly-suffixed group_ids/tenant_ids.
 #
 # Covers the Reconcile stage (app/graph/reconciliation.py): unlike Resolve's
 # live, query-time name matching (entity_resolution.py), this runs once
 # (per connector sync in production, called directly here) and persists its
-# decision -- a confident cross-connector name match becomes a :SAME_AS
+# decision: a confident cross-connector name match becomes a :SAME_AS
 # edge, an unconfident-but-similar one becomes a :ProposedMerge a human has
 # to approve or reject.
 import uuid
@@ -27,7 +27,7 @@ from app.graph.reconciliation import (
 def repo():
     from unittest.mock import Mock
     repo = GraphRepository(graphiti_instance=Mock())
-    # Idempotent -- the concurrent-reconcile test below specifically depends
+    # Idempotent: the concurrent-reconcile test below specifically depends
     # on the pair_key uniqueness constraint this creates (see
     # _create_proposal's docstring).
     ensure_reconciliation_indexes(repo.execute_cypher)
@@ -126,7 +126,7 @@ def test_genuinely_different_names_create_nothing(repo):
 
 
 def test_same_group_id_duplicates_are_not_reconciled(repo):
-    # Reconcile is a cross-CONNECTOR stage -- two same-named nodes already in
+    # Reconcile is a cross-CONNECTOR stage: two same-named nodes already in
     # the SAME group_id are either a real Graphiti extraction duplicate
     # (that's Graphiti's own dedup concern, see CLAUDE.md) or the same node,
     # not something this stage should be linking.
@@ -188,7 +188,7 @@ def test_approve_proposal_creates_same_as_and_marks_approved(repo):
         )
         assert rows[0]["confidence"] == "fuzzy_approved"
         assert list_proposals(repo.execute_cypher, tenant_id, status="pending") == []
-        # Already decided -- approving (or rejecting) again is a no-op, not a
+        # Already decided: approving (or rejecting) again is a no-op, not a
         # second edge.
         assert approve_proposal(repo.execute_cypher, tenant_id, proposal_id) is False
     finally:
@@ -199,7 +199,7 @@ def test_approve_proposal_creates_same_as_and_marks_approved(repo):
 def test_approve_proposal_fails_cleanly_if_an_entity_was_deleted_first(repo):
     # A real bug found in review: approve_proposal used to SET status =
     # 'approved' and only THEN try to create the :SAME_AS edge as a second,
-    # separate query -- if either entity had since been deleted (its
+    # separate query: if either entity had since been deleted (its
     # connector removed, its data re-synced away), that second query
     # silently matched nothing and created no edge, while the proposal was
     # already marked 'approved'. Now both are one statement: either the
@@ -232,9 +232,9 @@ def test_approve_proposal_fails_cleanly_if_an_entity_was_deleted_first(repo):
 def test_concurrent_reconcile_runs_never_duplicate_a_same_as_edge_or_proposal(repo):
     # The race this session's review flagged: two different connectors of
     # the SAME tenant syncing close together each run reconcile_tenant
-    # independently -- the in-memory already_paired snapshot each call
+    # independently: the in-memory already_paired snapshot each call
     # starts with can't see what the OTHER concurrent call is doing, so the
-    # real guard has to be at the database level (MERGE, not CREATE) -- see
+    # real guard has to be at the database level (MERGE, not CREATE): see
     # _create_same_as's and _create_proposal's docstrings. Real threads
     # against the real driver, not sequential calls that only look
     # concurrent.
@@ -316,7 +316,7 @@ def test_expand_same_as_pulls_in_the_linked_node(repo):
 def test_expand_same_as_does_not_leak_a_node_outside_the_allowed_group_ids(repo):
     # The security-relevant case: SAME_AS links across a whole tenant, but a
     # single query can be scoped narrower (a document set, or
-    # authorization.visible_uuids) -- expand_same_as must never hand back a
+    # authorization.visible_uuids): expand_same_as must never hand back a
     # node outside what THIS caller asked to see, even if it's genuinely
     # linked in the graph.
     tenant_id = f"test_reconcile_tenant_{uuid.uuid4().hex[:8]}"

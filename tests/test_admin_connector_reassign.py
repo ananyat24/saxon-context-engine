@@ -5,7 +5,7 @@
 # unblock ingestion into a knowledge base before the real tenant had it in
 # its own list) into the real tenant, without re-ingesting.
 #
-# Needs a real, reachable Neo4j -- same pattern as test_purge_connector_data.py.
+# Needs a real, reachable Neo4j: same pattern as test_purge_connector_data.py.
 import uuid
 
 import pytest

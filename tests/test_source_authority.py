@@ -1,6 +1,6 @@
 # Covers app/graph/connectors.py's source_authority field/authority_by_group_id
 # (real Neo4j) and ContextOrchestrator._apply_authority_tie_break (pure-logic,
-# stubbed retriever -- same convention as test_orchestrator_observability.py).
+# stubbed retriever: same convention as test_orchestrator_observability.py).
 # See CLAUDE.md's pivot notes: source_authority only ever breaks a tie between
 # two connectors' disagreeing facts, it never hides or filters anything.
 import asyncio
@@ -97,7 +97,7 @@ def test_higher_authority_source_wins_a_disagreement(repo, monkeypatch):
     packet = asyncio.run(orchestrator.get_context_packet("What is the status of Order 9001?", group_ids=["erp_group", "doc_group"], tenant_id=tenant_id))
 
     assert "Order 9001 is delayed." in packet.metadata["summary"] or packet.metadata["summary"] == "Order 9001 is delayed."
-    # Both facts are still present in the returned evidence -- authority
+    # Both facts are still present in the returned evidence: authority
     # only decides which feeds the answer, never hides the other source.
     fact_texts = {f["fact"] for f in packet.metadata["facts"]}
     assert "Order 9001 is shipped." in fact_texts
@@ -130,7 +130,7 @@ def test_tie_break_skipped_without_tenant_id(monkeypatch):
 
 # --- Regression: two real, non-contradicting facts about the same node pair
 # used to be wrongly treated as a "disagreement" and one silently dropped
-# from the answer -- found against real northwind data ("Order 10252 was
+# from the answer: found against real northwind data ("Order 10252 was
 # shipped to the city of Charleroi" / "...to the country of Belgium", both
 # LOCATED_AT edges from the same connector). Neither is what source_authority
 # is for: it ranks one connector's data over another's, so two facts from the

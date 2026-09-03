@@ -1,4 +1,4 @@
-# app/graph/token_crypto.py -- encrypts OAuth refresh tokens before they're
+# app/graph/token_crypto.py: encrypts OAuth refresh tokens before they're
 # stored in Neo4j (see the "google_drive_oauth" connector type). No real
 # Neo4j or network needed, just settings.token_encryption_key.
 import pytest

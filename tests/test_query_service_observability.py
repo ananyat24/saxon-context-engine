@@ -1,5 +1,5 @@
 # Tests app/context/query_service.py's cache_hit/cost_usd bookkeeping around
-# execute_context_query -- no real Neo4j/Graphiti: scope resolution
+# execute_context_query. No real Neo4j/Graphiti: scope resolution
 # (resolve_knowledge_base/authorization.resolve_as_user) is monkeypatched so
 # only the cache-hit short-circuit itself is under test.
 import asyncio
@@ -32,7 +32,7 @@ def test_cache_hit_is_marked_true_without_mutating_the_stored_copy(monkeypatch):
 
     assert result.metadata["cache_hit"] is True
     assert result.metadata["summary"] == "cached"
-    # The object actually stored in the cache must be untouched -- a second
+    # The object actually stored in the cache must be untouched: a second
     # concurrent caller reading it independently still needs cache_hit=True
     # (it IS a hit for them too), never the pre-cache False the first
     # computation set before storing it.
@@ -50,7 +50,7 @@ def test_cost_tracked_providers_are_anthropic_and_azure_openai():
 
 # --- execute_causal_query's spend tracking + as_user visibility -------------
 # Same "monkeypatch the collaborators, no real Neo4j/Graphiti" convention as
-# above -- ContextOrchestrator itself is replaced with a fake that just
+# above: ContextOrchestrator itself is replaced with a fake that just
 # records what it was called with, so this tests query_service's own wiring
 # (spend-limiter diffing, as_user -> visible_uuids resolution), not the
 # orchestrator's internals (covered separately by test_causal_recommendation.py).
@@ -150,7 +150,7 @@ def test_causal_query_visible_uuids_is_none_without_as_user(monkeypatch):
 # --- FoundryIQRetriever wiring into execute_context_query --------------
 # Confirms the plain Ask path adds/omits it based on config alone, and that
 # execute_causal_query never gets it regardless of config (see that
-# function's own docstring for why) -- not FoundryIQRetriever's own
+# function's own docstring for why): not FoundryIQRetriever's own
 # request/response behavior, covered separately by
 # test_foundry_iq_retriever.py.
 
@@ -170,7 +170,7 @@ def _patch_plain_query_scope(monkeypatch):
     monkeypatch.setattr(query_service.authorization, "resolve_as_user", lambda *a, **k: None)
     monkeypatch.setattr(query_service.settings, "llm_provider", "gemini")
     monkeypatch.setattr(query_service, "ContextOrchestrator", _FakeContextOrchestrator)
-    # No per-knowledge-base foundry_iq connector in these tests -- always
+    # No per-knowledge-base foundry_iq connector in these tests: always
     # falls through to the global env-var check, so foundry_iq_configured
     # alone controls the outcome without touching Neo4j.
     monkeypatch.setattr(query_service.connectors, "find_foundry_iq_config_for_group", lambda *a, **k: None)
@@ -205,7 +205,7 @@ def test_foundry_iq_retriever_is_omitted_when_not_configured(monkeypatch):
 
 
 # --- _resolve_foundry_iq_retriever's own priority logic -----------------
-# Unit-level, not through the full execute_context_query -- covers the
+# Unit-level, not through the full execute_context_query: covers the
 # per-knowledge-base-connector-beats-global-env-var priority and the
 # undecryptable-credential fallback directly.
 
@@ -219,7 +219,7 @@ def test_resolve_foundry_iq_retriever_prefers_a_per_group_connector_over_global_
         ),
     )
     monkeypatch.setattr(query_service, "decrypt_token", lambda enc: f"decrypted-{enc}")
-    monkeypatch.setattr(query_service, "foundry_iq_configured", lambda: False)  # global not set -- connector must win
+    monkeypatch.setattr(query_service, "foundry_iq_configured", lambda: False)  # global not set: connector must win
 
     retriever = query_service._resolve_foundry_iq_retriever("t1", ["kb1"], repo=None)
 
