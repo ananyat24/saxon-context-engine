@@ -2,7 +2,7 @@
 #
 # Loads every ontology YAML file (core + all domain packs) and validates + merges
 # them, the same way app/ontology/bootstrap.py does at app startup. Use this to
-# check your YAML edits are valid without having to start the whole app -- it fails
+# check your YAML edits are valid without having to start the whole app. It fails
 # loudly with a clear error if a file is malformed, instead of that error showing up
 # later as a confusing crash somewhere else in the app.
 from pathlib import Path

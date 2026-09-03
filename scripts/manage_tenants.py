@@ -1,5 +1,5 @@
 # Add, list, or remove a client's API key, and manage which knowledge bases
-# (datasets) they can query -- the whole point of this script is that
+# (datasets) they can query. The whole point of this script is that
 # onboarding a new tenant, or giving an existing one another dataset, never
 # requires touching code or hand-editing JSON. It reads and writes
 # config/tenants.json directly (see app/config.py for how the running app
@@ -107,7 +107,7 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 def cmd_rotate(args: argparse.Namespace) -> None:
     """Replaces a tenant's API key in place, keeping every other field
-    (tenant_id, gemini_api_key, knowledge_bases) exactly as-is -- the tenant
+    (tenant_id, gemini_api_key, knowledge_bases) exactly as-is. The tenant
     config is stored keyed BY its api key (see cmd_add), so rotating means
     moving the same config dict to a new key and dropping the old one, not
     editing any of the config itself. The old key stops authenticating the

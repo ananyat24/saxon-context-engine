@@ -5,12 +5,12 @@
 # writing about the same customer, then a later CRM update that changes who manages
 # the account. The final query shows Graphiti automatically marking the old
 # "Sarah Chen manages this account" fact as INVALIDATED once the new one
-# ("Marcus Lee manages this account") is ingested -- it doesn't just overwrite the
+# ("Marcus Lee manages this account") is ingested. It doesn't just overwrite the
 # old fact, it keeps both and marks which one is currently true.
 #
 # time.sleep(15) calls exist only because Gemini's free tier caps requests per
-# minute (check current limits at ai.google.dev/pricing, they change over time) --
-# remove them if you're on a paid tier with a higher rate limit.
+# minute (check current limits at ai.google.dev/pricing, they change over time).
+# Remove them if you're on a paid tier with a higher rate limit.
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
@@ -79,7 +79,7 @@ async def main():
         results = await graphiti.search("Who manages the Contoso Ltd account?", group_ids=[GROUP_ID])
         for r in results:
             # A fact with an expired_at or invalid_at timestamp has been superseded
-            # by a newer fact -- Graphiti keeps it in the graph as history rather
+            # by a newer fact. Graphiti keeps it in the graph as history rather
             # than deleting it, it just stops treating it as currently true.
             valid = "VALID" if r.expired_at is None and r.invalid_at is None else "INVALIDATED"
             print(f"  [{valid}] {r.fact}")

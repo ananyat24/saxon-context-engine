@@ -1,6 +1,6 @@
 # Seeds an org hierarchy (:User nodes + :REPORTS_TO edges) and ownership
 # assignments (:ASSIGNED_TO edges from existing business entities to the User
-# who owns them) for role-based visibility -- see app/graph/authorization.py
+# who owns them) for role-based visibility. See app/graph/authorization.py
 # for how those get enforced at query time, and why this is written directly
 # via Cypher rather than through Graphiti's LLM extraction: who-reports-to-
 # whom and who-owns-what is exact organizational data, the kind a real
@@ -8,7 +8,7 @@
 # to have an LLM infer from text.
 #
 # This script is intentionally specific to the "contoso_dw" knowledge base's
-# actual, already-ingested customers/sales (matched by name -- reliable here
+# actual, already-ingested customers/sales (matched by name, reliable here
 # because this demo dataset is small and has no name collisions; a larger
 # real dataset should instead assign ownership at ingestion time, when the
 # source record's own key still uniquely identifies which entity Graphiti's
@@ -38,11 +38,11 @@ USERS = [
 
 # Which already-ingested entities (by their Graphiti-assigned name) each rep
 # owns. Matched against data/samples/contoso_dw's own CustomerKey -> Country
-# mapping for the specific sales sample scripts/ingest_samples.py ingested --
-# see that file's CONTOSO_SALES_SAMPLE for which records these are. Two
+# mapping for the specific sales sample scripts/ingest_samples.py ingested.
+# See that file's CONTOSO_SALES_SAMPLE for which records these are. Two
 # expected records (customer "Virgil Blevins" and "Sale 103300") aren't
 # assigned here because they were marked ingested but never actually produced
-# a node -- a separate Graphiti extraction gap, not a bug in this script.
+# a node, a separate Graphiti extraction gap, not a bug in this script.
 ASSIGNMENTS = {
     "diego_ramirez": ["Karen Dorman", "Adassa Cavazos", "Sale 109300", "Sale 114900"],
     "priya_shah": ["Angelika Kuster", "Elisabetta Marcelo", "Sale 117000", "Sale 112401"],

@@ -2,7 +2,7 @@
 #
 # The smallest possible end-to-end example: ingest one sentence, then ask a question
 # about it. Good smoke test to confirm your Neo4j + Gemini setup actually works,
-# since it exercises the full path -- LLM extraction, graph write, and search.
+# since it exercises the full path: LLM extraction, graph write, and search.
 import asyncio
 from datetime import datetime, timezone
 from graphiti_core.nodes import EpisodeType
@@ -21,7 +21,7 @@ async def main():
             episode_body="Ananya set up the Saxon AI Context Engine with Graphiti and Gemini.",
             source=EpisodeType.text,
             source_description="seed quickstart",
-            # reference_time is when the episode's content happened/was true --
+            # reference_time is when the episode's content happened/was true:
             # here, "right now", since we're describing something happening live.
             reference_time=datetime.now(timezone.utc),
         )

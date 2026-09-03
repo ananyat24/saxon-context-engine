@@ -118,7 +118,7 @@ MANUFACTURING_SPECS = [
 # the "nouns" a sale refers to, so they need to exist first.
 CONTOSO_SPECS = [
     # StartDT/EndDT/GeoAreaKey are warehouse plumbing (slowly-changing-dimension
-    # bookkeeping), not facts about the person -- skipped so extraction spends
+    # bookkeeping), not facts about the person, so they're skipped, letting extraction spend
     # its attention (and tokens) on the columns that actually describe them.
     FileSourceSpec("customer.csv", "Customer", "CustomerKey",
                    skip_columns={"Latitude", "Longitude", "MiddleInitial", "StartDT", "EndDT", "GeoAreaKey"}),
@@ -156,7 +156,7 @@ def _collect_contoso() -> list[SourceRecord]:
         allowed = referenced[key_column]
         records.extend(read_csv_records(path, spec, row_filter=lambda row, k=key_column, a=allowed: row.get(k) in a))
 
-    # Sales themselves aren't filtered further -- these specific rows are the
+    # Sales themselves aren't filtered further: these specific rows are the
     # sample the customers/products/stores above were chosen to match.
     sales_spec = CONTOSO_SPECS[3]
     sampled_order_keys = {row["OrderKey"] for row in sales_rows}
@@ -246,7 +246,7 @@ async def run(args: argparse.Namespace) -> None:
                     reference_time=record.reference_time,
                 )
             except SpendLimitExceeded as e:
-                # Unlike a rate limit, this isn't transient -- retrying later
+                # Unlike a rate limit, this isn't transient: retrying later
                 # won't clear it, so stop the whole run rather than burning
                 # through the rest of the batch re-raising on every record.
                 logger.error(f"  {e}")
@@ -254,7 +254,7 @@ async def run(args: argparse.Namespace) -> None:
                 break
             except Exception as e:
                 # One bad record (or a rate-limit hit) shouldn't discard the
-                # progress already made -- the log is saved in `finally` below,
+                # progress already made. The log is saved in `finally` below,
                 # and only successful records are marked, so a re-run retries
                 # exactly what failed rather than starting over.
                 logger.error(f"  failed: {e}")
@@ -263,7 +263,7 @@ async def run(args: argparse.Namespace) -> None:
                 if "rate limit" in str(e).lower():
                     consecutive_rate_limits += 1
                     # One record is several LLM calls in a tight burst (extraction
-                    # plus multiple embedding calls), not one -- that burst alone
+                    # plus multiple embedding calls), not one, and that burst alone
                     # can exceed a per-minute cap regardless of the delay between
                     # records. Retrying immediately just piles onto an already-
                     # exhausted window and never lets it clear: a real run of this
@@ -319,7 +319,7 @@ def main() -> None:
     parser.add_argument("dataset", choices=["northwind", "contoso", "manufacturing", "legal"])
     parser.add_argument("--group-id", default="samples", help="Tenant/data-isolation bucket (default: samples)")
     parser.add_argument("--limit", type=int, default=20, help="Max records to ingest this run (default: 20)")
-    # 15s because one record is several LLM calls, not one -- 4s between
+    # 15s because one record is several LLM calls, not one: 4s between
     # records tripped Gemini's free-tier limit on 6 of 10 records in testing.
     parser.add_argument("--delay", type=float, default=15.0, help="Seconds between records (default: 15)")
     parser.add_argument("--dry-run", action="store_true", help="Print generated text without calling the LLM")

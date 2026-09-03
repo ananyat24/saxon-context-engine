@@ -2,12 +2,12 @@
 # Deploys the Saxon AI Context Engine API to Azure Container Apps.
 #
 # Run this yourself, from a machine where `az login` has already been done
-# against the right Azure account -- it's not run by any automation in this
+# against the right Azure account. It's not run by any automation in this
 # repo. Requires the Azure CLI (az): https://learn.microsoft.com/cli/azure/install-azure-cli
 #
 # Prerequisites this script does NOT handle:
 #   - A Neo4j instance reachable over the public internet (Neo4j AuraDB Free is
-#     the recommended option -- see docs/internal/infrastructure-plan.md).
+#     the recommended option; see docs/internal/infrastructure-plan.md).
 #     Neo4j Desktop running on your laptop is NOT reachable from Azure.
 #   - At least one tenant added via `python scripts/manage_tenants.py add`,
 #     so there's an API key for the deployed app to authenticate.
@@ -40,12 +40,12 @@ IMAGE_NAME="${IMAGE_NAME:-saxon-context-engine}"
 : "${NEO4J_URI:?Set NEO4J_URI, e.g. neo4j+s://xxxx.databases.neo4j.io}"
 : "${NEO4J_USER:=neo4j}"
 # graphiti_core's own driver defaults to a database literally named "neo4j"
-# unless told otherwise -- true for Neo4j Desktop/Community Edition, but an
+# unless told otherwise. True for Neo4j Desktop/Community Edition, but an
 # AuraDB instance's actual database is often named after its instance id
 # instead (see app/config.py's neo4j_database).
 : "${NEO4J_DATABASE:=neo4j}"
 : "${NEO4J_PASSWORD:?Set NEO4J_PASSWORD}"
-# Defaults to "anthropic" -- this deployment's normal configuration -- so a
+# Defaults to "anthropic" (this deployment's normal configuration), so a
 # routine redeploy doesn't need to keep repeating it; override to switch
 # providers for a one-off deploy.
 : "${LLM_PROVIDER:=anthropic}"
@@ -62,11 +62,11 @@ ANTHROPIC_MODEL="${ANTHROPIC_MODEL:-claude-haiku-4-5}"
 # Only needed if the Claude key was issued through Microsoft Foundry rather
 # than directly from console.anthropic.com (see app/config.py):
 ANTHROPIC_FOUNDRY_RESOURCE="${ANTHROPIC_FOUNDRY_RESOURCE:-}"
-# Only needed to enable the "google_drive" source connector type -- the full
+# Only needed to enable the "google_drive" source connector type: the full
 # contents of a Google Cloud service account's JSON key (see app/config.py
 # and .env.example for how to get one). Leave unset to deploy without it.
 GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON:-}"
-# Only needed to enable the "sharepoint" source connector type -- an Azure
+# Only needed to enable the "sharepoint" source connector type: an Azure
 # AD app registration's client-credentials-flow details (see app/config.py
 # and .env.example for how to get these). All three or none.
 SHAREPOINT_TENANT_ID="${SHAREPOINT_TENANT_ID:-}"
@@ -77,16 +77,16 @@ SHAREPOINT_CLIENT_SECRET="${SHAREPOINT_CLIENT_SECRET:-}"
 FOUNDRY_IQ_SEARCH_ENDPOINT="${FOUNDRY_IQ_SEARCH_ENDPOINT:-}"
 FOUNDRY_IQ_API_KEY="${FOUNDRY_IQ_API_KEY:-}"
 FOUNDRY_IQ_KNOWLEDGE_BASE="${FOUNDRY_IQ_KNOWLEDGE_BASE:-}"
-# Only needed to enable the admin API (POST/GET/DELETE /api/v1/admin/tenants
-# -- see app/api/admin.py), which lets you add a tenant live, without a
+# Only needed to enable the admin API (POST/GET/DELETE /api/v1/admin/tenants,
+# see app/api/admin.py), which lets you add a tenant live, without a
 # redeploy. Leave unset to deploy without it (those routes 500 with a clear
 # "not configured" message rather than accepting no credential at all).
 ADMIN_API_KEY="${ADMIN_API_KEY:-}"
-# Only needed to enable the "google_drive_oauth" connector type -- the
+# Only needed to enable the "google_drive_oauth" connector type: the
 # one-click "Connect Google Drive" button (see app/config.py and
 # .env.example for how to get a client id/secret and generate an encryption
 # key). GOOGLE_OAUTH_CLIENT_ID isn't a secret (the frontend embeds it
-# directly), so it's a plain env var below, not a Container Apps secret --
+# directly), so it's a plain env var below, not a Container Apps secret,
 # unlike GOOGLE_OAUTH_CLIENT_SECRET and TOKEN_ENCRYPTION_KEY. All three or
 # none; leave unset to deploy without the connector type.
 GOOGLE_OAUTH_CLIENT_ID="${GOOGLE_OAUTH_CLIENT_ID:-}"
@@ -109,7 +109,7 @@ echo "=== 2. Confirming resource group exists ==="
 az group show --name "$RESOURCE_GROUP" --output none
 
 echo "=== 3. Registering required resource providers (skipped for any already registered) ==="
-# Only calls `register` for a provider that actually needs it -- the register
+# Only calls `register` for a provider that actually needs it. The register
 # action itself requires subscription-level Contributor/Owner, which a
 # resource-group-scoped Contributor role (common when someone else owns the
 # subscription) doesn't have. Checking first (a lower-privilege read) avoids
@@ -131,9 +131,9 @@ az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --output none 
 
 echo "=== 5. Building the image in Azure (no local Docker needed) ==="
 # `az acr build` uploads the repo and builds it in the cloud, using the
-# Dockerfile at the repo root -- no local Docker install required.
+# Dockerfile at the repo root: no local Docker install required.
 # --no-logs: still blocks until the build finishes and still fails the
-# script on a real build failure (via the command's exit code) -- it only
+# script on a real build failure (via the command's exit code). It only
 # skips *displaying* the streamed logs locally, which is needed on some
 # Windows consoles where a non-UTF8 codepage makes the CLI's own log-printing
 # crash on certain build output (pip's progress spinner, etc.), independent
@@ -150,11 +150,11 @@ echo "=== 7. Creating (or updating) the Container App ==="
 # Secrets (--secrets) are Container Apps' own secret store: encrypted at
 # rest, referenced by name rather than embedded in plain env vars, and not
 # visible in `az containerapp show` output the way a plain env var value is.
-# This is the "read from environment variable, not Key Vault, for now" setup
-# -- one step more secure than a bare env var, with Key Vault itself still an
+# This is the "read from environment variable, not Key Vault, for now" setup:
+# one step more secure than a bare env var, with Key Vault itself still an
 # option to layer in later without changing how the app reads its config.
 # The MCP server (app/mcp/server.py, v3.5) 421s any request whose Host header
-# isn't in MCP_ALLOWED_HOSTS -- so this deployment's own hostname has to be in
+# isn't in MCP_ALLOWED_HOSTS, so this deployment's own hostname has to be in
 # that list, not just localhost. An existing app already has a stable FQDN to
 # read here; a brand-new app doesn't get one until after `containerapp create`
 # below, so that branch patches this env var in as a follow-up step once the
@@ -162,7 +162,7 @@ echo "=== 7. Creating (or updating) the Container App ==="
 EXISTING_FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
   --query properties.configuration.ingress.fqdn --output tsv 2>/dev/null || echo "")
 MCP_ALLOWED_HOSTS="localhost:8000,127.0.0.1:8000${EXISTING_FQDN:+,$EXISTING_FQDN}"
-# PUBLIC_BASE_URL (app/config.py) -- this deployment's own public HTTPS URL,
+# PUBLIC_BASE_URL (app/config.py): this deployment's own public HTTPS URL,
 # used to build the notificationUrl a Microsoft Graph push subscription
 # calls back to (app/ingestion/graph_subscriptions.py). Same "patch in once
 # the FQDN is known" handling as MCP_ALLOWED_HOSTS for a brand-new app.
@@ -170,7 +170,7 @@ PUBLIC_BASE_URL="${EXISTING_FQDN:+https://$EXISTING_FQDN}"
 
 # google-drive-service-account-json and sharepoint-client-secret are the two
 # genuinely optional secrets (see their "leave unset to deploy without it"
-# comments above) -- Azure rejects `containerapp secret set`/`create --secrets`
+# comments above). Azure rejects `containerapp secret set`/`create --secrets`
 # outright if any name=value pair in the call has an empty value ("value or
 # keyVaultUrl and identity should be provided"), so an unset optional
 # credential has to be omitted from the call entirely, not passed as "". The
@@ -227,14 +227,14 @@ ENV_ARGS+=(FABRIC_IQ_ONTOLOGY_SCOPE="$FABRIC_IQ_ONTOLOGY_SCOPE")
 
 if az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
   echo "App exists, updating image, secrets, and env vars..."
-  # `containerapp update` has no --secrets flag (that's create-only) -- secrets
+  # `containerapp update` has no --secrets flag (that's create-only), so secrets
   # on an existing app are set separately, then referenced the same way.
   az containerapp secret set \
     --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \
     --secrets "${SECRET_ARGS[@]}"
   # Container Apps only creates a new revision (and thus restarts the
   # container, re-resolving secretref values into fresh env vars) when it
-  # detects a template change -- an env var *declaration* changing, or the
+  # detects a template change: an env var *declaration* changing, or the
   # image tag changing. A secret's *value* changing while its declaration
   # (secretref:tenant-api-keys, etc.) stays the same does NOT count, so an
   # update that only rotates a secret's content would otherwise silently
@@ -257,7 +257,7 @@ else
     --min-replicas 0 --max-replicas 3 \
     --secrets "${SECRET_ARGS[@]}" \
     --env-vars "${ENV_ARGS[@]}"
-  # MCP_ALLOWED_HOSTS/PUBLIC_BASE_URL above only have localhost/nothing --
+  # MCP_ALLOWED_HOSTS/PUBLIC_BASE_URL above only have localhost/nothing:
   # this app's real FQDN wasn't assigned until the create call just above.
   # Patch both in now that it's known.
   NEW_FQDN=$(az containerapp show --name "$APP_NAME" --resource-group "$RESOURCE_GROUP" \

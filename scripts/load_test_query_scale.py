@@ -1,13 +1,13 @@
 # Answers a different question than scripts/ingest_samples.py does: not "does
 # extraction work," but "does query-time code stay fast once the graph is much
 # bigger than our demo datasets." Seeds a synthetic knowledge base directly via
-# Cypher -- no LLM calls, no cost, no external RDBMS needed -- at a scale
+# Cypher (no LLM calls, no cost, no external RDBMS needed) at a scale
 # meant to resemble a real production graph, then times the exact query paths
 # app/graph/graph_repository.py and app/graph/authorization.py use: named-entity
 # resolution, role-based visibility, and the two-entity relationship path.
 #
 # This is deliberately separate from testing real RDBMS ingestion (a different,
-# LLM-cost-bound question -- see scripts/ingest_from_postgres.py) so query-time
+# LLM-cost-bound question; see scripts/ingest_from_postgres.py) so query-time
 # scaling can be checked for free, as often as needed, before spending anything
 # on a bigger ingest.
 #
@@ -159,11 +159,11 @@ def cleanup(repo: GraphRepository) -> None:
 
 def warm_up(repo: GraphRepository, n_entities: int, root_user: str, leaf_user: str) -> None:
     """Neo4j compiles and caches a query plan the first time it sees a given
-    Cypher *shape* (the literal query string, independent of parameter values)
-    -- that compilation costs ~200-300ms locally, but only once per shape per
+    Cypher *shape* (the literal query string, independent of parameter values).
+    That compilation costs ~200-300ms locally, but only once per shape per
     server lifetime; every later call with different parameters reuses the
     cached plan and costs ~10ms. A real server pays this exactly once, at
-    startup or on first use, then stays warm for its whole uptime -- so
+    startup or on first use, then stays warm for its whole uptime, so
     without a warm-up pass here, the timings below would mostly measure a
     one-time compilation cost, not the steady-state, data-scale-dependent cost
     they're meant to reveal.
@@ -221,8 +221,8 @@ def main() -> None:
     args = parser.parse_args()
 
     # A shared client (one driver/connection pool for the whole run) so these
-    # timings reflect real per-request Cypher cost, not connection setup --
-    # this matches how the app itself now shares one Neo4jClient across a
+    # timings reflect real per-request Cypher cost, not connection setup.
+    # This matches how the app itself now shares one Neo4jClient across a
     # request via app.state (see app/main.py) rather than opening a fresh
     # driver on every single Cypher call, which is what GraphRepository()
     # with no client falls back to.
