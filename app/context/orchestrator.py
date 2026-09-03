@@ -292,7 +292,11 @@ class ContextOrchestrator:
                         "something TO a person with that person actually doing it -- a request "
                         "made to someone is not that person's action. If the facts don't state "
                         "an answer explicitly, say the information isn't available in the given "
-                        "facts rather than guessing. Respond with one clear, concise sentence."
+                        "facts rather than guessing -- but say what's specifically missing, the "
+                        "way you'd tell a colleague, not with a generic disclaimer. Never preface "
+                        "the answer with throat-clearing like \"Based on the facts provided\" or "
+                        "\"According to the given information\" -- start directly with the "
+                        "answer itself. Respond with one clear, concise sentence."
                     ),
                 ),
                 Message(

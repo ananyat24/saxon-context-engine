@@ -1475,6 +1475,21 @@ function describeGraph(summary, nodes) {
 // being searched. `headerNodes` (already fetched by loadGraph for the
 // header's own knowledge base) is reused when no document set is active, to
 // avoid a second fetch for the common case.
+// Hand-picked for knowledge bases where the auto-generated chips (built
+// from whatever's most recently created -- see renderSuggestedQuestions)
+// turned out thin or off-topic on inspection: a demo's first impression
+// shouldn't depend on ingestion order. Each one was checked against the
+// live system and gives a real, well-sourced answer, not just a
+// grammatical one. Falls through to the generic auto-generated chips for
+// every knowledge base not listed here.
+const CURATED_SUGGESTED_QUESTIONS = {
+  solandra_supply_chain: [
+    "What happened with the CX-17 Power Relay?",
+    "Tell me about Ferrotek Components",
+    "What is Order SO-45822?",
+  ],
+};
+
 async function refreshSuggestedQuestionsForScope(headerNodes) {
   if (!getApiKey()) {
     document.getElementById("suggestedQuestions").innerHTML = "";
@@ -1482,6 +1497,11 @@ async function refreshSuggestedQuestionsForScope(headerNodes) {
   }
   const docSetId = getSelectedDocumentSet();
   const ds = docSetId ? documentSetDirectory.find((d) => d.id === docSetId) : null;
+  const curated = !ds ? CURATED_SUGGESTED_QUESTIONS[getSelectedKnowledgeBase()] : null;
+  if (curated) {
+    renderSuggestedQuestionChips(curated);
+    return;
+  }
   if (!ds) {
     renderSuggestedQuestions(headerNodes);
     return;
@@ -1500,13 +1520,24 @@ async function refreshSuggestedQuestionsForScope(headerNodes) {
   renderSuggestedQuestions(nodes);
 }
 
+// Node labels that mean "this is an auto-generated log entry describing an
+// action" (see app/graph/entity_resolution.py's matching exclusion list)
+// rather than a real named thing -- "Submitted Plant 1 August throughput
+// forecast" or "quarterly check-in call with Brightpeak Automation" reads
+// as a sentence fragment, not something a person would ask "what do we know
+// about ___?" of. Suggested questions are only worth showing when they read
+// like a real question, so these are filtered out before picking names.
+const _ACTION_TYPE_LABELS = new Set([
+  "Task", "Event", "Activity", "Process", "Transaction", "Interaction", "Observation",
+]);
+
 // Turns real node names from this tenant's own graph into example questions,
 // so the "Ask" box isn't a blank prompt asking a stakeholder to guess syntax.
 function renderSuggestedQuestions(nodes) {
-  const container = document.getElementById("suggestedQuestions");
-  const names = nodes.map((n) => n.name).filter(Boolean).slice(0, 3);
+  const namedNodes = nodes.filter((n) => !(n.labels || []).some((l) => _ACTION_TYPE_LABELS.has(l)));
+  const names = namedNodes.map((n) => n.name).filter(Boolean).slice(0, 3);
   if (names.length === 0) {
-    container.innerHTML = "";
+    document.getElementById("suggestedQuestions").innerHTML = "";
     return;
   }
   const questions = [
@@ -1514,6 +1545,11 @@ function renderSuggestedQuestions(nodes) {
     names[1] ? `How is ${names[0]} connected to ${names[1]}?` : null,
     names[2] ? `What's changed recently about ${names[2]}?` : null,
   ].filter(Boolean);
+  renderSuggestedQuestionChips(questions);
+}
+
+function renderSuggestedQuestionChips(questions) {
+  const container = document.getElementById("suggestedQuestions");
   container.innerHTML = questions
     .map((q) => `<button class="chip chip-suggest" type="button">${escapeXml(q)}</button>`)
     .join("");
