@@ -19,6 +19,7 @@ from app.graph.neo4j_client import Neo4jClient
 from app.graph.spend_limiter import SpendLimitExceeded, get_limiter
 from app.graph.tenant_graphiti_pool import TenantGraphitiPool
 from app.models.context_packet import ContextPacket
+from app.retrieval.foundry_iq_retriever import FoundryIQRetriever, foundry_iq_configured
 from app.security import resolve_knowledge_base
 
 # Only anthropic/azure_openai calls are ever recorded against the spend
@@ -70,7 +71,13 @@ async def execute_context_query(
         return cached.model_copy(update={"metadata": {**cached.metadata, "cache_hit": True}})
 
     graphiti = await graphiti_pool.get_or_create(tenant)
-    orchestrator = ContextOrchestrator(graphiti, neo4j_client=neo4j_client)
+    # Only added when fully configured (see foundry_iq_configured's own
+    # docstring) -- an unconfigured tenant's queries run exactly as they
+    # did before this integration existed, not against a retriever that
+    # would fail every call. Plain Ask only, deliberately not threaded into
+    # execute_causal_query below -- see this module's own note there.
+    extra_retrievers = [FoundryIQRetriever()] if foundry_iq_configured() else None
+    orchestrator = ContextOrchestrator(graphiti, neo4j_client=neo4j_client, extra_retrievers=extra_retrievers)
     limiter = get_limiter()
     spent_before = limiter.spent("query")
     try:
@@ -113,6 +120,15 @@ async def execute_causal_query(
     see _COST_TRACKED_PROVIDERS above), returned in metadata.cost_usd rather
     than silently left out, so a causal query's cost is visible the same way
     a plain query's is.
+
+    Deliberately does NOT get FoundryIQRetriever (see execute_context_query
+    above): a causal answer can synthesize a recommendation and writes a
+    permanent, auditable :Decision node from whatever facts fed it -- an
+    external knowledge base result with no group_id, no bi-temporal
+    validity, and a separate (currently unmapped) permission model is a
+    real, undecided question for that path, not a safe default to wire in
+    silently. Revisit once FoundryIQRetriever's own as_user-mapping gap
+    (see its retrieve() docstring) is actually resolved.
     """
     repo = GraphRepository(neo4j_client=neo4j_client)
     group_id = resolve_knowledge_base(tenant, knowledge_base)

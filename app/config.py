@@ -246,6 +246,26 @@ class Settings(BaseSettings):
     sharepoint_client_id: str = ""
     sharepoint_client_secret: str = ""
 
+    # Foundry IQ (see app/retrieval/foundry_iq_retriever.py) -- a live,
+    # query-time retriever, not an ingestion connector like sharepoint/
+    # google_drive above. Foundry IQ's own retrieve API is inherently
+    # query-in/grounded-answer-out (Azure AI Search's agentic retrieval),
+    # with no "list everything" bulk endpoint a connector's fetch() could
+    # pull from -- so it plugs into ContextOrchestrator's existing
+    # `extra_retrievers` list (same TextRetriever protocol GraphRetriever
+    # implements) instead of the connector dispatch table. One Foundry IQ
+    # knowledge base can itself be configured (on the Azure AI Search side,
+    # not here) to span Fabric IQ (`fabricOntology`/`fabricDataAgent`
+    # knowledge sources) and Work IQ (`workIQ` knowledge source) -- Foundry
+    # IQ is Microsoft's own single orchestration point over both, so one
+    # retriever here is genuinely "connect to all three," not three
+    # separate integrations. api_key is a Search resource admin/query key;
+    # an Entra (keyless) auth path is also supported by the API but not
+    # implemented here yet -- see this retriever's own module docstring.
+    foundry_iq_search_endpoint: str = ""
+    foundry_iq_api_key: str = ""
+    foundry_iq_knowledge_base: str = ""
+
     # OAuth client for the "google_drive_oauth" connector type (see
     # app/ingestion/google_drive_source.py's GoogleDriveOAuthConnector) --
     # the one-click "Connect Google Drive" button, as opposed to the

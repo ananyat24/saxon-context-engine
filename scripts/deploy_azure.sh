@@ -72,6 +72,11 @@ GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON="${GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON:-}"
 SHAREPOINT_TENANT_ID="${SHAREPOINT_TENANT_ID:-}"
 SHAREPOINT_CLIENT_ID="${SHAREPOINT_CLIENT_ID:-}"
 SHAREPOINT_CLIENT_SECRET="${SHAREPOINT_CLIENT_SECRET:-}"
+# Only needed to enable the Foundry IQ retriever (see app/config.py and
+# .env.example for how to get these). All three or none.
+FOUNDRY_IQ_SEARCH_ENDPOINT="${FOUNDRY_IQ_SEARCH_ENDPOINT:-}"
+FOUNDRY_IQ_API_KEY="${FOUNDRY_IQ_API_KEY:-}"
+FOUNDRY_IQ_KNOWLEDGE_BASE="${FOUNDRY_IQ_KNOWLEDGE_BASE:-}"
 # Only needed to enable the admin API (POST/GET/DELETE /api/v1/admin/tenants
 # -- see app/api/admin.py), which lets you add a tenant live, without a
 # redeploy. Leave unset to deploy without it (those routes 500 with a clear
@@ -170,6 +175,7 @@ SECRET_ARGS=(
 )
 [ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && SECRET_ARGS+=(google-drive-service-account-json="$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON")
 [ -n "$SHAREPOINT_CLIENT_SECRET" ] && SECRET_ARGS+=(sharepoint-client-secret="$SHAREPOINT_CLIENT_SECRET")
+[ -n "$FOUNDRY_IQ_API_KEY" ] && SECRET_ARGS+=(foundry-iq-api-key="$FOUNDRY_IQ_API_KEY")
 [ -n "$ADMIN_API_KEY" ] && SECRET_ARGS+=(admin-api-key="$ADMIN_API_KEY")
 [ -n "$GOOGLE_OAUTH_CLIENT_SECRET" ] && SECRET_ARGS+=(google-oauth-client-secret="$GOOGLE_OAUTH_CLIENT_SECRET")
 [ -n "$TOKEN_ENCRYPTION_KEY" ] && SECRET_ARGS+=(token-encryption-key="$TOKEN_ENCRYPTION_KEY")
@@ -191,11 +197,14 @@ ENV_ARGS=(
   ANTHROPIC_FOUNDRY_RESOURCE="$ANTHROPIC_FOUNDRY_RESOURCE"
   SHAREPOINT_TENANT_ID="$SHAREPOINT_TENANT_ID"
   SHAREPOINT_CLIENT_ID="$SHAREPOINT_CLIENT_ID"
+  FOUNDRY_IQ_SEARCH_ENDPOINT="$FOUNDRY_IQ_SEARCH_ENDPOINT"
+  FOUNDRY_IQ_KNOWLEDGE_BASE="$FOUNDRY_IQ_KNOWLEDGE_BASE"
   MCP_ALLOWED_HOSTS="$MCP_ALLOWED_HOSTS"
   PUBLIC_BASE_URL="$PUBLIC_BASE_URL"
 )
 [ -n "$GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON" ] && ENV_ARGS+=(GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=secretref:google-drive-service-account-json)
 [ -n "$SHAREPOINT_CLIENT_SECRET" ] && ENV_ARGS+=(SHAREPOINT_CLIENT_SECRET=secretref:sharepoint-client-secret)
+[ -n "$FOUNDRY_IQ_API_KEY" ] && ENV_ARGS+=(FOUNDRY_IQ_API_KEY=secretref:foundry-iq-api-key)
 [ -n "$ADMIN_API_KEY" ] && ENV_ARGS+=(ADMIN_API_KEY=secretref:admin-api-key)
 [ -n "$GOOGLE_OAUTH_CLIENT_ID" ] && ENV_ARGS+=(GOOGLE_OAUTH_CLIENT_ID="$GOOGLE_OAUTH_CLIENT_ID")
 [ -n "$GOOGLE_OAUTH_CLIENT_SECRET" ] && ENV_ARGS+=(GOOGLE_OAUTH_CLIENT_SECRET=secretref:google-oauth-client-secret)

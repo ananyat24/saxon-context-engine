@@ -145,3 +145,55 @@ def test_causal_query_visible_uuids_is_none_without_as_user(monkeypatch):
         )
     )
     assert _FakeOrchestrator.calls[-1]["visible_uuids"] is None
+
+
+# --- FoundryIQRetriever wiring into execute_context_query --------------
+# Confirms the plain Ask path adds/omits it based on config alone, and that
+# execute_causal_query never gets it regardless of config (see that
+# function's own docstring for why) -- not FoundryIQRetriever's own
+# request/response behavior, covered separately by
+# test_foundry_iq_retriever.py.
+
+
+class _FakeContextOrchestrator:
+    calls = []
+
+    def __init__(self, graphiti, neo4j_client=None, extra_retrievers=None):
+        _FakeContextOrchestrator.calls.append({"extra_retrievers": extra_retrievers})
+
+    async def get_context_packet(self, query, group_ids=None, visible_uuids=None, num_results=8, tenant_id=None):
+        return ContextPacket(query=query, metadata={"summary": "s"})
+
+
+def _patch_plain_query_scope(monkeypatch):
+    monkeypatch.setattr(query_service, "resolve_knowledge_base", lambda t, kb: "kb1")
+    monkeypatch.setattr(query_service.authorization, "resolve_as_user", lambda *a, **k: None)
+    monkeypatch.setattr(query_service.settings, "llm_provider", "gemini")
+    monkeypatch.setattr(query_service, "ContextOrchestrator", _FakeContextOrchestrator)
+
+
+def test_foundry_iq_retriever_is_added_when_fully_configured(monkeypatch):
+    _FakeContextOrchestrator.calls.clear()
+    _patch_plain_query_scope(monkeypatch)
+    monkeypatch.setattr(query_service, "foundry_iq_configured", lambda: True)
+
+    asyncio.run(
+        query_service.execute_context_query(
+            tenant=_tenant(), query="foundry iq wiring test - configured", neo4j_client=object(), graphiti_pool=_FakeGraphitiPool()
+        )
+    )
+    extra = _FakeContextOrchestrator.calls[-1]["extra_retrievers"]
+    assert extra is not None and len(extra) == 1
+
+
+def test_foundry_iq_retriever_is_omitted_when_not_configured(monkeypatch):
+    _FakeContextOrchestrator.calls.clear()
+    _patch_plain_query_scope(monkeypatch)
+    monkeypatch.setattr(query_service, "foundry_iq_configured", lambda: False)
+
+    asyncio.run(
+        query_service.execute_context_query(
+            tenant=_tenant(), query="foundry iq wiring test - not configured", neo4j_client=object(), graphiti_pool=_FakeGraphitiPool()
+        )
+    )
+    assert _FakeContextOrchestrator.calls[-1]["extra_retrievers"] is None
