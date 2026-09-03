@@ -1,4 +1,4 @@
-# SharePointConnector tests -- no real network, no real Azure AD app
+# SharePointConnector tests: no real network, no real Azure AD app
 # registration. The token endpoint and Graph REST calls (httpx.AsyncClient)
 # are both monkeypatched, same spirit as test_google_drive_connector.py.
 import asyncio

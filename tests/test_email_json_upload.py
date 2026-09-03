@@ -1,5 +1,5 @@
 # EmailConnector's new upload-folder path (see app/ingestion/email_source.py)
-# -- reads a JSON array export ({from, to, subject, date, body} objects, the
+#: reads a JSON array export ({from, to, subject, date, body} objects, the
 # shape a Gmail/Outlook data export produces) the same way DatabaseConnector
 # reads uploaded CSVs, falling back to the bundled mock inbox when nothing's
 # been uploaded. No real network/Neo4j needed.

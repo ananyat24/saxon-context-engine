@@ -52,7 +52,7 @@ def test_parse_date_handles_multiple_formats():
 
 
 def test_parse_date_returns_none_for_unparseable():
-    # A bad date shouldn't abort a whole file -- the record still ingests
+    # A bad date shouldn't abort a whole file: the record still ingests
     # without a reference time.
     assert parse_date("not a date", ("%Y-%m-%d",)) is None
     assert parse_date("", ("%Y-%m-%d",)) is None
@@ -93,7 +93,7 @@ def test_ingest_log_roundtrip(tmp_path):
     log.mark("tenant-a", "order-1")
     log.save()
 
-    # A fresh instance reads back what the previous run recorded -- this is what
+    # A fresh instance reads back what the previous run recorded: this is what
     # stops a re-run from re-spending LLM calls on records already ingested.
     reloaded = IngestLog(log_path)
     assert reloaded.already_ingested("tenant-a", "order-1") is True

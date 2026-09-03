@@ -83,7 +83,7 @@ def test_clear_push_subscription_removes_it(repo, connector):
 
 def test_list_connectors_with_push_subscriptions_only_includes_ones_with_a_subscription(repo, connector):
     tenant_id, connector_id = connector
-    # No subscription yet -- shouldn't show up.
+    # No subscription yet: shouldn't show up.
     ids_before = {c["id"] for c in connectors.list_connectors_with_push_subscriptions(repo=repo)}
     assert connector_id not in ids_before
 

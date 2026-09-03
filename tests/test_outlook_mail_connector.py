@@ -1,4 +1,4 @@
-# OutlookMailConnector tests -- no real network, no real Azure AD app
+# OutlookMailConnector tests: no real network, no real Azure AD app
 # registration. The token endpoint and Graph REST calls (httpx.AsyncClient)
 # are both monkeypatched, same spirit as test_sharepoint_connector.py (this
 # connector type shares its auth code path).

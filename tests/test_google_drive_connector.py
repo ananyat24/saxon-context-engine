@@ -1,4 +1,4 @@
-# GoogleDriveConnector tests -- no real network, no real Google credentials.
+# GoogleDriveConnector tests: no real network, no real Google credentials.
 # Auth (service_account.Credentials.from_service_account_info/.refresh) and
 # the Drive REST calls (httpx.AsyncClient) are both monkeypatched, so these
 # run free and fast, same spirit as test_connectors.py's web connector tests.
@@ -161,7 +161,7 @@ def test_fetch_reads_supported_files_and_skips_the_rest(monkeypatch):
 
 
 # --- Regression: Drive doesn't always report an accurate mimeType for a
-# regular file -- depending on the upload path (drag-drop, Drive for
+# regular file: depending on the upload path (drag-drop, Drive for
 # Desktop, some third-party sync tools), a genuine .csv can come back
 # tagged application/octet-stream instead of text/csv, which used to make
 # every file in an otherwise-valid folder look unsupported and fail the

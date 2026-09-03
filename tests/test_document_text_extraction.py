@@ -1,4 +1,4 @@
-# Tests app/ingestion/document_text_extraction.py -- the PDF/DOCX parsing
+# Tests app/ingestion/document_text_extraction.py: the PDF/DOCX parsing
 # shared by the Google Drive and SharePoint connectors. No network.
 from io import BytesIO
 
@@ -7,7 +7,7 @@ from app.ingestion.document_text_extraction import extract_docx_text, extract_pd
 
 def test_extract_pdf_text_returns_empty_for_a_blank_page():
     # A page with no text layer (e.g. a scanned/image-only PDF) should
-    # produce "" rather than raise -- the caller treats that as "skip this
+    # produce "" rather than raise: the caller treats that as "skip this
     # file", not an error.
     from pypdf import PdfWriter
 

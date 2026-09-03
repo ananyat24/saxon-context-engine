@@ -1,4 +1,4 @@
-# GmailConnector tests -- no real network, no real Google credentials, no
+# GmailConnector tests: no real network, no real Google credentials, no
 # real domain-wide delegation. Auth (service_account.Credentials.
 # from_service_account_info/.with_subject/.refresh) and the Gmail REST calls
 # (httpx.AsyncClient) are both monkeypatched, same spirit as

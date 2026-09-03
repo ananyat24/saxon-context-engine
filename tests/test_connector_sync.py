@@ -1,4 +1,4 @@
-# Tests app/ingestion/connector_sync.py's run_connector_sync() -- the logic
+# Tests app/ingestion/connector_sync.py's run_connector_sync(): the logic
 # shared by the manual "Sync now" route and the background scheduler. No
 # real Neo4j, Graphiti, or LLM calls: record_sync_result, build_graphiti,
 # and IngestionPipeline are all monkeypatched, so these run free and fast.
@@ -203,7 +203,7 @@ class _RecordingRepo:
 def test_successful_sync_tags_each_episode_with_the_connector_id(monkeypatch):
     # The real bug this pins: app/api/graph.py's connector preview filters
     # entities/facts by which connector's episode produced them (see that
-    # module's ?connector_id= handling) -- so every episode a sync creates
+    # module's ?connector_id= handling), so every episode a sync creates
     # has to actually get tagged, or the preview silently shows nothing for
     # a connector that really did sync data.
     _no_op_record_sync_result(monkeypatch)
@@ -242,7 +242,7 @@ def test_tagging_retries_and_recovers_from_a_transient_failure(monkeypatch):
     # tag-write specifically, and because content_hash still gets recorded
     # regardless (the episode really was ingested), an unchanged future
     # sync would skip re-ingestion forever and never get another chance to
-    # tag it -- a permanent gap from a momentary blip. The retry has to
+    # tag it: a permanent gap from a momentary blip. The retry has to
     # actually succeed on a later attempt, not just not-crash.
     _no_op_record_sync_result(monkeypatch)
 

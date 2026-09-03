@@ -1,7 +1,7 @@
 # GoogleDriveOAuthConnector (the "google_drive_oauth" connector type) --
 # reads a fixed list of previously-picked file ids, authenticating via a
 # stored-and-refreshed OAuth token rather than a service account. No real
-# network/Neo4j/Google credentials -- everything below it is monkeypatched,
+# network/Neo4j/Google credentials: everything below it is monkeypatched,
 # same spirit as test_google_drive_connector.py's fakes for the sibling
 # service-account connector.
 import asyncio
@@ -77,7 +77,7 @@ def test_fetch_reads_exactly_the_selected_files(monkeypatch):
             if url.endswith("/file1") and "fields" in params:
                 return _FakeResponse(200, metadata_by_id["file1"])
             if url.endswith("/file2") and "fields" in params:
-                return _FakeResponse(404)  # revoked/deleted -- skipped, not fatal
+                return _FakeResponse(404)  # revoked/deleted: skipped, not fatal
             if url.endswith("/file1") and params.get("alt") == "media":
                 return _FakeResponse(200, text="hello from notes.txt")
             raise AssertionError(f"unexpected request: {url} {params}")

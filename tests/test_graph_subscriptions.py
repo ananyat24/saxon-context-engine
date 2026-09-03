@@ -1,4 +1,4 @@
-# app/ingestion/graph_subscriptions.py -- no real network, no real Azure AD
+# app/ingestion/graph_subscriptions.py: no real network, no real Azure AD
 # app registration. The token endpoint and Graph REST calls (httpx.AsyncClient)
 # are both monkeypatched, same spirit as test_sharepoint_connector.py /
 # test_outlook_mail_connector.py.

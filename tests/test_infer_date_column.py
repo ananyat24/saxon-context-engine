@@ -1,9 +1,9 @@
 # Pure-logic tests for _infer_date_column/_infer_spec (app/ingestion/database_source.py)
-# -- no Neo4j, no filesystem. Covers the fix for a real, demonstrated gap:
+#: no Neo4j, no filesystem. Covers the fix for a real, demonstrated gap:
 # an auto-inferred spec (any CSV dropped into a connector's upload folder
 # without a hand-picked FileSourceSpec) never tried to detect a date column,
 # so every such episode's reference_time defaulted to ingestion time
-# regardless of what the CSV's own date fields said -- see CLAUDE.md's v1
+# regardless of what the CSV's own date fields said: see CLAUDE.md's v1
 # status note on the Solandra day1/day2 transition-tracking gap this
 # contributed to.
 from app.ingestion.database_source import _infer_date_column, _infer_spec
@@ -22,7 +22,7 @@ def test_falls_back_to_a_recognized_updated_on_style_column():
 
 
 def test_does_not_false_positive_on_location_ending_in_on():
-    # "Location" ends in "on" the same as "UpdatedOn" does -- a naive
+    # "Location" ends in "on" the same as "UpdatedOn" does: a naive
     # suffix-only check would wrongly treat it as a date column.
     assert _infer_date_column(["ID", "Name", "Location"]) is None
 

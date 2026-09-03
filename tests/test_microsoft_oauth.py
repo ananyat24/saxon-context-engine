@@ -1,4 +1,4 @@
-# app/ingestion/microsoft_oauth.py -- the Fabric IQ Ontology / Work IQ
+# app/ingestion/microsoft_oauth.py: the Fabric IQ Ontology / Work IQ
 # delegated OAuth plumbing. No real Microsoft tenant: httpx is
 # monkeypatched, same spirit as test_sharepoint_connector.py; encode_state/
 # decode_state use real Fernet encryption (fast, no network) against a

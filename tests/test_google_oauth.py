@@ -1,6 +1,6 @@
-# app/ingestion/google_oauth.py -- the three plain-HTTP calls the
+# app/ingestion/google_oauth.py: the three plain-HTTP calls the
 # "google_drive_oauth" connector type makes against Google's OAuth endpoints.
-# No real network or Google credentials -- httpx.AsyncClient is monkeypatched,
+# No real network or Google credentials: httpx.AsyncClient is monkeypatched,
 # same spirit as test_google_drive_connector.py's fakes.
 import asyncio
 

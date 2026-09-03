@@ -1,4 +1,4 @@
-# Pure file-I/O tests for scripts/manage_tenants.py -- no Neo4j needed, this
+# Pure file-I/O tests for scripts/manage_tenants.py: no Neo4j needed, this
 # script only ever reads/writes config/tenants.json. Each test points
 # CONFIG_PATH at a throwaway file so nothing here ever touches the real one.
 import argparse
