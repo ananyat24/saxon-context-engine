@@ -3,10 +3,10 @@
 # to extract entities/facts from the text, then stores them in Neo4j with built-in
 # support for tracking when a fact became true and when it stopped being true.
 # This module has two responsibilities:
-#   1. build_graphiti() -- construct a configured Graphiti client (LLM + embedder +
+#   1. build_graphiti(): construct a configured Graphiti client (LLM + embedder +
 #      reranker + the Neo4j connection details), so every other module that needs
 #      Graphiti builds it the same way instead of repeating this setup.
-#   2. GraphitiAdapter -- a small helper for writing a plain (id, properties) record
+#   2. GraphitiAdapter: a small helper for writing a plain (id, properties) record
 #      straight to Neo4j as an "Episode" node, bypassing Graphiti's LLM extraction.
 #      Useful for tests/demos where you want a predictable node without spending an
 #      LLM call.
@@ -37,7 +37,7 @@ def _apply_spend_limit_openai(
     azure_client: AsyncAzureOpenAI, bucket: str, input_price: float, output_price: float, embedding_price: float
 ) -> None:
     """Wraps azure_client's chat/embeddings calls so every request this client
-    makes (via the LLM client, embedder, and reranker below -- they all share
+    makes (via the LLM client, embedder, and reranker below, which all share
     this one azure_client instance) is checked against, and counted toward,
     the local budget for `bucket`. See app/graph/spend_limiter.py."""
     limiter = get_limiter()
@@ -57,7 +57,7 @@ def _apply_spend_limit_openai(
         # Azure's structured-output path (JSON-schema-constrained responses,
         # e.g. graphiti_core's extraction calls and our own answer-synthesis
         # call in app/context/orchestrator.py) goes through .parse(), not
-        # .create() -- a separate method needing its own wrapper.
+        # .create(), so it needs its own wrapper.
         limiter.ensure_room(bucket)
         response = await original_chat_parse(*args, **kwargs)
         usage = getattr(response, "usage", None)
@@ -94,12 +94,13 @@ def _apply_spend_limit_anthropic(
         if usage is not None:
             cost = estimate_cost_usd(usage.input_tokens, usage.output_tokens, input_price, output_price)
             # Prompt caching (see app/graph/caching_anthropic_client.py) bills
-            # a cache write/read as separate token counts the plain
-            # input_tokens figure above doesn't include at all -- ignoring
+            # a cache write/read as separate token counts that the plain
+            # input_tokens figure above doesn't include at all. Ignoring
             # them here would silently under-count real spend the moment
             # caching is active, exactly the kind of gap the spend limiter
             # exists to not have. Per Anthropic's published pricing, a cache
-            # write costs ~1.25x a normal input token, a cache read ~0.1x.
+            # write costs about 1.25x a normal input token, a cache read
+            # about 0.1x.
             cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
             cache_read_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
             cost += cache_creation_tokens / 1_000_000 * input_price * 1.25
@@ -113,7 +114,7 @@ def _apply_spend_limit_anthropic(
 def _build_gemini_embedder_and_reranker(api_key: str):
     """Split out from _build_gemini_clients below so "anthropic" mode can
     reuse this for embeddings/reranking (Claude has no embeddings API of its
-    own -- see app/config.py's llm_provider docstring) without also getting
+    own, see app/config.py's llm_provider docstring) without also getting
     Gemini's chat/extraction client."""
     embedder = GeminiEmbedder(config=GeminiEmbedderConfig(api_key=api_key, embedding_model=settings.embedding_model))
     cross_encoder = GeminiRerankerClient(config=LLMConfig(api_key=api_key))
@@ -122,7 +123,7 @@ def _build_gemini_embedder_and_reranker(api_key: str):
 
 def _build_gemini_clients(api_key: str):
     """Every tenant brings their own Gemini key (see app/config.py's TenantConfig),
-    which is why this path takes an api_key argument -- one Graphiti client per
+    which is why this path takes an api_key argument: one Graphiti client per
     tenant, each billed to that tenant's own Gemini account."""
     llm_client = GeminiClient(
         config=LLMConfig(api_key=api_key, model=settings.llm_model, small_model=settings.small_llm_model)
@@ -132,15 +133,16 @@ def _build_gemini_clients(api_key: str):
 
 
 def _build_azure_openai_clients(bucket: str):
-    """Azure OpenAI is an operator-wide resource, not a per-tenant one -- unlike
-    Gemini, there's no separate key per client here, every tenant's Graphiti
-    client is built from the same enterprise Azure deployment. Reach for this
-    when Gemini's free-tier rate limit is the actual bottleneck (see
-    scripts/ingest_samples.py's rate-limit backoff) rather than per-tenant
-    billing isolation, which Azure OpenAI doesn't provide on its own.
+    """Azure OpenAI is an operator-wide resource, not a per-tenant one.
+    Unlike Gemini, there's no separate key per client here; every tenant's
+    Graphiti client is built from the same enterprise Azure deployment.
+    Reach for this when Gemini's free-tier rate limit is the actual
+    bottleneck (see scripts/ingest_samples.py's rate-limit backoff) rather
+    than per-tenant billing isolation, which Azure OpenAI doesn't provide
+    on its own.
 
     `bucket` selects which local spend budget (see app/graph/spend_limiter.py)
-    this client's calls count against -- "ingestion" or "query".
+    this client's calls count against: "ingestion" or "query".
     """
     missing = [
         name
@@ -179,10 +181,10 @@ def _build_azure_openai_clients(bucket: str):
 
 def _build_anthropic_clients(bucket: str, gemini_api_key: str):
     """Anthropic is an operator-wide resource, same reasoning as Azure OpenAI
-    above -- one shared Claude key, not a key per tenant.
+    above: one shared Claude key, not a key per tenant.
 
     Claude has no embeddings API (see app/config.py's llm_provider
-    docstring), so embeddings/reranking still come from Gemini here --
+    docstring), so embeddings/reranking still come from Gemini here.
     `gemini_api_key` is the tenant's own Gemini key (TenantConfig.gemini_api_key,
     the same field "gemini" mode uses), reused for just that piece.
     """
@@ -190,7 +192,7 @@ def _build_anthropic_clients(bucket: str, gemini_api_key: str):
         raise RuntimeError("llm_provider is 'anthropic' but anthropic_api_key is not set. See .env.example.")
 
     # A key issued through Microsoft Foundry (same place as an Azure OpenAI
-    # resource) won't authenticate against the direct Anthropic API -- it
+    # resource) won't authenticate against the direct Anthropic API; it
     # needs AsyncAnthropicFoundry, pointed at the Foundry resource, instead.
     if settings.anthropic_foundry_resource:
         anthropic_client = AsyncAnthropicFoundry(
@@ -202,7 +204,7 @@ def _build_anthropic_clients(bucket: str, gemini_api_key: str):
         anthropic_client, bucket, settings.anthropic_input_price_per_1m, settings.anthropic_output_price_per_1m
     )
     # CachingAnthropicClient, not the bare AnthropicClient graphiti_core
-    # ships -- see app/graph/caching_anthropic_client.py for why turning on
+    # ships: see app/graph/caching_anthropic_client.py for why turning on
     # Anthropic prompt caching needs a subclass rather than a config flag.
     llm_client = CachingAnthropicClient(client=anthropic_client, config=LLMConfig(model=settings.anthropic_model))
     embedder, cross_encoder = _build_gemini_embedder_and_reranker(gemini_api_key)
@@ -220,25 +222,25 @@ def build_graphiti(
     extraction, embeddings, and reranking search results.
 
     Which provider is controlled by settings.llm_provider ("gemini",
-    "azure_openai", or "anthropic"), not by any argument here -- it's an
+    "azure_openai", or "anthropic"), not by any argument here: it's an
     operator-wide choice, not a per-call one. `google_api_key` is used in
     "gemini" mode (where each tenant's own key comes in, via
-    TenantGraphitiPool) AND in "anthropic" mode (for embeddings/reranking,
-    since Claude has no embeddings API of its own -- see the llm_provider
+    TenantGraphitiPool) and in "anthropic" mode (for embeddings/reranking,
+    since Claude has no embeddings API of its own, see the llm_provider
     setting's docstring); it's ignored entirely in "azure_openai" mode, since
     that provider is one shared enterprise resource rather than a key per
     tenant.
 
-    `bucket` only matters in "azure_openai"/"anthropic" mode -- it's which
+    `bucket` only matters in "azure_openai"/"anthropic" mode: it's which
     local spend budget this client's calls count against (see
     app/graph/spend_limiter.py). Defaults to "ingestion" since every direct
     caller of this function (scripts/ingest_samples.py, scripts/seed_core_graph.py)
     is a data-loading script; TenantGraphitiPool passes "query" explicitly for
     the live API path.
 
-    neo4j_uri/user/password fall back to settings regardless of provider --
-    pass them explicitly only to point at a different database than .env (e.g.
-    in tests).
+    neo4j_uri/user/password fall back to settings regardless of provider;
+    pass them explicitly only to point at a different database than .env
+    (e.g. in tests).
     """
     uri = neo4j_uri or settings.neo4j_uri
     user = neo4j_user or settings.neo4j_user
@@ -258,7 +260,7 @@ def build_graphiti(
         )
 
     # graphiti_core's own Neo4jDriver defaults to database="neo4j" unless told
-    # otherwise -- explicit here so this works against an Aura instance whose
+    # otherwise. Explicit here so this works against an Aura instance whose
     # database is named after the instance id instead (see
     # settings.neo4j_database).
     driver = Neo4jDriver(uri, user, password, database=settings.neo4j_database)
@@ -276,7 +278,7 @@ class GraphitiAdapter:
         """Create or update an Episode node with the given id and properties.
 
         `properties` must contain only flat, scalar values (strings, numbers,
-        booleans, or lists of those) -- that's what Neo4j's property storage
+        booleans, or lists of those): that's what Neo4j's property storage
         supports; nested dicts or arbitrary objects will fail at write time.
         """
         if not episode_id:

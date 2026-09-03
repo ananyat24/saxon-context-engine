@@ -1,5 +1,5 @@
 # The one real implementation behind "ask a question, get assembled context
-# back" -- resolves scope (a single knowledge base, a document set, or an
+# back": resolves scope (a single knowledge base, a document set, or an
 # as_user-restricted view), checks the response cache, runs retrieval +
 # synthesis, and caches the result. Both the HTTP route
 # (app/api/context.py) and the MCP server (app/mcp/server.py) call this
@@ -34,7 +34,7 @@ def _resolve_foundry_iq_retriever(
     tenant_id: str, group_ids: list[str], repo: GraphRepository
 ) -> Optional[FoundryIQRetriever]:
     """A per-knowledge-base "foundry_iq" connector (configured through the
-    UI -- see app/api/connectors.py's _create_foundry_iq_connector) takes
+    UI, see app/api/connectors.py's _create_foundry_iq_connector) takes
     priority over the deployment-wide FOUNDRY_IQ_* env vars, so different
     knowledge bases (different clients, on a multi-tenant deployment) can
     each point at their own Foundry IQ knowledge base rather than sharing
@@ -60,12 +60,12 @@ def _resolve_foundry_iq_retriever(
 
 def _resolve_microsoft_iq_retrievers(tenant_id: str, group_ids: list[str], repo: GraphRepository) -> list:
     """The "fabric_iq_ontology"/"work_iq" counterpart to
-    _resolve_foundry_iq_retriever above -- no global-env-var fallback here
-    (unlike Foundry IQ, these have no service-credential config at all,
+    _resolve_foundry_iq_retriever above. There's no global-env-var fallback
+    here (unlike Foundry IQ, these have no service-credential config at all,
     see app/config.py's microsoft_oauth_* settings' own comment on why),
     so a knowledge base only ever gets one of these if a connector was
     actually connected for it. Both, not just the first match, can apply
-    to the same group_ids -- a tenant may have connected Fabric IQ
+    to the same group_ids: a tenant may have connected Fabric IQ
     Ontology and Work IQ separately, and both are worth querying."""
     retrievers: list = []
     for group_id in group_ids:
@@ -90,7 +90,7 @@ def _resolve_microsoft_iq_retrievers(tenant_id: str, group_ids: list[str], repo:
 
 
 # Only anthropic/azure_openai calls are ever recorded against the spend
-# limiter (see app/graph/graphiti_adapter.py) -- a Gemini-provider tenant's
+# limiter (see app/graph/graphiti_adapter.py). A Gemini-provider tenant's
 # queries genuinely aren't cost-tracked yet, so cost_usd is reported as None
 # for them rather than a misleading 0.0 that would read as "this was free."
 _COST_TRACKED_PROVIDERS = {"anthropic", "azure_openai"}
@@ -107,8 +107,8 @@ async def execute_context_query(
     as_user: Optional[str] = None,
     result_limit: Optional[int] = None,
 ) -> ContextPacket:
-    """Raises HTTPException (400 unknown scope, 402 spend limit exceeded) --
-    both callers are expected to either let it propagate (FastAPI turns it
+    """Raises HTTPException (400 unknown scope, 402 spend limit exceeded).
+    Both callers are expected to either let it propagate (FastAPI turns it
     into the matching HTTP response on its own) or catch and translate it."""
     repo = GraphRepository(neo4j_client=neo4j_client)
     num_results = max(1, min(result_limit, 20)) if result_limit else 8
@@ -131,7 +131,7 @@ async def execute_context_query(
     cache_key = cache.make_key(tenant.tenant_id, group_ids, as_user, query, num_results)
     cached = cache.get(cache_key)
     if cached is not None:
-        # A copy, not a mutation of the cached ContextPacket itself -- other
+        # A copy, not a mutation of the cached ContextPacket itself: other
         # callers may be holding/about to hit the same cache entry, and they
         # each need their own accurate cache_hit value, not whatever the last
         # caller happened to set it to.
@@ -140,10 +140,10 @@ async def execute_context_query(
     graphiti = await graphiti_pool.get_or_create(tenant)
     # Only added when a foundry_iq connector exists for one of these
     # group_ids, or the deployment-wide env vars are set (see
-    # _resolve_foundry_iq_retriever above) -- an unconfigured tenant's
+    # _resolve_foundry_iq_retriever above), so an unconfigured tenant's
     # queries run exactly as they did before this integration existed, not
     # against a retriever that would fail every call. Plain Ask only,
-    # deliberately not threaded into execute_causal_query below -- see this
+    # deliberately not threaded into execute_causal_query below; see this
     # module's own note there.
     foundry_iq_retriever = _resolve_foundry_iq_retriever(tenant.tenant_id, group_ids, repo)
     extra_retrievers = ([foundry_iq_retriever] if foundry_iq_retriever else []) + _resolve_microsoft_iq_retrievers(
@@ -177,26 +177,26 @@ async def execute_causal_query(
     knowledge_base: Optional[str] = None,
     as_user: Optional[str] = None,
 ) -> ContextPacket:
-    """The causal-reasoning counterpart to execute_context_query above --
+    """The causal-reasoning counterpart to execute_context_query above: the
     same scope resolution as that function's single-knowledge-base branch,
     including as_user's org-hierarchy-scoped visibility (document_set still
     isn't supported here, since a causal chain needs one clear knowledge
-    base to write its Decision node into -- that part of the docstring
+    base to write its Decision node into; that part of the docstring
     still holds). Deliberately does NOT go through the response cache: a
-    causal query has a real side effect (recording a Decision node -- see
+    causal query has a real side effect (recording a Decision node, see
     app/graph/decisions.py) every time it runs, and caching the response
     would silently suppress that side effect on a cache hit while still
     looking like a fresh answer to the caller.
 
     Tracks cost_usd the same way execute_context_query does (only
-    anthropic/azure_openai are ever recorded against the spend limiter --
+    anthropic/azure_openai are ever recorded against the spend limiter,
     see _COST_TRACKED_PROVIDERS above), returned in metadata.cost_usd rather
     than silently left out, so a causal query's cost is visible the same way
     a plain query's is.
 
     Deliberately does NOT get FoundryIQRetriever (see execute_context_query
     above): a causal answer can synthesize a recommendation and writes a
-    permanent, auditable :Decision node from whatever facts fed it -- an
+    permanent, auditable :Decision node from whatever facts fed it. An
     external knowledge base result with no group_id, no bi-temporal
     validity, and a separate (currently unmapped) permission model is a
     real, undecided question for that path, not a safe default to wire in

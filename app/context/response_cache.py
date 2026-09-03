@@ -3,11 +3,11 @@
 # don't each pay for retrieval + synthesis from scratch.
 #
 # Deliberately simple: an in-memory dict with both a TTL (a safety net,
-# since exact change-tracking invalidation is real, separate scope -- see
+# since exact change-tracking invalidation is real, separate scope, see
 # CLAUDE.md's v3 status note) and explicit invalidation whenever a connector
 # sync actually changes data for a tenant/group (see
 # app/ingestion/connector_sync.py's call to invalidate_group()), which
-# covers the common case -- a synced connector -- without needing full
+# covers the common case, a synced connector, without needing full
 # change-tracking. Lost on process restart, and never shared across
 # instances, which is fine: this is a performance optimization, not a
 # source of truth, and a cache miss just means paying full price once.
@@ -21,9 +21,9 @@ from app.config import settings
 # app/graph/connector_scheduler.py) so a cached answer never meaningfully
 # outlives what a background sync would have refreshed by anyway.
 _DEFAULT_TTL_SECONDS = 300.0
-# Bounds memory regardless of how many distinct queries come in -- oldest
-# entries evicted first once exceeded, same simple bound spend_limiter.py
-# and other in-process state in this codebase already accept.
+# Bounds memory regardless of how many distinct queries come in. Oldest
+# entries are evicted first once this is exceeded, the same simple bound
+# spend_limiter.py and other in-process state in this codebase already accept.
 _MAX_ENTRIES = 500
 
 CacheKey = tuple[str, tuple[str, ...], str, str, int]
@@ -68,7 +68,7 @@ class ResponseCache:
 
     def invalidate_group(self, tenant_id: str, group_id: str) -> None:
         """Called after a connector sync actually changes data for one
-        group_id -- drops every cached entry whose scope could include that
+        group_id: drops every cached entry whose scope could include that
         group, rather than waiting out the TTL and risking a stale "no
         information found" right after new data was just ingested."""
         with self._lock:

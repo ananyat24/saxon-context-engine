@@ -1,21 +1,21 @@
 # The "Reconcile" stage named in the reference architecture (Connect ->
-# Resolve -> Reconcile -> Plan -> Rank -> Assemble -> Deliver -- see
+# Resolve -> Reconcile -> Plan -> Rank -> Assemble -> Deliver, see
 # CLAUDE.md Part 2). Deferred when entity_resolution.py (the Resolve stage)
 # was pulled out on its own, because Resolve already did a live, query-time
 # version of "is this the same entity mentioned in two connectors" (see
-# match_entities_by_name's exact/normalized-name reconciliation) -- this
-# module is what that stage was missing: something that actually OWNS the
+# match_entities_by_name's exact/normalized-name reconciliation). This
+# module is what that stage was missing: something that actually owns the
 # decision, runs it once per sync instead of recomputing it on every query,
 # writes it down so it's inspectable/auditable, and can catch a match
 # stronger name-equality never will (two names that are close but don't
-# normalize the same -- a typo, an abbreviation).
+# normalize the same, like a typo or an abbreviation).
 #
 # Checked what's actually in this project's connector datasets before
 # building this (see CLAUDE.md's Reconcile follow-up note): none of the
 # bundled/demo connectors carry a real shared external key across each other
 # (mock_crm's AccountID never appears in mock_email's free text, nor does an
 # email domain map back to an account). Name is the only cross-connector
-# signal that actually exists today, so this builds a *stronger* name
+# signal that actually exists today, so this builds a stronger name
 # matching tier (fuzzy similarity) rather than an ID-matching path with
 # nothing real to match against. If a future connector's data does carry a
 # real shared key, that's a strictly stronger tier to add above fuzzy here,
@@ -23,16 +23,16 @@
 #
 # Two tiers, in order of confidence:
 #   1. exact/normalized name match across different group_ids (the same
-#      equality match_entities_by_name already does live) -- confident
+#      equality match_entities_by_name already does live), confident
 #      enough to auto-merge, now persisted as a :SAME_AS edge instead of
 #      recomputed every query.
-#   2. fuzzy name match (similar but not normalized-equal) -- NOT confident
+#   2. fuzzy name match (similar but not normalized-equal), not confident
 #      enough to auto-merge; written as a :ProposedMerge node a human has to
 #      approve or reject (see approve_proposal/reject_proposal) before it
 #      becomes a :SAME_AS edge.
 # expand_same_as lets a query-time caller (GraphRepository) pull in
 # whatever this stage has already linked, on top of Resolve's own live
-# matching -- see that function's docstring for why one hop is enough.
+# matching; see that function's docstring for why one hop is enough.
 import difflib
 import logging
 import uuid
@@ -44,15 +44,15 @@ from app.graph.entity_resolution import ExecuteCypher, _normalize_entity_name
 logger = logging.getLogger(__name__)
 
 # Below this, two normalized names are treated as coincidentally similar,
-# not the same entity -- picked by manual judgment (no real fuzzy-collision
+# not the same entity. Picked by manual judgment (no real fuzzy-collision
 # dataset exists yet to calibrate against, see this module's docstring).
 # Worth revisiting once real production data surfaces actual near-miss
 # pairs to tune against.
 _FUZZY_MIN_SIMILARITY = 0.84
 # A normalized name shorter than this is too short for ratio-based
 # similarity to mean anything (e.g. "Co" vs "Go" scores high on length
-# alone) -- skip fuzzy comparison entirely for names this short rather than
-# risk a nonsense proposal.
+# alone), so fuzzy comparison is skipped entirely for names this short
+# rather than risking a nonsense proposal.
 _FUZZY_MIN_NAME_LENGTH = 4
 
 
@@ -62,11 +62,11 @@ class ReconcileResult(TypedDict):
 
 
 def ensure_reconciliation_indexes(execute_cypher: ExecuteCypher) -> None:
-    """Idempotent, safe to call on every startup -- same pattern as
+    """Idempotent, safe to call on every startup, same pattern as
     app/graph/connectors.py's ensure_connector_indexes. The uniqueness
     constraint on pair_key is what makes _create_proposal's MERGE safe under
     real concurrency (two different connectors of the same tenant syncing
-    close together, each running reconcile_tenant) -- same reasoning as
+    close together, each running reconcile_tenant), same reasoning as
     app/graph/scheduler_lock.py's own constraint on :SchedulerLock.id."""
     execute_cypher("CREATE INDEX proposed_merge_tenant_id IF NOT EXISTS FOR (p:ProposedMerge) ON (p.tenant_id)", None)
     execute_cypher(
@@ -81,7 +81,7 @@ def _similarity(a: str, b: str) -> float:
 
 def _existing_pairs(execute_cypher: ExecuteCypher, group_ids: list[str]) -> set[frozenset]:
     """Every uuid-pair already linked (:SAME_AS) or already proposed (any
-    status -- including a rejected one, so a rejected proposal doesn't just
+    status, including a rejected one, so a rejected proposal doesn't just
     get re-proposed on the next sync) among entities in these group_ids, so
     reconcile_tenant never creates a duplicate edge/proposal for the same
     pair on a repeat run."""
@@ -99,15 +99,15 @@ def _existing_pairs(execute_cypher: ExecuteCypher, group_ids: list[str]) -> set[
 
 
 def reconcile_tenant(execute_cypher: ExecuteCypher, tenant_id: str, group_ids: list[str]) -> ReconcileResult:
-    """Runs both tiers across every entity in this tenant's group_ids (not
-    just whichever connector just synced -- a newly-ingested entity in one
+    """Runs both tiers across every entity in this tenant's group_ids, not
+    just whichever connector just synced (a newly-ingested entity in one
     connector might match an existing one in another, and that only shows
     up by looking at all of them together). Cheap enough to run in full on
     every sync at this project's data scale; would need to narrow to
     "entities touched since the last run" before that stops being true.
 
     NOT n:SaxonRecommendation, same as every other general entity query in this
-    codebase (see entity_resolution.match_entities_by_name's docstring) --
+    codebase (see entity_resolution.match_entities_by_name's docstring):
     a :Decision is an internal audit record, not a business entity that
     could ever be "the same real-world thing" as another one.
     """
@@ -144,8 +144,8 @@ def reconcile_tenant(execute_cypher: ExecuteCypher, tenant_id: str, group_ids: l
             )
 
     # Fuzzy tier: only across entities whose normalized names didn't already
-    # group them together above, and only across different group_ids --
-    # within-connector near-duplicates are Graphiti's own extraction/dedup
+    # group them together above, and only across different group_ids.
+    # Within-connector near-duplicates are Graphiti's own extraction/dedup
     # concern (see CLAUDE.md's contradiction-detection note), not this
     # cross-connector stage's job.
     normalized_groups = [(norm, members) for norm, members in by_normalized.items() if len(norm) >= _FUZZY_MIN_NAME_LENGTH]
@@ -174,14 +174,14 @@ def reconcile_tenant(execute_cypher: ExecuteCypher, tenant_id: str, group_ids: l
 
 
 def _create_same_as(execute_cypher: ExecuteCypher, a_uuid: str, b_uuid: str, confidence: str) -> None:
-    # MERGE on the relationship pattern itself, not CREATE -- two different
+    # MERGE on the relationship pattern itself, not CREATE: two different
     # connectors' syncs finishing close together could each run
     # reconcile_tenant concurrently and both decide this exact pair needs a
     # :SAME_AS edge (the already_paired check in reconcile_tenant is only an
     # in-memory snapshot from when that particular call started, so it
     # can't see what a concurrent call is doing). CREATE would happily make
     # two edges between the same two nodes; Neo4j's MERGE on a full
-    # relationship pattern finds-or-creates exactly one, same guarantee
+    # relationship pattern finds-or-creates exactly one, the same guarantee
     # _create_proposal's pair_key constraint gives the ProposedMerge side.
     execute_cypher(
         "MATCH (a:Entity {uuid: $a}), (b:Entity {uuid: $b}) "
@@ -192,15 +192,15 @@ def _create_same_as(execute_cypher: ExecuteCypher, a_uuid: str, b_uuid: str, con
 
 
 def _create_proposal(execute_cypher: ExecuteCypher, tenant_id: str, a: dict, b: dict, score: float) -> None:
-    # MERGE on a deterministic pair_key (order-independent -- sorted so
+    # MERGE on a deterministic pair_key (order-independent, sorted so
     # (a,b) and (b,a) always land on the same node), not CREATE: the
     # already_paired check in reconcile_tenant's caller is an in-memory
     # snapshot taken once at the start of that run, so it can't see a
-    # proposal a DIFFERENT concurrent reconcile_tenant call (a different
+    # proposal a different concurrent reconcile_tenant call (a different
     # connector's sync finishing at nearly the same moment) creates for the
     # same pair in between. The pair_key uniqueness constraint (see
     # ensure_reconciliation_indexes) makes this MERGE the real, database-
-    # enforced guard against that race -- ON MATCH intentionally sets
+    # enforced guard against that race. ON MATCH intentionally sets
     # nothing, so a concurrent duplicate attempt never overwrites an
     # already-pending (or already-decided) proposal's real state.
     pair_key = "|".join(sorted((a["uuid"], b["uuid"])))
@@ -230,20 +230,20 @@ def expand_same_as(
     never find (e.g. an approved "Acme Corp" ~ "Acme Corportion" typo pair).
 
     `allowed_group_ids` matters because reconcile_tenant links across a
-    WHOLE tenant's group_ids, but any one query can be scoped narrower than
+    whole tenant's group_ids, but any one query can be scoped narrower than
     that (a document set naming only some of a tenant's knowledge bases, or
-    authorization.visible_uuids restricting further still) -- without this
+    authorization.visible_uuids restricting further still). Without this
     filter, expanding through a :SAME_AS edge could surface a fact from a
     group_id/entity this particular query has no business seeing, even
     though nothing here is a real data isolation bug (:SAME_AS itself is
-    still scoped to one tenant elsewhere -- see reconcile_tenant). Callers
+    still scoped to one tenant elsewhere, see reconcile_tenant). Callers
     already filtering by visible_uuids (see GraphRepository._resolve_named_entities)
     still need to re-apply that filter to whatever this returns.
 
     One hop is enough: reconcile_tenant always links every group member
     directly to one canonical node (a star, not a chain), and an approved
     proposal likewise always creates one direct edge between the two
-    entities a human reviewed -- so any node already in `rows` is at most
+    entities a human reviewed, so any node already in `rows` is at most
     one :SAME_AS hop from every other node it should pull in. Undirected
     ([:SAME_AS] with no arrow) since which side reconcile_tenant happened to
     call "a" vs "b" isn't meaningful to a caller.
@@ -290,14 +290,14 @@ def list_proposals(execute_cypher: ExecuteCypher, tenant_id: str, status: Option
 def approve_proposal(execute_cypher: ExecuteCypher, tenant_id: str, proposal_id: str) -> bool:
     """Approves a pending proposal: writes the :SAME_AS edge it proposed and
     marks it decided. Returns False (no-op) if the id doesn't belong to this
-    tenant, isn't pending, or -- the case this must not silently mismark --
+    tenant, isn't pending, or, the case this must not silently mismark,
     either entity it names has since been deleted (the connector it came
     from was removed, or its data re-synced away the node entirely). One
     Cypher statement, not "check pending, set approved, then separately try
     to create the edge": splitting those steps let a deleted entity's MATCH
     quietly find nothing while the earlier SET had already committed
     'approved', leaving a proposal marked approved with no edge ever
-    created -- a real, found-in-review bug, not a hypothetical one. Matching
+    created, a real, found-in-review bug, not a hypothetical one. Matching
     both entities in the same statement that sets status means either the
     whole thing commits together or none of it does."""
     rows = execute_cypher(

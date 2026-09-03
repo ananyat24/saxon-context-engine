@@ -1,26 +1,26 @@
-# Tenants added live, without a redeploy -- see app/api/admin.py.
+# Tenants added live, without a redeploy. See app/api/admin.py.
 #
 # The original way to onboard a tenant (`python scripts/manage_tenants.py
-# add`, writing config/tenants.json, or the TENANT_API_KEYS env var -- see
+# add`, writing config/tenants.json, or the TENANT_API_KEYS env var, see
 # app/config.py) is static: it's only read once, at process startup, so
-# adding a client meant re-running the *entire* deploy script (a full
+# adding a client meant re-running the entire deploy script (a full
 # container rebuild) just to add one API key. Stored as :Tenant nodes in
-# Neo4j instead, same rationale as :Connector/:DocumentSet -- this is
-# operator-created data that has to survive a redeploy, and (the actual
-# point here) be visible to every already-running request-handling process
+# Neo4j instead, same rationale as :Connector/:DocumentSet: this is
+# operator-created data that has to survive a redeploy, and, the actual
+# point here, be visible to every already-running request-handling process
 # the moment it's created, not just after a restart.
 #
 # require_tenant (app/security.py) and the MCP server's own authentication
 # (app/mcp/server.py) both check the static config first, then fall back to
-# looking a tenant up here -- so an existing statically-configured tenant's
-# behavior is completely unchanged, and only a *new* tenant (created via the
+# looking a tenant up here, so an existing statically-configured tenant's
+# behavior is completely unchanged, and only a new tenant (created via the
 # admin API) takes this path.
 #
-# The API key itself is stored only as a SHA-256 hash, not plaintext --
-# unlike config/tenants.json (a local file, gitignored, but still plaintext
+# The API key itself is stored only as a SHA-256 hash, not plaintext.
+# Unlike config/tenants.json (a local file, gitignored, but still plaintext
 # on disk), a Neo4j data breach here wouldn't hand over every tenant's live
 # key. The tenant's own Gemini key is still stored in plaintext, same as
-# config/tenants.json today -- it has to be, to actually call Gemini with it.
+# config/tenants.json today: it has to be, to actually call Gemini with it.
 import hashlib
 import secrets
 from typing import Optional
@@ -30,7 +30,7 @@ from app.graph.graph_repository import GraphRepository
 
 
 def ensure_tenant_indexes(repo: Optional[GraphRepository] = None) -> None:
-    """Idempotent, safe to call on every startup -- same pattern as
+    """Idempotent, safe to call on every startup, same pattern as
     app/graph/authorization.py's ensure_authorization_indexes."""
     repo = repo or GraphRepository()
     repo.execute_cypher("CREATE INDEX tenant_api_key_hash IF NOT EXISTS FOR (t:Tenant) ON (t.api_key_hash)")
@@ -53,7 +53,7 @@ def _row_to_tenant_config(row: dict) -> TenantConfig:
 
 def find_tenant_by_tenant_id(tenant_id: str, repo: Optional[GraphRepository] = None) -> Optional[TenantConfig]:
     """Static config first (settings.tenant_api_keys, keyed by API key, so
-    this scans its values), then the Neo4j-backed store -- same "static
+    this scans its values), then the Neo4j-backed store, the same "static
     first" order as find_tenant_by_api_key. Used where a caller already has
     a tenant_id but not the tenant's own API key, e.g. app/api/webhooks.py
     mapping an inbound Graph notification's connector back to a tenant to
@@ -89,8 +89,8 @@ def find_tenant_by_api_key(api_key: str, repo: Optional[GraphRepository] = None)
 
 def list_tenant_configs(repo: Optional[GraphRepository] = None) -> list[TenantConfig]:
     """Every Neo4j-backed tenant as a full TenantConfig (Gemini key
-    included) -- for internal, in-process use only (the background
-    connector scheduler needs to sync *every* tenant's connectors, not just
+    included), for internal, in-process use only (the background
+    connector scheduler needs to sync every tenant's connectors, not just
     the statically-configured ones). Never expose this via an API response;
     use list_tenants() (masked) for anything client- or operator-facing."""
     repo = repo or GraphRepository()
@@ -102,7 +102,7 @@ def list_tenant_configs(repo: Optional[GraphRepository] = None) -> list[TenantCo
 
 
 def list_tenants(repo: Optional[GraphRepository] = None) -> list[dict]:
-    """Never returns the API key itself, even hashed -- only its last 4
+    """Never returns the API key itself, even hashed: only its last 4
     characters, enough for an operator to recognize which key is which
     without the listing becoming a second way to exfiltrate a live key."""
     repo = repo or GraphRepository()
@@ -121,10 +121,11 @@ def create_tenant(
     repo: Optional[GraphRepository] = None,
 ) -> tuple[str, dict]:
     """Generates a fresh API key, stores only its hash, and returns the raw
-    key exactly once -- the caller (the admin API route) is the only place
-    it's ever shown; there's no way to recover it afterward, same as most
-    providers' own API key creation flow. Raises ValueError if tenant_id is
-    already taken (the uniqueness constraint from ensure_tenant_indexes)."""
+    key exactly once: the caller (the admin API route) is the only place
+    it's ever shown, and there's no way to recover it afterward, same as
+    most providers' own API key creation flow. Raises ValueError if
+    tenant_id is already taken (the uniqueness constraint from
+    ensure_tenant_indexes)."""
     repo = repo or GraphRepository()
     raw_key = secrets.token_urlsafe(32)
     kb_ids = [kb.id for kb in knowledge_bases]

@@ -1,11 +1,11 @@
 # Enforces a local, app-side cost ceiling on paid-LLM-provider usage (Azure
-# OpenAI and/or Anthropic -- see app/graph/graphiti_adapter.py for how each
+# OpenAI and/or Anthropic; see app/graph/graphiti_adapter.py for how each
 # provider wraps its client to call into this).
 #
 # This exists because for Azure OpenAI specifically, we only hold an API key
 # for the resource, not the Azure portal access needed to set a hard spending
-# cap on the resource itself (that has to come from whoever provisioned it --
-# a deployment-level TPM rate limit is the real hard limit; this is a
+# cap on the resource itself (that has to come from whoever provisioned it:
+# a deployment-level TPM rate limit is the real hard limit, and this is a
 # backstop on our side in the meantime). For Anthropic, this is just a
 # straightforward local safety net on top of whatever limit the Anthropic
 # Console account itself has configured.
@@ -15,9 +15,9 @@
 #   - "ingestion": scripts/ingest_samples.py, scripts/seed_core_graph.py
 #   - "query": the live /api/v1/context/query path (app/api/context.py)
 #
-# Cost is *estimated* from token usage x a per-token price the caller
+# Cost is estimated from token usage times a per-token price the caller
 # supplies (see app/config.py's azure_openai_*_price_per_1m and
-# anthropic_*_price_per_1m) -- it only matches the provider's actual invoice
+# anthropic_*_price_per_1m). It only matches the provider's actual invoice
 # if those prices are kept in sync with whatever model is really in use.
 # That's fine for what this is for: catching a runaway loop or bug well
 # before it becomes a real bill, not exact billing reconciliation.
@@ -62,7 +62,7 @@ class SpendLimiter:
 
     def ensure_room(self, bucket: str) -> None:
         """Called before a paid-provider LLM call is made (whichever provider
-        is active -- see app/graph/graphiti_adapter.py). Raises if this
+        is active, see app/graph/graphiti_adapter.py). Raises if this
         bucket is already at or over budget, so the over-budget call itself
         never goes out."""
         spent, budget = self.spent(bucket), self._budget_for(bucket)
@@ -89,7 +89,7 @@ def estimate_cost_usd(
     prompt_tokens: int, completion_tokens: int, price_per_1m_input: float, price_per_1m_output: float = 0.0
 ) -> float:
     """Provider-agnostic: the caller supplies whichever provider/price applies
-    (see app/graph/graphiti_adapter.py's per-provider wrappers) -- this
+    (see app/graph/graphiti_adapter.py's per-provider wrappers). This
     function has no opinion on which provider or model is in use. For an
     embedding call, pass price_per_1m_output=0.0 (embeddings have no
     completion tokens)."""

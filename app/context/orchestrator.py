@@ -1,13 +1,13 @@
 # The main coordination point for answering a query: runs every configured
 # retriever, pools what they find, and packages it into a ContextPacket.
 #
-# Only GraphRetriever is wired in -- and that's deliberate, not a placeholder
+# Only GraphRetriever is wired in, and that's deliberate, not a placeholder
 # waiting on a separate semantic-search retriever. Graphiti already ships
 # hybrid search (semantic + BM25 + graph traversal); GraphRepository.
 # search_graphiti_facts() calls it directly as its own fallback branch, only
 # after trying to resolve the query to a specific named entity first (see
 # that method's docstring). That resolve-first-fall-back-to-search-second
-# decision *is* this system's query planner -- it already skips the paid
+# decision is this system's query planner: it already skips the paid
 # hybrid-search call whenever a named entity answers the question directly,
 # which is the actual cost-saving goal a separate ContextPlanner class would
 # have existed to achieve. A standalone vector-index-backed SemanticRetriever
@@ -15,9 +15,9 @@
 # own hybrid search covers this without a second index to maintain.
 #
 # This retriever list still exists (rather than calling GraphRetriever
-# directly) so a genuinely different retrieval source -- live external data
-# that shouldn't live in the graph at all, e.g. -- can be appended here
-# later without restructuring this class.
+# directly) so a genuinely different retrieval source, such as live external
+# data that shouldn't live in the graph at all, can be appended here later
+# without restructuring this class.
 #
 # Note: this fills in ContextPacket.metadata with a plain-text summary and the
 # raw per-fact records (including temporal validity), but not the packet's
@@ -53,28 +53,28 @@ class _CausalRecommendation(BaseModel):
 
 # Kept short for the same reason _SYNTHESIS_MAX_TOKENS is: this runs on every
 # causal query, not just at ingestion time, and a recommendation is meant to
-# be a few sentences a person can act on, not a report. Raised from 300 --
-# found live, after routing more (real, historical) facts into chain_lines
-# (see _build_answer_lines's use above): a richer chain_lines input pushes
-# the model to reference more of it in the answer, and 300 tokens wasn't
-# enough headroom for all 4 structured fields to complete -- the response
-# got cut off mid-field, which is a pydantic *validation* failure (a field
-# is simply missing), not a content problem, and silently degraded every
-# such query to no recommendation at all.
+# be a few sentences a person can act on, not a report. Raised from 300 after
+# it was found live that routing more (real, historical) facts into
+# chain_lines (see _build_answer_lines's use above) means a richer
+# chain_lines input pushes the model to reference more of it in the answer,
+# and 300 tokens wasn't enough headroom for all 4 structured fields to
+# complete. The response got cut off mid-field, which is a pydantic
+# validation failure (a field is simply missing), not a content problem, and
+# silently degraded every such query to no recommendation at all.
 _RECOMMENDATION_MAX_TOKENS = 500
 
 
-# Kept low deliberately -- this is one short sentence, not a report. Also
+# Kept low deliberately: this is one short sentence, not a report. Also
 # bounds the cost of a call that (unlike extraction) runs on every multi-fact
 # query, not just at ingestion time. Raised from 80 for the same reason
-# _RECOMMENDATION_MAX_TOKENS was -- _build_answer_lines now feeds real
+# _RECOMMENDATION_MAX_TOKENS was: _build_answer_lines now feeds real
 # historical facts in too, and 80 tokens left no margin before a longer
 # synthesized sentence got cut off mid-JSON-field and failed validation.
 _SYNTHESIS_MAX_TOKENS = 150
 
 
 def _parse_iso(timestamp) -> Optional[datetime]:
-    """Accepts either an ISO string or a neo4j.time.DateTime -- valid_at/invalid_at
+    """Accepts either an ISO string or a neo4j.time.DateTime: valid_at/invalid_at
     arrive as the latter straight out of the driver, and only look like strings
     once FastAPI serializes the HTTP response, so this has to handle both."""
     if timestamp is None:
@@ -129,7 +129,7 @@ def _describe_transition(old: dict, new: dict) -> str:
 def _build_answer_lines(facts: list[dict]) -> list[str]:
     """Turns a raw, possibly mixed valid/invalid fact list into the plain-
     English lines _synthesize_answer (or a single-line shortcut) should
-    see -- shared by the plain Ask path (get_context_packet) and the
+    see. Shared by the plain Ask path (get_context_packet) and the
     causal path's fact-only fallbacks (_fact_only_causal_packet), which
     used to each filter to `is_valid` facts only and silently drop
     everything else.
@@ -137,12 +137,12 @@ def _build_answer_lines(facts: list[dict]) -> list[str]:
     Three kinds of line, in this order: a transition description for every
     invalidated fact _find_transitions could pair with whatever replaced
     it ("this changed on <date>: it used to read X, now reads Y"); every
-    still-current fact, as-is; and -- the actual fix -- every OTHER
+    still-current fact, as-is; and, the actual fix, every other
     invalidated fact, one _find_transitions couldn't pair (its
     replacement wasn't in this particular batch), explicitly marked as no
     longer current rather than silently dropped. Real historical
     information a person asked about shouldn't vanish just because
-    nothing superseded it *in this retrieval* -- found for real against
+    nothing superseded it in this retrieval. Found for real against
     live data: a question whose only relevant fact was exactly this kind
     of unpaired-invalid fact got "No matching graph context found" as its
     answer, even though metadata.facts (the raw, unfiltered response) had
@@ -188,16 +188,16 @@ class ContextOrchestrator:
         if extra_retrievers:
             self.retrievers.extend(extra_retrievers)
         # Used both for the causal-chain walk and the source-authority tie
-        # break -- neither is a Graphiti hybrid-search call, so both go
+        # break. Neither is a Graphiti hybrid-search call, so both go
         # straight to Neo4j rather than through a retriever.
         self._repo = GraphRepository(graphiti_instance, neo4j_client=neo4j_client)
 
     def _apply_authority_tie_break(self, tenant_id: str, edge_facts: list[dict]) -> None:
-        """When two *different connectors'* facts disagree about the same
+        """When two different connectors' facts disagree about the same
         relationship (same source/target pair and relationship type, both
         currently valid, different text, and actually attributed to more
         than one group_id), marks the one from the higher-authority
-        connector `is_authoritative` and the other(s) not -- see
+        connector `is_authoritative` and the other(s) not. See
         app/graph/connectors.py's source_authority field. Every fact still
         comes back in the response's facts list either way (see
         get_context_packet below); this only decides which lines feed the
@@ -205,8 +205,8 @@ class ContextOrchestrator:
         or filter anything" rule. Mutates edge_facts in place, adding
         "source_authority" and "is_authoritative" to every entry.
 
-        Two things had to be tightened after testing against real data --
-        both are cases where a group of facts *looked* like a disagreement
+        Two things had to be tightened after testing against real data,
+        both cases where a group of facts looked like a disagreement
         under the original (source, target) grouping but was really just
         several true, complementary facts, and treating them as a
         disagreement silently dropped one from the answer:
@@ -217,11 +217,11 @@ class ContextOrchestrator:
         2. Requiring the group to actually span more than one group_id: it
            turns out a single connector can extract two same-typed,
            same-pair edges that are still both true (found for real in the
-           northwind data -- "Order 10252 was shipped to the city of
+           northwind data: "Order 10252 was shipped to the city of
            Charleroi" and "...to the country of Belgium" are both
            LOCATED_AT edges from the same connector). source_authority
            ranks one connector's data over another's, so arbitrating
-           between a connector and itself is never meaningful -- only a
+           between a connector and itself is never meaningful; only a
            group whose facts come from 2+ distinct group_ids is a real
            cross-source disagreement worth breaking a tie on.
 
@@ -229,7 +229,7 @@ class ContextOrchestrator:
         to Y" path-lookup branch in search_graphiti_facts, which returns
         every hop with source_node_uuid/target_node_uuid both "") is skipped
         from grouping entirely, rather than left to collide on that shared
-        blank key -- otherwise every hop of a multi-hop path looks like one
+        blank key. Otherwise every hop of a multi-hop path looks like one
         giant disagreement and the answer collapses to a single hop.
         """
         authority_map = connectors.authority_by_group_id(tenant_id, repo=self._repo)
@@ -250,34 +250,34 @@ class ContextOrchestrator:
             distinct_texts = {f["fact"] for f in facts_for_pair}
             distinct_sources = {f.get("group_id") for f in facts_for_pair}
             if len(distinct_texts) <= 1 or len(distinct_sources) <= 1:
-                continue  # no disagreement -- nothing to break a tie on
+                continue  # no disagreement, nothing to break a tie on
             winner = max(facts_for_pair, key=lambda f: f["source_authority"])
             for f in facts_for_pair:
                 f["is_authoritative"] = f is winner
 
     async def _synthesize_answer(self, query: str, current_lines: list[str]) -> str:
         """Condenses several current facts into one clear sentence answering
-        `query`, via a small, tightly-bounded LLM call -- used only when
+        `query`, via a small, tightly-bounded LLM call. Used only when
         there's more than one current fact (a single fact is already a clear
         one-line answer on its own, so that case skips this entirely, at
         zero extra cost).
 
         Deliberately does NOT use each entity's Graphiti-generated `summary`
-        for this (see GraphRepository._resolve_named_entities) -- that
+        for this (see GraphRepository._resolve_named_entities): that
         summary accumulates every fact ever seen with no temporal awareness,
         which is exactly the stale-answer bug fixed in graph_repository.py.
         This only ever sees the already-filtered current_lines, so it can't
         reintroduce a superseded fact as part of the "answer."
 
         Falls back to a plain joined list on any failure (including the
-        local spend cap being hit) -- a failed synthesis should degrade to
+        local spend cap being hit): a failed synthesis should degrade to
         the older, plainer behavior, not break the whole query.
 
         The system prompt explicitly guards against one specific failure
         mode found live: "Who approved the expedited fix, and what did it
         cost?" answered "Grace Okafor approved..." when the only retrieved
         fact was "Owen Whitfield requests a budget exception FROM Grace
-        Okafor" -- a request addressed to someone is not that person acting
+        Okafor". A request addressed to someone is not that person acting
         on it, but the model conflated the two rather than noticing the
         actual approval fact was simply missing from what it was given.
         """
@@ -332,7 +332,7 @@ class ContextOrchestrator:
 
         # A resolved entity's own summary (see GraphRepository._resolve_named_entity)
         # is already one consolidated, holistic statement about it, generated at
-        # ingestion time -- lead with that rather than the individual edges below it.
+        # ingestion time, so lead with that rather than the individual edges below it.
         entity_summary_lines = [
             line
             for f in raw_facts
@@ -347,7 +347,7 @@ class ContextOrchestrator:
 
         # A resolved entity's summary can restate facts that are also present as
         # individual edges verbatim (Graphiti doesn't guarantee the two are
-        # distinct) -- dedupe by exact text, keeping first occurrence, so the
+        # distinct), so dedupe by exact text, keeping first occurrence, so the
         # same sentence never shows up twice.
         summary_lines = []
         seen = set()
@@ -358,25 +358,25 @@ class ContextOrchestrator:
         if not summary_lines:
             summary_text = "No matching graph context found."
         elif len(summary_lines) == 1:
-            # Already a single clear statement -- synthesizing would just cost
-            # a call to say the same thing differently.
+            # Already a single clear statement, so synthesizing would just
+            # cost a call to say the same thing differently.
             summary_text = summary_lines[0]
         else:
             summary_text = await self._synthesize_answer(query, summary_lines)
 
         # Only the semantic-search fallback (see GraphRepository.search_graphiti_facts)
-        # is ever capped by num_results -- a resolved entity's own facts always
+        # is ever capped by num_results: a resolved entity's own facts always
         # come back in full. Hitting the cap there is the signal a client uses
         # to offer "see more results" instead of always guessing at one.
         semantic_result_count = sum(1 for f in raw_facts if f.get("kind") == "semantic_search")
         result_limit_hit = semantic_result_count >= num_results
 
-        # Which path actually answered this query -- observability for the
-        # cost story: "entity_resolution" means GraphRepository.search_graphiti_facts
+        # Which path actually answered this query: observability for the
+        # cost story. "entity_resolution" means GraphRepository.search_graphiti_facts
         # resolved a named entity directly and never paid for Graphiti's hybrid
         # search at all (see that method's docstring); "semantic_search" means
         # it fell back to that paid call; "none" means nothing matched either
-        # way. A query can only ever be one of these -- GraphRepository returns
+        # way. A query can only ever be one of these: GraphRepository returns
         # from whichever branch applies and never mixes facts from both.
         if not raw_facts:
             retrieval_path = "none"
@@ -398,14 +398,14 @@ class ContextOrchestrator:
 
     async def _synthesize_recommendation(self, query: str, anchor_name: str, chain_lines: list[str]) -> _CausalRecommendation:
         """The one place in this codebase an LLM call is deliberately allowed
-        to infer, not just condense -- everywhere else (see
-        _synthesize_answer above) is explicitly fact-only. This is a
+        to infer, not just condense (everywhere else, see
+        _synthesize_answer above, is explicitly fact-only). This is a
         separate, clearly-labeled mode for exactly that reason: a
         what-happened/why/impact/recommendation answer requires connecting
         facts across a causal chain, which is a different (and riskier)
         kind of output than restating what a single retrieval pass already
-        found. Still grounded -- told to reason only from the given facts,
-        not invent new ones -- but allowed to draw a conclusion from how
+        found. Still grounded, told to reason only from the given facts,
+        not invent new ones, but allowed to draw a conclusion from how
         they connect, which is the actual point of this mode."""
         messages = [
             Message(
@@ -438,17 +438,18 @@ class ContextOrchestrator:
     ) -> ContextPacket:
         """Shared by both fact-only fallback shapes in get_causal_context_packet
         below (a single entity with no causal-typed edges of its own, and a
-        two-entity connecting path that isn't entirely causal-typed) --
-        same fact-only synthesis the plain Ask path uses (_synthesize_answer),
+        two-entity connecting path that isn't entirely causal-typed). Uses
+        the same fact-only synthesis the plain Ask path uses (_synthesize_answer),
         never a fabricated recommendation, never a :Decision. `facts` must be
-        non-empty; can be a mix of valid and invalidated facts -- see
+        non-empty; can be a mix of valid and invalidated facts (see
         _build_answer_lines, which turns that mix into lines without
         silently dropping an invalidated fact that has no paired
-        replacement in this batch. retrieval_path distinguishes which
+        replacement in this batch). retrieval_path distinguishes which
         shape this is in telemetry."""
         # `or` fallback: _build_answer_lines can filter everything out (every
         # fact non-authoritative) even though `facts` itself is guaranteed
-        # non-empty by this method's contract -- never leave `lines` empty.
+        # non-empty by this method's contract, so `lines` should never be
+        # left empty.
         lines = _build_answer_lines(facts) or [f["fact"] for f in facts]
         summary = lines[0] if len(lines) == 1 else await self._synthesize_answer(query, lines)
         return ContextPacket(
@@ -471,27 +472,27 @@ class ContextOrchestrator:
         tenant_id: Optional[str] = None,
     ) -> ContextPacket:
         """The causal-reasoning mode: resolves query to a starting entity (or,
-        for a "how is X connected to Y" question, two of them -- see
+        for a "how is X connected to Y" question, two of them, see
         GraphRepository.causal_chain_for_query), assembles either the
         causal-typed chain out from one entity or the shortest path
         connecting two, and synthesizes a what-happened/why/impact/
-        recommendation answer from it -- but only when that assembled
-        context is *entirely* causal-typed (GraphRepository.is_entirely_causal).
+        recommendation answer from it, but only when that assembled
+        context is entirely causal-typed (GraphRepository.is_entirely_causal).
         When it isn't (a two-entity path made of ordinary relationships, or
         a single entity with no causal-typed edges of its own at all), this
         falls back to the exact same fact-only synthesis the plain Ask path
-        uses, with the full evidence still attached -- never a fabricated
+        uses, with the full evidence still attached: never a fabricated
         causal chain, never a recommendation, never a :Decision.
 
         Deliberately a separate method from get_context_packet, not a mode
         flag on it: the fact-only synthesis path above must never be
         loosened to also infer/recommend, and keeping this as its own
         method (with its own, separately-labeled ContextPacket.metadata
-        field -- "recommendation", never blended into "summary") is what
+        field, "recommendation", never blended into "summary") is what
         guarantees that. See CLAUDE.md's pivot notes.
 
         Any recommendation produced is recorded as a :Decision graph node
-        (see app/graph/decisions.py) when tenant_id is given -- best-effort,
+        (see app/graph/decisions.py) when tenant_id is given. Best-effort:
         a failure to record doesn't fail the query itself, since the
         recommendation is still valid to hand back even if logging it
         failed.
@@ -500,7 +501,7 @@ class ContextOrchestrator:
         if anchor is None:
             if chain_facts:
                 # No entity resolved by name, but causal_chain_for_query's
-                # semantic-search fallback found something -- fact-only,
+                # semantic-search fallback found something. Fact-only,
                 # same as every other non-causal path: this isn't a
                 # resolved anchor or a real causal walk, so it never gets a
                 # recommendation or a :Decision, only sourced evidence and a
@@ -521,22 +522,22 @@ class ContextOrchestrator:
         if not chain_facts:
             if second_entity is not None:
                 # Mirrors search_graphiti_facts's own two-entity "not found"
-                # phrasing -- there's genuinely nothing to fall back to here
+                # phrasing: there's genuinely nothing to fall back to here
                 # (a fact-only answer about one entity's own edges wouldn't
                 # answer "how are these two connected" either).
                 summary = f'No connection found between "{anchor["name"]}" and "{second_entity["name"]}" in this knowledge base.'
             else:
-                # Single entity, no causal-typed chain -- fall back to its
-                # own directly-touching facts of ANY relationship type,
+                # Single entity, no causal-typed chain: fall back to its
+                # own directly-touching facts of any relationship type,
                 # rather than just saying nothing was found. Deliberately
-                # NOT "walk any relationship as if it were causal": routed
+                # not "walk any relationship as if it were causal": routed
                 # through _fact_only_causal_packet below, same as the
                 # two-entity-but-not-causal case, so neither ever produces a
                 # recommendation/Decision. The relevance nuance
-                # (_synthesize_answer answers the *question*, so an
+                # (_synthesize_answer answers the actual question, so an
                 # irrelevant fact never makes it into a multi-fact summary)
-                # comes for free from that shared helper. Deliberately NOT
-                # filtered to is_valid here -- _fact_only_causal_packet (via
+                # comes for free from that shared helper. Deliberately not
+                # filtered to is_valid here: _fact_only_causal_packet (via
                 # _build_answer_lines) handles a mix of valid/invalidated
                 # facts correctly now; pre-filtering here would silently
                 # throw away real historical facts before they ever got that
@@ -544,7 +545,7 @@ class ContextOrchestrator:
                 direct_facts = self._repo.direct_facts_for(anchor["uuid"], visible_uuids)
                 if direct_facts:
                     return await self._fact_only_causal_packet(query, group_ids, direct_facts, "causal_fallback_direct_facts")
-                summary = f'No causal chain -- or any other recorded fact -- connecting "{anchor["name"]}" to anything else in this knowledge base.'
+                summary = f'No causal chain, or any other recorded fact, connecting "{anchor["name"]}" to anything else in this knowledge base.'
             return ContextPacket(
                 query=query,
                 metadata={
@@ -560,14 +561,14 @@ class ContextOrchestrator:
         # A single-anchor causal walk that found only one causal-typed edge
         # is too thin to trust as "the" explanation on its own when the
         # anchor genuinely has other, non-causal-typed facts a plain Ask
-        # would surface -- committing straight to a recommendation here
+        # would surface. Committing straight to a recommendation here
         # means that one fact silently outranks everything else known about
         # the entity, with no way for the more relevant context to ever be
         # seen. Found live: "Who owns the Brightpeak Automation account
         # right now, and does that affect whether it's at risk?" walked to
         # exactly one causal-typed fact (a PRODUCES edge to its order), and
         # the real ownership-handoff facts (MANAGED_BY-shaped, not causal)
-        # never entered the recommendation at all -- even though the plain
+        # never entered the recommendation at all, even though the plain
         # Ask path resolves the same entity and shows all of it correctly.
         # Only overrides when direct_facts_for turns up something the thin
         # chain doesn't already have; when the anchor truly has nothing
@@ -585,16 +586,17 @@ class ContextOrchestrator:
         if not self._repo.is_entirely_causal(chain_facts):
             # A two-entity connecting path isn't restricted to causal-typed
             # edges the way the single-anchor walk is (see
-            # causal_chain_for_query) -- "how is X connected to Y" needs the
+            # causal_chain_for_query): "how is X connected to Y" needs the
             # real shortest path, whatever it's made of. When that path
             # isn't entirely causal, treating it as one would mean inferring
             # a "why" from, say, a shared location, which isn't a real
-            # causal story -- fact-only, fully-sourced instead.
+            # causal story, so this returns a fact-only, fully-sourced
+            # answer instead.
             return await self._fact_only_causal_packet(query, group_ids, chain_facts, "causal_path_between_entities")
 
-        # _build_answer_lines (not a raw is_valid filter) so a real but
-        # superseded fact -- e.g. the root-cause defect edge that later got
-        # invalidated once the lot was quarantined -- still reaches the
+        # _build_answer_lines (not a raw is_valid filter), so a real but
+        # superseded fact, e.g. the root-cause defect edge that later got
+        # invalidated once the lot was quarantined, still reaches the
         # recommendation synthesis below instead of silently vanishing the
         # same way it used to vanish from the plain Ask path before that fix.
         # Found live: the actual root cause of an at-risk order was a

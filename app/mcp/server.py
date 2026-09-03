@@ -1,4 +1,4 @@
-# MCP server (v3.5) -- exposes the same tenant-scoped context-query path
+# MCP server (v3.5): exposes the same tenant-scoped context-query path
 # HTTP clients hit at POST /api/v1/context/query (see app/context/query_service.py)
 # as MCP tools, so any MCP-capable agent (Claude Desktop/Code, Copilot, a
 # custom agent) can query a client's consolidated graph directly, not only
@@ -7,11 +7,11 @@
 # Same auth model as the HTTP API, deliberately not a separate one: a caller
 # authenticates with the same X-API-Key header (see app/security.py), read
 # here from the MCP request's raw headers via Context.headers rather than a
-# FastAPI Header() dependency -- MCP tool functions aren't part of FastAPI's
-# dependency-injection system, so require_tenant's lookup logic is
+# FastAPI Header() dependency, since MCP tool functions aren't part of
+# FastAPI's dependency-injection system, so require_tenant's lookup logic is
 # reimplemented against a plain header mapping instead of reused directly.
 #
-# Mounted into the same FastAPI app/process as the HTTP API (app/main.py) --
+# Mounted into the same FastAPI app/process as the HTTP API (app/main.py):
 # one container, one deploy, no separate auth model or infrastructure to
 # stand up for this to work.
 import asyncio
@@ -39,7 +39,7 @@ mcp_server = MCPServer(
     ),
 )
 
-# Set once, at process startup, by app/main.py's lifespan -- see that module's
+# Set once, at process startup, by app/main.py's lifespan. See that module's
 # comment on why this can't just be request.app.state the way the HTTP route
 # reaches these: the MCP server is mounted as its own Starlette sub-app
 # (mcp_server.streamable_http_app()), which doesn't share the parent FastAPI
@@ -57,11 +57,11 @@ def configure(neo4j_client: Neo4jClient, graphiti_pool: TenantGraphitiPool) -> N
 async def _authenticate(ctx: Context) -> TenantConfig:
     """Same lookup as app/security.py's require_tenant (static config first,
     then the Neo4j-backed store a tenant created through the admin API
-    lands in -- see app/graph/tenants.py), against MCP's own header mapping
+    lands in, see app/graph/tenants.py), against MCP's own header mapping
     instead of a FastAPI Header() dependency. Raises ToolError (not
-    HTTPException -- there's no HTTP response to shape here), which the MCP
-    SDK treats as an anticipated failure and surfaces to the calling agent
-    verbatim -- a plain exception would be masked as a generic "Error
+    HTTPException, since there's no HTTP response to shape here), which the
+    MCP SDK treats as an anticipated failure and surfaces to the calling
+    agent verbatim. A plain exception would be masked as a generic "Error
     executing tool" with no detail, per mcp.server.mcpserver.tools.base.Tool.run."""
     headers = ctx.headers or {}
     api_key = headers.get("x-api-key")
@@ -120,15 +120,15 @@ async def query_context_graph(
 async def query_causal_chain(
     query: str, ctx: Context, knowledge_base: Optional[str] = None, as_user: Optional[str] = None
 ) -> dict:
-    """What happened -> why -> impact -> recommendation, reasoned across a
+    """What happened, why, impact, then recommendation, reasoned across a
     chain of related facts (e.g. an at-risk Order to its Product to a
-    Component to the Supplier to an open QualityEvent) -- distinct from
+    Component to the Supplier to an open QualityEvent). Distinct from
     query_context_graph above, which only ever restates facts already in
     the graph and never infers or recommends anything.
 
     Returns a dict whose "recommendation" field (what_happened/why/impact/
     recommendation) is a generated suggestion, kept separate from the
-    grounded "summary" field of facts it was built from -- the two are
+    grounded "summary" field of facts it was built from. The two are
     never blended, so a caller always knows which is which. Saxon does not
     act on the recommendation; it's also logged as an auditable :Decision
     graph node ("decision_id") for later review.
@@ -137,7 +137,7 @@ async def query_causal_chain(
     use the tenant's default source. as_user restricts the chain to what
     that person can see in their org's hierarchy, same as
     query_context_graph's as_user. document_set scoping isn't supported for
-    this mode yet -- a causal chain needs one clear knowledge base to write
+    this mode yet: a causal chain needs one clear knowledge base to write
     its Decision node into.
     """
     tenant = await _authenticate(ctx)

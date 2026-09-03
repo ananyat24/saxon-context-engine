@@ -1,5 +1,5 @@
 # Document Sets: named groupings of one or more of a tenant's own knowledge
-# bases ("connectors" in this feature's terms -- see app/config.py's
+# bases ("connectors" in this feature's terms, see app/config.py's
 # KnowledgeBase), so a query can be scoped to several connectors at once
 # under one label instead of picking exactly one knowledge_base each time.
 #
@@ -8,12 +8,12 @@
 # docstring for why): this is app-owned structured data a client creates and
 # deletes live through the UI, not something an LLM extraction pipeline
 # should be inventing from text. It also has to actually persist across
-# requests and redeploys -- config/tenants.json is only read once at process
+# requests and redeploys. config/tenants.json is only read once at process
 # startup, and Azure Container Apps' filesystem doesn't survive a redeploy
 # anyway, so a JSON file on disk isn't a real option for something meant to
-# be created/deleted live.
+# be created and deleted live.
 #
-# Scoped by tenant_id, not group_id -- a set can name several group_ids at
+# Scoped by tenant_id, not group_id: a set can name several group_ids at
 # once, so it isn't itself a single data partition the way group_id is.
 import uuid
 from typing import Optional
@@ -24,7 +24,7 @@ from app.graph.graph_repository import GraphRepository
 
 
 def ensure_document_set_indexes(repo: Optional[GraphRepository] = None) -> None:
-    """Idempotent, safe to call on every startup -- same pattern as
+    """Idempotent, safe to call on every startup, same pattern as
     authorization.ensure_authorization_indexes."""
     repo = repo or GraphRepository()
     repo.execute_cypher(
@@ -46,8 +46,8 @@ def list_document_sets(tenant_id: str, repo: Optional[GraphRepository] = None) -
 
 
 def get_document_set(tenant_id: str, document_set_id: str, repo: Optional[GraphRepository] = None) -> Optional[dict]:
-    """Looked up by id AND tenant_id together, the same boundary
-    resolve_knowledge_base enforces for a single knowledge base -- a caller
+    """Looked up by id and tenant_id together, the same boundary
+    resolve_knowledge_base enforces for a single knowledge base: a caller
     can only ever reach a document set that belongs to their own tenant,
     never one they merely guessed the id of."""
     repo = repo or GraphRepository()
@@ -97,7 +97,7 @@ def update_document_set(
     repo: Optional[GraphRepository] = None,
 ) -> Optional[dict]:
     """Overwrites name/connector_ids/is_public on an existing set. All three
-    are required (not a partial patch) -- the UI's edit form always submits a
+    are required (not a partial patch): the UI's edit form always submits a
     complete set of values, same as create, so there's no ambiguity to
     resolve about what a missing field would mean. Returns None if the id
     doesn't belong to this tenant, the same boundary every other lookup here
@@ -133,8 +133,8 @@ def delete_document_set(tenant_id: str, document_set_id: str, repo: Optional[Gra
 
 def resolve_document_set(tenant_id: str, document_set_id: str, repo: Optional[GraphRepository] = None) -> list[str]:
     """Turns a document_set id into the connector (knowledge_base) ids it
-    names -- the same boundary resolve_knowledge_base enforces for a single
-    id: the set must belong to *this* tenant or the request is rejected."""
+    names, the same boundary resolve_knowledge_base enforces for a single
+    id: the set must belong to this tenant or the request is rejected."""
     doc_set = get_document_set(tenant_id, document_set_id, repo=repo)
     if doc_set is None:
         raise HTTPException(

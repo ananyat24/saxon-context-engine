@@ -1,30 +1,32 @@
 # Writes a causal-chain recommendation (see app/context/orchestrator.py's
-# get_causal_context_packet) as a real, inspectable :Entity:Decision node --
+# get_causal_context_packet) as a real, inspectable :Entity:Decision node,
 # ontology/core.yaml's Decision type, defined from the start but never
 # actually written to the graph until this. Turns a generated recommendation
-# into an auditable graph fact a client can query/see provenance for later,
-# rather than a throwaway string that only ever existed in one API response.
+# into an auditable graph fact a client can query and see provenance for
+# later, rather than a throwaway string that only ever existed in one API
+# response.
 #
-# Saxon never acts on a Decision it records here -- logging it is the whole
+# Saxon never acts on a Decision it records here; logging it is the whole
 # scope. Execution against a recommendation is explicitly out of scope for
 # this pivot; see CLAUDE.md.
 #
-# Also tagged with a second, Saxon-reserved label, :SaxonRecommendation --
-# NOT the same thing as the node being ontology-typed :Decision. `Decision`
-# (ontology/core.yaml) is a legitimate general-purpose business entity type
-# ("a decision, approval, rejection, or recommendation made by a person,
-# group, rule, workflow, or AI agent") -- a real client dataset can and does
-# contain its own genuine Decision entities (e.g. a CSV literally named
-# "decisions.csv", auto-inferring that exact type name). Every "don't
-# surface Saxon's own internal audit trail as if it were a business fact"
-# exclusion in this codebase used to filter on the ontology label `:Decision`
-# directly -- which meant a real client's own Decision records got hidden by
-# the same filter, everywhere, permanently (found via testing against real
-# ingested data: a genuine $38,400 budget-approval record became
-# unreachable by every retrieval path, including a query for it by its own
-# literal ID). Filtering on this second, narrower label instead means only
-# nodes Saxon itself generated are ever excluded -- a real business Decision
-# entity from a client's own data is retrievable like anything else.
+# Also tagged with a second, Saxon-reserved label, :SaxonRecommendation,
+# which is NOT the same thing as the node being ontology-typed :Decision.
+# `Decision` (ontology/core.yaml) is a legitimate general-purpose business
+# entity type ("a decision, approval, rejection, or recommendation made by a
+# person, group, rule, workflow, or AI agent"), and a real client dataset
+# can and does contain its own genuine Decision entities (e.g. a CSV
+# literally named "decisions.csv", auto-inferring that exact type name).
+# Every "don't surface Saxon's own internal audit trail as if it were a
+# business fact" exclusion in this codebase used to filter on the ontology
+# label `:Decision` directly, which meant a real client's own Decision
+# records got hidden by the same filter, everywhere, permanently (found via
+# testing against real ingested data: a genuine $38,400 budget-approval
+# record became unreachable by every retrieval path, including a query for
+# it by its own literal ID). Filtering on this second, narrower label
+# instead means only nodes Saxon itself generated are ever excluded; a real
+# business Decision entity from a client's own data is retrievable like
+# anything else.
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,7 +35,7 @@ from app.graph.graph_repository import GraphRepository
 
 
 def ensure_decision_indexes(repo: Optional[GraphRepository] = None) -> None:
-    """Idempotent, safe to call on every startup -- same pattern as
+    """Idempotent, safe to call on every startup, same pattern as
     app/graph/connectors.py's ensure_connector_indexes."""
     repo = repo or GraphRepository()
     repo.execute_cypher(
@@ -46,14 +48,14 @@ def ensure_decision_indexes(repo: Optional[GraphRepository] = None) -> None:
 
 
 def _backfill_saxon_recommendation_label(repo: GraphRepository) -> None:
-    """One-time (but safe to run every startup -- idempotent) migration for
-    a :Decision node created before the :SaxonRecommendation label existed
-    (see this module's own top docstring for why that label exists at
-    all). Found for real, live, right after deploying the fix: a
-    :Decision node this app itself generated *before* the fix -- so it
-    never got the new label -- was then indistinguishable from a real
-    client Decision entity to every retrieval path, and got resolved as a
-    real answer to a repeat of the exact query that had generated it.
+    """One-time (but safe to run every startup, since it's idempotent)
+    migration for a :Decision node created before the :SaxonRecommendation
+    label existed (see this module's own top docstring for why that label
+    exists at all). Found for real, live, right after deploying the fix: a
+    :Decision node this app itself generated before the fix never got the
+    new label, so it was then indistinguishable from a real client Decision
+    entity to every retrieval path, and got resolved as a real answer to a
+    repeat of the exact query that had generated it.
 
     `source_system: 'saxon.causal_engine'` (set unconditionally by
     record_decision below, even before the label existed) is the reliable
@@ -79,16 +81,16 @@ def record_decision(
     recommendation, linked to the entity it's about via an INVOLVES edge
     (Decision extends Event in the ontology, and core.yaml already defines
     Event -INVOLVES-> Entity for exactly this shape). decision_status
-    starts 'proposed' since nothing has acted on it -- there's no workflow
+    starts 'proposed' since nothing has acted on it: there's no workflow
     yet to move it to approved/rejected, but the field exists on the
     ontology type for when one does. Returns the new Decision node's uuid.
 
     The extra :SaxonRecommendation label (see this module's own docstring)
     is what every "hide Saxon's own generated audit trail" query filters
-    on -- not the ontology label :Decision itself, which a real client
+    on, not the ontology label :Decision itself, which a real client
     dataset can also legitimately use.
 
-    The INVOLVES-target MATCH is scoped by group_id, not just uuid -- the
+    The INVOLVES-target MATCH is scoped by group_id, not just uuid. The
     only caller today (ContextOrchestrator.get_causal_context_packet)
     always resolves anchor_uuid from a Cypher query already scoped to the
     caller's own group_ids, so this is defensive rather than fixing a live

@@ -2,24 +2,24 @@
 # prompt caching for the system prompt on every call.
 #
 # Why this needs to exist at all: graphiti_core's own AnthropicClient sends
-# `system=system_message.content` as a *plain string* to `messages.create()`
+# `system=system_message.content` as a plain string to `messages.create()`
 # (see _generate_response below). Anthropic's prompt caching only activates
 # on a `system` block that carries an explicit `cache_control` marker, which
-# a plain string can never do -- caching is opt-in per content block, not
+# a plain string can never do. Caching is opt-in per content block, not
 # automatic. graphiti_core has no config knob for this, so the only way to
 # enable it without a PR upstream is to override the one method that builds
 # the request.
 #
 # What actually gets cached: the ontology-derived system prompt Graphiti
 # builds for extraction, and this app's own short synthesis system prompt
-# (see app/context/orchestrator.py's _synthesize_answer) -- both are large-ish
-# and byte-for-byte identical across many calls in the same session/ingest
-# batch. Anthropic's ephemeral cache lasts ~5 minutes and is refreshed on
-# each hit, so back-to-back calls within a session (a connector sync
-# ingesting several records, or a few queries in a row) get cache reads
-# (~10% of base input cost) instead of paying full price for the same
+# (see app/context/orchestrator.py's _synthesize_answer). Both are large-ish
+# and byte-for-byte identical across many calls in the same session or
+# ingest batch. Anthropic's ephemeral cache lasts about 5 minutes and is
+# refreshed on each hit, so back-to-back calls within a session (a connector
+# sync ingesting several records, or a few queries in a row) get cache reads
+# (roughly 10% of base input cost) instead of paying full price for the same
 # prompt every time. A single isolated call, or calls spread further apart
-# than the cache TTL, sees no benefit -- this is a real but usage-pattern-
+# than the cache TTL, sees no benefit. This is a real but usage-pattern-
 # dependent saving, not a guaranteed discount on every call.
 #
 # Maintenance note: this duplicates graphiti_core's _generate_response body
@@ -27,7 +27,7 @@
 # it, because the system-prompt construction happens partway through that
 # method, not at a point graphiti_core exposes a hook for. If graphiti_core
 # changes that method's internals on a future upgrade, this override needs
-# to be re-checked against it -- same kind of version-sensitivity already
+# to be re-checked against it, the same kind of version-sensitivity already
 # flagged for the `anthropic<1.0.0` pin elsewhere in this codebase.
 import json
 import typing
@@ -57,9 +57,9 @@ class CachingAnthropicClient(AnthropicClient):
 
         try:
             tools, tool_choice = self._create_tool(response_model)
-            # The one real change from graphiti_core's own implementation:
-            # a list of one text block with cache_control, instead of a
-            # plain string, is what actually turns caching on for this call.
+            # The one real change from graphiti_core's own implementation: a
+            # list of one text block with cache_control, instead of a plain
+            # string, is what actually turns caching on for this call.
             cached_system = [
                 {
                     "type": "text",

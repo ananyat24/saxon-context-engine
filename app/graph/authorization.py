@@ -3,18 +3,19 @@
 # hierarchy.
 #
 # This is a deliberately separate layer from Graphiti's own fact graph. A
-# tenant's business facts (customers, orders, contracts...) are extracted by
-# an LLM and carry temporal validity; who-reports-to-whom and who-owns-what
-# are authorization data, and authorization data must be exact, not
-# probabilistic. So instead of asking an LLM to infer "Priya manages this
-# account" from text, org structure and ownership are written directly as
-# :User nodes and :REPORTS_TO / :ASSIGNED_TO edges (see scripts/seed_roles.py
-# for how a real onboarding process would populate them -- through an admin
-# action or an HR/CRM sync, the same way a real company's access control data
-# arrives, not through document extraction).
+# tenant's business facts (customers, orders, contracts, and so on) are
+# extracted by an LLM and carry temporal validity, but who-reports-to-whom
+# and who-owns-what are authorization data, and authorization data must be
+# exact, not probabilistic. So instead of asking an LLM to infer "Priya
+# manages this account" from text, org structure and ownership are written
+# directly as :User nodes and :REPORTS_TO / :ASSIGNED_TO edges (see
+# scripts/seed_roles.py for how a real onboarding process would populate
+# them: through an admin action or an HR/CRM sync, the same way a real
+# company's access control data actually arrives, not through document
+# extraction).
 #
 # :User and :REPORTS_TO/:ASSIGNED_TO are intentionally not part of the
-# ontology YAML (app/ontology/): that schema constrains what Graphiti's LLM
+# ontology YAML (app/ontology/). That schema constrains what Graphiti's LLM
 # extraction is allowed to invent from text, and authorization data is never
 # something an extraction pipeline should be inventing.
 import logging
@@ -27,8 +28,8 @@ from app.graph.graph_repository import GraphRepository
 logger = logging.getLogger(__name__)
 
 # Bounds how far up/down the org chart a single query will walk. An
-# unbounded variable-length path is the one thing that *could* make this
-# slow on a pathological input (e.g. a cyclic REPORTS_TO chain from bad data);
+# unbounded variable-length path is the one thing that could make this slow
+# on a pathological input, such as a cyclic REPORTS_TO chain from bad data.
 # 50 levels is far deeper than any real org chart, so this is a safety rail,
 # not a real limit in practice.
 MAX_HIERARCHY_DEPTH = 50
@@ -36,8 +37,8 @@ MAX_HIERARCHY_DEPTH = 50
 
 def ensure_authorization_indexes(repo: Optional[GraphRepository] = None) -> None:
     """Creates the indexes role-based visibility depends on for its scaling
-    claim to hold. Idempotent -- safe to call on every app startup, not just
-    once during setup.
+    claim to hold. Idempotent, so it's safe to call on every app startup,
+    not just once during setup.
 
     Without User(group_id, id), resolving "who does this user outrank" would
     mean scanning every User node in the database to find the starting point
@@ -60,11 +61,11 @@ def user_exists(group_id: str, user_id: str, repo: Optional[GraphRepository] = N
 
 def resolve_as_user(group_id: str, as_user: Optional[str], repo: Optional[GraphRepository] = None) -> Optional[str]:
     """Validates a client-supplied as_user id the same way resolve_knowledge_base
-    validates a knowledge_base id: None means "no role filtering" (unfiltered,
-    the current behavior), but a *given* id must actually exist in this
-    knowledge base's org chart or the request is rejected. This is what stops
-    a client from probing for a valid-looking user id from a knowledge base
-    they can't otherwise see structure for.
+    validates a knowledge_base id: None means "no role filtering" (the
+    current, unfiltered behavior), but a given id must actually exist in
+    this knowledge base's org chart or the request is rejected. This is what
+    stops a client from probing for a valid-looking user id from a
+    knowledge base they can't otherwise see structure for.
     """
     if as_user is None:
         return None
@@ -98,7 +99,7 @@ def _visible_user_ids_clause() -> str:
     requesting user plus everyone who (transitively) reports to them.
 
     This only ever traverses the :User subgraph, which is sized to the
-    org -- hundreds or thousands of employees -- regardless of how many
+    org (hundreds or thousands of employees) regardless of how many
     millions of business entities the knowledge base holds. That's what
     keeps this cheap at any data scale: the expensive dimension (entity
     count) never enters into this part of the query.
@@ -116,7 +117,7 @@ def _visible_user_ids_clause() -> str:
 
 def _visible_entities_clause() -> str:
     """Builds on _visible_user_ids_clause(): expands visible_owner_ids outward
-    to the entities they own via an indexed User lookup + relationship
+    to the entities they own via an indexed User lookup and relationship
     traversal, rather than matching every :Entity in the knowledge base and
     checking its owner against the visible-user list.
 
@@ -124,11 +125,11 @@ def _visible_entities_clause() -> str:
     scripts/load_test_query_scale.py at 100k entities (4.2s for a query the
     module's own docstring claims is entity-count-independent): it touches
     every entity in the group no matter how small the visible-user set is,
-    because the Entity side -- not the User side -- is where the match
-    starts. Starting from `visible_owner_ids` (bounded by org size) and
-    traversing outward via the existing ASSIGNED_TO edges instead costs
-    proportional to what those users actually own, which is what the
-    scaling claim requires. Binds `n`, one row per visible entity.
+    because the Entity side, not the User side, is where the match starts.
+    Starting from `visible_owner_ids` (bounded by org size) and traversing
+    outward via the existing ASSIGNED_TO edges instead costs proportional
+    to what those users actually own, which is what the scaling claim
+    requires. Binds `n`, one row per visible entity.
     """
     return (
         _visible_user_ids_clause()
@@ -211,12 +212,13 @@ def get_visible_relationships(
 def get_visible_entity_uuids(group_id: str, user_id: str, repo: Optional[GraphRepository] = None) -> set[str]:
     """Every entity uuid this user can see, as a set for O(1) membership
     checks. Used to post-filter Graphiti's own search results (see
-    GraphRepository.search_graphiti_facts) -- Graphiti's search already
+    GraphRepository.search_graphiti_facts). Graphiti's search already
     returns a small, bounded top-K list, so filtering that list against this
-    set is cheap regardless of how large the underlying knowledge base is;
-    the set itself is bounded by how much this user's org owns, not by total
-    graph size, for the same reason the queries above scale. No ORDER BY/LIMIT
-    here since every matching id is needed, not a page of them.
+    set is cheap regardless of how large the underlying knowledge base is.
+    The set itself is bounded by how much this user's org owns, not by
+    total graph size, for the same reason the queries above scale. No
+    ORDER BY/LIMIT here since every matching id is needed, not a page of
+    them.
     """
     repo = repo or GraphRepository()
     rows = repo.execute_cypher(

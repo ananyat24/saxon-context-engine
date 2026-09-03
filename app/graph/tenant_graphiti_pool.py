@@ -1,9 +1,9 @@
 # Each tenant supplies their own Gemini API key (see app/config.py's TenantConfig
-# and app/security.py), which means a single shared Graphiti client -- the pattern
-# used before this existed -- no longer works, since build_graphiti() bakes one
+# and app/security.py), which means a single shared Graphiti client, the pattern
+# used before this existed, no longer works, since build_graphiti() bakes one
 # Gemini key into the client at construction time. Building a fresh Graphiti
 # client (LLM + embedder + reranker setup) on every single request would work,
-# but it's real overhead to repeat per-request -- the same problem this project
+# but it's real overhead to repeat per-request, the same problem this project
 # already fixed once for the single-tenant case (see app/main.py's lifespan
 # handler). This pool keeps that fix while allowing one client per tenant instead
 # of one for the whole process: each tenant's client is built once, on their
@@ -23,7 +23,7 @@ class TenantGraphitiPool:
     """Builds and caches one Graphiti client per tenant, keyed by tenant_id.
 
     One tenant can have several knowledge bases (group_ids) sharing this one
-    client -- group_id is just a data partition tag on nodes/edges, not a
+    client: group_id is just a data partition tag on nodes/edges, not a
     separate connection, so switching knowledge bases never needs a new client."""
 
     def __init__(self) -> None:

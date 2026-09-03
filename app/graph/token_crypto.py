@@ -1,9 +1,9 @@
 # Encrypts/decrypts OAuth refresh tokens before they're persisted to Neo4j
 # (see app/graph/connectors.py's oauth_refresh_token_enc field, written by
 # the "google_drive_oauth" connector type's exchange flow in
-# app/api/connectors.py). A refresh token is a live credential -- anyone who
+# app/api/connectors.py). A refresh token is a live credential: anyone who
 # reads it can mint fresh access tokens and read that Google account's
-# picked files for as long as the grant stands -- so it's never written in
+# picked files for as long as the grant stands, so it's never written in
 # plaintext, the same posture this app already takes toward tenant API keys
 # and provider credentials, just enforced in code here instead of by "don't
 # commit .env".
@@ -19,15 +19,15 @@ from app.config import settings
 
 
 class TokenEncryptionNotConfigured(Exception):
-    """Raised instead of silently storing a refresh token in plaintext --
-    see app/config.py's token_encryption_key. Callers (the OAuth exchange
+    """Raised instead of silently storing a refresh token in plaintext.
+    See app/config.py's token_encryption_key. Callers (the OAuth exchange
     route) should treat this the same as any other "not configured on this
     server" setup gap, not a transient failure to retry."""
 
 
 def _fernet() -> Fernet:
-    # Re-reads settings.token_encryption_key on every call (not cached
-    # across the process) -- deliberately, so a test monkeypatching it (or
+    # Re-reads settings.token_encryption_key on every call, not cached
+    # across the process, deliberately, so a test monkeypatching it (or
     # an operator rotating it without a full restart, if that's ever wired
     # up) takes effect immediately rather than through a stale cache.
     # Constructing a Fernet instance is cheap; this isn't a hot path.
@@ -52,7 +52,7 @@ def encrypt_token(plaintext: str) -> str:
 
 def decrypt_token(ciphertext: str) -> str:
     """Raises InvalidToken if the ciphertext doesn't decrypt under the
-    currently-configured key -- e.g. TOKEN_ENCRYPTION_KEY was rotated since
+    currently-configured key, e.g. TOKEN_ENCRYPTION_KEY was rotated since
     this was stored. Callers should surface that as "reconnect this
     connector", not retry."""
     return _fernet().decrypt(ciphertext.encode("utf-8")).decode("utf-8")
