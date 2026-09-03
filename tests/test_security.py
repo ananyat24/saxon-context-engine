@@ -14,7 +14,7 @@ class _FakeApp:
 
 
 class _FakeRequest:
-    """Stands in for FastAPI's Request -- require_tenant only ever reaches
+    """Stands in for FastAPI's Request: require_tenant only ever reaches
     into request.app.state.neo4j_client, and only on the Neo4j-backed
     tenant fallback path (see app/graph/tenants.py), which these tests
     monkeypatch rather than hit a real database."""

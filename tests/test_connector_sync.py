@@ -189,7 +189,7 @@ class _FakeIngestResult:
 
 
 class _RecordingRepo:
-    """Only implements execute_cypher -- enough to prove which episodes get
+    """Only implements execute_cypher: enough to prove which episodes get
     tagged with which connector_id, without needing a real Neo4j."""
 
     def __init__(self):
