@@ -179,14 +179,50 @@ def _build_azure_openai_clients(bucket: str):
     return llm_client, embedder, cross_encoder
 
 
+def _build_azure_openai_embedder(bucket: str) -> AzureOpenAIEmbedderClient:
+    """Just the embeddings half of what _build_azure_openai_clients builds,
+    for reuse as anthropic mode's embedder (see _build_anthropic_clients
+    below) when Gemini's free-tier embedding quota is the actual
+    bottleneck -- that quota (generativelanguage.googleapis.com's
+    embed_content_free_tier_requests) is a real, low, per-day cap (1000
+    requests/day per project, found live: a Solandra CSV re-ingest of a
+    few hundred rows exhausted it more than once in the same day, even
+    across a freshly-issued Gemini key, since the cap is per Google Cloud
+    project, not per key), independent of Anthropic's own chat quota,
+    which isn't affected by it at all. Shares the same Azure OpenAI
+    settings/spend-tracking _build_azure_openai_clients uses, scoped to
+    just this one call path since anthropic mode's chat client is Claude,
+    not this."""
+    azure_client = AsyncAzureOpenAI(
+        azure_endpoint=settings.azure_openai_endpoint,
+        api_key=settings.azure_openai_api_key,
+        api_version=settings.azure_openai_api_version,
+    )
+    _apply_spend_limit_openai(
+        azure_client,
+        bucket,
+        settings.azure_openai_input_price_per_1m,
+        settings.azure_openai_output_price_per_1m,
+        settings.azure_openai_embedding_price_per_1m,
+    )
+    return AzureOpenAIEmbedderClient(azure_client=azure_client, model=settings.azure_openai_embedding_deployment)
+
+
 def _build_anthropic_clients(bucket: str, gemini_api_key: str):
     """Anthropic is an operator-wide resource, same reasoning as Azure OpenAI
     above: one shared Claude key, not a key per tenant.
 
     Claude has no embeddings API (see app/config.py's llm_provider
-    docstring), so embeddings/reranking still come from Gemini here.
-    `gemini_api_key` is the tenant's own Gemini key (TenantConfig.gemini_api_key,
-    the same field "gemini" mode uses), reused for just that piece.
+    docstring), so embeddings come from elsewhere. By default that's
+    Gemini, using `gemini_api_key` (the tenant's own key,
+    TenantConfig.gemini_api_key, the same field "gemini" mode uses). If
+    AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY are also set, embeddings
+    move to Azure OpenAI instead (see _build_azure_openai_embedder and
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT), which is the escape hatch for when
+    Gemini's free-tier embedding quota is the actual bottleneck. Reranking
+    always stays on Gemini regardless: Gemini's reranker is a chat-style
+    call against a separate quota from embed_content, so it isn't affected
+    by that cap and there's no reason to move it too.
     """
     if not settings.anthropic_api_key:
         raise RuntimeError("llm_provider is 'anthropic' but anthropic_api_key is not set. See .env.example.")
@@ -207,7 +243,12 @@ def _build_anthropic_clients(bucket: str, gemini_api_key: str):
     # ships: see app/graph/caching_anthropic_client.py for why turning on
     # Anthropic prompt caching needs a subclass rather than a config flag.
     llm_client = CachingAnthropicClient(client=anthropic_client, config=LLMConfig(model=settings.anthropic_model))
-    embedder, cross_encoder = _build_gemini_embedder_and_reranker(gemini_api_key)
+    gemini_embedder, cross_encoder = _build_gemini_embedder_and_reranker(gemini_api_key)
+    embedder = (
+        _build_azure_openai_embedder(bucket)
+        if settings.azure_openai_endpoint and settings.azure_openai_api_key
+        else gemini_embedder
+    )
     return llm_client, embedder, cross_encoder
 
 
