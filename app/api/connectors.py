@@ -10,7 +10,6 @@
 # translate the result into an HTTP response. It's not a second
 # implementation of the fetch, dedup-check, and ingest sequence.
 import logging
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -151,19 +150,25 @@ class CreateConnectorRequest(BaseModel):
     foundry_iq_knowledge_base: Optional[str] = Field(default=None, max_length=200)
 
 
-# A connector past this many sync intervals since its last success is
-# flagged "stale" rather than "ok." Generous enough to absorb a transient
-# failure or two without crying wolf, but still catches "the background
-# scheduler stopped running for this connector" (see
-# app/graph/connector_scheduler.py), which nothing else surfaces.
-_STALE_AFTER_INTERVAL_MULTIPLE = 3
-
-
 def _connector_health(c: dict) -> str:
-    """Returns "error", "never_synced", "queued", "stale", "ok", or
-    "authorized_needs_files": a coarse freshness signal computed
-    server-side so the staleness threshold lives in one place rather than
-    being duplicated in the frontend."""
+    """Returns "error", "never_synced", "queued", "ok", or
+    "authorized_needs_files".
+
+    This used to also return "stale" once a connector's last successful
+    sync was more than a few sync intervals old, on the theory that it
+    would catch app/graph/connector_scheduler.py's background job silently
+    dying for one connector. That assumption doesn't hold on this
+    deployment: Azure Container Apps scales the app to zero replicas when
+    idle (see scripts/deploy_azure.sh's minReplicas), so the in-process
+    scheduler simply isn't running most of the time by design, not because
+    anything broke. Every connector aged into "stale" within about 45
+    minutes of a real, fully up-to-date sync, which read as "your data may
+    be out of date" when nothing about the underlying content had changed
+    at all. A connector whose last sync actually failed is still surfaced
+    below via "error"; there's no reliable signal left to distinguish "the
+    scheduler stopped running" from "nothing new to sync" without an
+    always-on replica.
+    """
     if c["status"] == "authorized_needs_files":
         # A google_drive_oauth connector whose consent popup succeeded but
         # whose file picker was never finished, because the tab or popup
@@ -175,18 +180,11 @@ def _connector_health(c: dict) -> str:
         return "error"
     if c["status"] == "queued":
         # A sync was just accepted onto the ingestion queue (see
-        # app/graph/ingestion_queue.py) and hasn't run yet. Not stale,
-        # since it's about to get fresher rather than gone quiet, and not
-        # "ok" either, since nothing new has actually landed yet.
+        # app/graph/ingestion_queue.py) and hasn't run yet. Not "ok" yet,
+        # since nothing new has actually landed.
         return "queued"
     if not c["last_synced_at"]:
         return "never_synced"
-    last_synced_at = c["last_synced_at"]
-    if isinstance(last_synced_at, str):
-        last_synced_at = datetime.fromisoformat(last_synced_at.replace("Z", "+00:00"))
-    max_age = timedelta(minutes=settings.connector_sync_interval_minutes * _STALE_AFTER_INTERVAL_MULTIPLE)
-    if datetime.now(timezone.utc) - last_synced_at > max_age:
-        return "stale"
     return "ok"
 
 
