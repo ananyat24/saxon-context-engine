@@ -3,12 +3,22 @@
 # logged as a real :Entity:Decision node (ontology/core.yaml's Decision
 # type, previously defined but never written to the graph), so it's an
 # auditable fact, not a throwaway string. See CLAUDE.md's pivot notes.
+import asyncio
 import uuid
 
 import pytest
 
 from app.graph.decisions import ensure_decision_indexes, record_decision
 from app.graph.graph_repository import GraphRepository
+
+
+class _FakeEmbedder:
+    """Stands in for the tenant's real Graphiti embedder: record_decision only
+    ever calls .create() once, on the decision's own name, so a fixed-length
+    stub vector is enough."""
+
+    async def create(self, input_data):
+        return [0.0] * 1024
 
 
 @pytest.fixture
@@ -27,14 +37,15 @@ def test_record_decision_creates_an_entity_decision_node_linked_to_the_anchor(re
             {"uuid": anchor_uuid, "group_id": group_id},
         )
 
-        decision_id = record_decision(
+        decision_id = asyncio.run(record_decision(
             repo,
             group_id=group_id,
             anchor_uuid=anchor_uuid,
             query="What is going on with Decision Test Anchor?",
             recommendation_text="Recommendation: escalate to the account owner.",
             rationale="Fact one; fact two",
-        )
+            embedder=_FakeEmbedder(),
+        ))
 
         rows = repo.execute_cypher(
             "MATCH (d:Entity:Decision {uuid: $uuid}) RETURN d.description AS description, "

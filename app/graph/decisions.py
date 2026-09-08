@@ -31,6 +31,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+from graphiti_core.embedder.client import EmbedderClient
+
 from app.graph.graph_repository import GraphRepository
 
 
@@ -68,7 +70,7 @@ def _backfill_saxon_recommendation_label(repo: GraphRepository) -> None:
     )
 
 
-def record_decision(
+async def record_decision(
     repo: GraphRepository,
     *,
     group_id: str,
@@ -76,6 +78,7 @@ def record_decision(
     query: str,
     recommendation_text: str,
     rationale: str,
+    embedder: EmbedderClient,
 ) -> str:
     """Creates a :Entity:Decision:SaxonRecommendation node carrying the
     recommendation, linked to the entity it's about via an INVOLVES edge
@@ -90,6 +93,23 @@ def record_decision(
     on, not the ontology label :Decision itself, which a real client
     dataset can also legitimately use.
 
+    `embedder` (the tenant's own Graphiti client's embedder, so the same
+    provider and dimension as every other node in this group_id) is used to
+    give this node a name_embedding, the same property Graphiti sets on
+    every node it creates through its own extraction pipeline. This node
+    is created by hand instead, via a raw Cypher CREATE, so nothing does
+    that step unless this function does it explicitly. Skipping it isn't
+    just a missing feature: Graphiti's own entity-resolution similarity
+    search runs across every :Entity in the group_id on every later sync,
+    including this one, and Neo4j's vector.similarity.cosine() throws a
+    real, sync-blocking ArgumentError the moment it's asked to compare
+    against a NULL embedding. Found live: a live deployment's own
+    "Explain why + recommend" button, used a handful of times, left enough
+    embedding-less SaxonRecommendation nodes in one group_id to eventually
+    break every subsequent connector sync into it, with an error that
+    looked like a dimension mismatch between embedding providers and had
+    nothing to do with one.
+
     The INVOLVES-target MATCH is scoped by group_id, not just uuid. The
     only caller today (ContextOrchestrator.get_causal_context_packet)
     always resolves anchor_uuid from a Cypher query already scoped to the
@@ -100,10 +120,13 @@ def record_decision(
     """
     decision_uuid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    name = f"Recommendation for: {query}"[:200]
+    name_embedding = await embedder.create(input_data=name.replace("\n", " "))
     repo.execute_cypher(
         """
         CREATE (d:Entity:Decision:SaxonRecommendation {
-            uuid: $uuid, name: $name, description: $description, rationale: $rationale,
+            uuid: $uuid, name: $name, name_embedding: $name_embedding,
+            description: $description, rationale: $rationale,
             decision_status: 'proposed', source_system: 'saxon.causal_engine',
             group_id: $group_id, created_at: datetime($now)
         })
@@ -115,7 +138,8 @@ def record_decision(
         """,
         {
             "uuid": decision_uuid,
-            "name": f"Recommendation for: {query}"[:200],
+            "name": name,
+            "name_embedding": name_embedding,
             "description": recommendation_text,
             "rationale": rationale,
             "group_id": group_id,

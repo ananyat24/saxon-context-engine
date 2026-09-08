@@ -13,6 +13,18 @@ import asyncio
 from app.context.orchestrator import ContextOrchestrator
 
 
+def _as_async(fn):
+    """record_decision is awaited now, so a synchronous stand-in (most
+    tests below just need to capture its kwargs and return a fixed id)
+    needs this thin wrapper rather than an async lambda, which Python
+    doesn't have."""
+
+    async def wrapper(repo, **kwargs):
+        return fn(repo, **kwargs)
+
+    return wrapper
+
+
 class _FakeLLMClient:
     def __init__(self, response):
         self._response = response
@@ -24,6 +36,7 @@ class _FakeLLMClient:
 class _FakeGraphiti:
     def __init__(self, llm_response):
         self.llm_client = _FakeLLMClient(llm_response)
+        self.embedder = None  # record_decision is monkeypatched in every test that reaches it
 
 
 class _FakeCausalRepo:
@@ -68,7 +81,7 @@ def _orchestrator(anchor, facts, llm_response=_LLM_RESPONSE, second_entity=None)
 
 
 def test_recommendation_is_a_separate_field_never_blended_into_summary(monkeypatch):
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: "decision-1")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: "decision-1"))
     anchor = {"uuid": "anchor-1", "name": "Test Order 500"}
     facts = [{"fact": "Test Order 500 depends on Test Widget.", "is_valid": True, "relationship_type": "DEPENDS_ON"}]
     orchestrator = _orchestrator(anchor, facts)
@@ -86,7 +99,7 @@ def test_recommendation_is_a_separate_field_never_blended_into_summary(monkeypat
 def test_recommendation_is_recorded_as_a_decision_when_tenant_id_given(monkeypatch):
     recorded = {}
 
-    def fake_record_decision(repo, **kwargs):
+    async def fake_record_decision(repo, **kwargs):
         recorded.update(kwargs)
         return "decision-uuid-1"
 
@@ -106,7 +119,7 @@ def test_recommendation_is_recorded_as_a_decision_when_tenant_id_given(monkeypat
 
 def test_no_decision_recorded_without_tenant_id(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     anchor = {"uuid": "anchor-1", "name": "Test Order 502"}
     facts = [{"fact": "Test Order 502 depends on Test Widget.", "is_valid": True, "relationship_type": "DEPENDS_ON"}]
     orchestrator = _orchestrator(anchor, facts)
@@ -119,7 +132,7 @@ def test_no_decision_recorded_without_tenant_id(monkeypatch):
 
 def test_unresolved_anchor_returns_none_recommendation_and_no_decision(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     orchestrator = _orchestrator(None, [])
 
     packet = asyncio.run(orchestrator.get_causal_context_packet("Why is Unknown Entity at risk?", group_ids=["kb1"], tenant_id="t1"))
@@ -138,7 +151,7 @@ def test_semantic_fallback_facts_with_no_anchor_are_fact_only_not_a_recommendati
     # fabricated recommendation/:Decision from an anchor that was never
     # actually resolved.
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     facts = [{"fact": "Daniel Reyes approved the expedited fix for $9,000.", "is_valid": True, "kind": "semantic_search"}]
     orchestrator = _orchestrator(None, facts)
 
@@ -157,7 +170,7 @@ def test_semantic_fallback_facts_with_no_anchor_are_fact_only_not_a_recommendati
 
 def test_empty_chain_skips_synthesis_and_decision(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     anchor = {"uuid": "anchor-1", "name": "Isolated Order"}
     orchestrator = _orchestrator(anchor, [])
 
@@ -181,7 +194,7 @@ def test_empty_chain_skips_synthesis_and_decision(monkeypatch):
 
 def test_empty_causal_chain_falls_back_to_a_single_direct_fact(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     anchor = {"uuid": "anchor-1", "name": "Fallback Widget"}
     direct_facts = [{"fact": "Fallback Widget is located in Warehouse 4.", "is_valid": True}]
     orchestrator = _orchestrator(anchor, [])
@@ -201,7 +214,7 @@ def test_empty_causal_chain_falls_back_to_a_single_direct_fact(monkeypatch):
 
 def test_empty_causal_chain_falls_back_to_synthesizing_several_direct_facts(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     anchor = {"uuid": "anchor-1", "name": "Multi Fact Widget"}
     direct_facts = [
         {"fact": "Multi Fact Widget is located in Warehouse 4.", "is_valid": True},
@@ -222,7 +235,7 @@ def test_empty_causal_chain_falls_back_to_synthesizing_several_direct_facts(monk
 
 def test_empty_causal_chain_with_no_direct_facts_either_still_reports_not_found(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     anchor = {"uuid": "anchor-1", "name": "Truly Isolated Widget"}
     orchestrator = _orchestrator(anchor, [])  # direct_facts defaults to []
 
@@ -264,7 +277,7 @@ def test_two_entity_path_entirely_causal_gets_a_real_recommendation(monkeypatch)
     recorded = {}
     monkeypatch.setattr(
         "app.context.orchestrator.record_decision",
-        lambda repo, **kw: recorded.update(kw) or "decision-two-ent",
+        _as_async(lambda repo, **kw: recorded.update(kw) or "decision-two-ent"),
     )
     anchor = {"uuid": "component-1", "name": "Test Component"}
     second_entity = {"uuid": "qe-1", "name": "Test QualityEvent"}
@@ -301,7 +314,7 @@ def test_domain_specific_causal_types_produce_a_real_recommendation_too(monkeypa
     recorded = {}
     monkeypatch.setattr(
         "app.context.orchestrator.record_decision",
-        lambda repo, **kw: recorded.update(kw) or "decision-supply-chain",
+        _as_async(lambda repo, **kw: recorded.update(kw) or "decision-supply-chain"),
     )
     anchor = {"uuid": "order-1", "name": "Order 45821"}
     facts = [
@@ -322,7 +335,7 @@ def test_domain_specific_causal_types_produce_a_real_recommendation_too(monkeypa
 
 def test_two_entity_path_not_entirely_causal_is_fact_only_with_full_evidence(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     anchor = {"uuid": "industry-1", "name": "Industrial Automation"}
     second_entity = {"uuid": "person-1", "name": "Diego Alvarez"}
     facts = [
@@ -369,7 +382,7 @@ def test_two_entity_path_not_entirely_causal_is_fact_only_with_full_evidence(mon
 
 
 def test_an_invalidated_but_real_fact_still_feeds_the_recommendation(monkeypatch):
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: "decision-invalidated")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: "decision-invalidated"))
     anchor = {"uuid": "order-1", "name": "Order SO-99"}
     facts = [
         {
@@ -420,7 +433,7 @@ def test_an_invalidated_but_real_fact_still_feeds_the_recommendation(monkeypatch
 
 def test_single_thin_causal_fact_defers_to_direct_facts_when_more_exists(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     anchor = {"uuid": "anchor-1", "name": "Test Account"}
     thin_chain = [{"fact": "Test Account produced Test Order 900.", "is_valid": True, "relationship_type": "PRODUCES"}]
     richer_direct_facts = [
@@ -456,7 +469,7 @@ def test_single_thin_causal_fact_still_gets_a_recommendation_when_nothing_else_e
     recorded = {}
     monkeypatch.setattr(
         "app.context.orchestrator.record_decision",
-        lambda repo, **kw: recorded.update(kw) or "decision-thin-ok",
+        _as_async(lambda repo, **kw: recorded.update(kw) or "decision-thin-ok"),
     )
     anchor = {"uuid": "anchor-1", "name": "Test Order 501"}
     facts = [{"fact": "Test Order 501 depends on Test Widget.", "is_valid": True, "relationship_type": "DEPENDS_ON"}]
@@ -474,7 +487,7 @@ def test_single_thin_causal_fact_still_gets_a_recommendation_when_nothing_else_e
 
 def test_two_entity_no_path_reports_no_connection_found_not_an_unrelated_fact(monkeypatch):
     called = []
-    monkeypatch.setattr("app.context.orchestrator.record_decision", lambda repo, **kw: called.append(kw) or "x")
+    monkeypatch.setattr("app.context.orchestrator.record_decision", _as_async(lambda repo, **kw: called.append(kw) or "x"))
     anchor = {"uuid": "a-1", "name": "Isolated Thing One"}
     second_entity = {"uuid": "b-1", "name": "Isolated Thing Two"}
     orchestrator = _orchestrator(anchor, [], second_entity=second_entity)

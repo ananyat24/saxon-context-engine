@@ -619,7 +619,7 @@ class ContextOrchestrator:
 
         if recommendation and tenant_id and group_ids:
             try:
-                decision_id = record_decision(
+                decision_id = await record_decision(
                     self._repo,
                     group_id=group_ids[0],
                     anchor_uuid=anchor["uuid"],
@@ -630,6 +630,7 @@ class ContextOrchestrator:
                         f"Recommendation: {recommendation['recommendation']}"
                     ),
                     rationale="; ".join(chain_lines[:5]),
+                    embedder=self.graphiti.embedder,
                 )
             except Exception as e:
                 logger.warning(f"Failed to record Decision entity for causal recommendation: {e}")

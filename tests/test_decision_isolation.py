@@ -22,6 +22,15 @@ from app.graph.decisions import ensure_decision_indexes, record_decision
 from app.graph.graph_repository import GraphRepository
 
 
+class _FakeEmbedder:
+    """Stands in for the tenant's real Graphiti embedder: record_decision only
+    ever calls .create() once, on the decision's own name, so a fixed-length
+    stub vector is enough."""
+
+    async def create(self, input_data):
+        return [0.0] * 1024
+
+
 @pytest.fixture
 def repo():
     repo = GraphRepository(graphiti_instance=Mock())
@@ -57,14 +66,15 @@ def test_a_recorded_decisions_involves_edge_never_shows_up_as_the_anchors_own_fa
             group_id, rel_type="SOURCED_FROM",
         )
 
-        record_decision(
+        asyncio.run(record_decision(
             repo,
             group_id=group_id,
             anchor_uuid=anchor,
             query="Why is Decision Isolation CX-17 Power Relay affected?",
             recommendation_text="Recommendation: qualify a second supplier.",
             rationale="Some rationale",
-        )
+            embedder=_FakeEmbedder(),
+        ))
 
         facts = repo.direct_facts_for(anchor, None)
         fact_texts = {f["fact"] for f in facts}
@@ -84,14 +94,15 @@ def test_a_decisions_own_name_never_resolves_as_a_query_anchor(repo):
         anchor = _node(repo, group_id, "Decision Isolation Widget")
         query_text = "Why is Decision Isolation Widget at risk?"
 
-        decision_id = record_decision(
+        decision_id = asyncio.run(record_decision(
             repo,
             group_id=group_id,
             anchor_uuid=anchor,
             query=query_text,
             recommendation_text="Recommendation: investigate further.",
             rationale="Some rationale",
-        )
+            embedder=_FakeEmbedder(),
+        ))
         # Sanity: the Decision node really was created with the name a
         # search for its own text would otherwise match against.
         decision_name = repo.execute_cypher(
@@ -127,11 +138,12 @@ def test_causal_chain_never_walks_through_a_decision_node(repo):
             "group_id: $group_id, valid_at: datetime('2026-01-01T00:00:00Z'), invalid_at: null, expired_at: null}]->(b)",
             {"a": component, "b": supplier, "group_id": group_id},
         )
-        record_decision(
+        asyncio.run(record_decision(
             repo, group_id=group_id, anchor_uuid=component,
             query="Why is Decision Isolation Component affected?",
             recommendation_text="Recommendation text.", rationale="Rationale",
-        )
+            embedder=_FakeEmbedder(),
+        ))
 
         anchor, second_entity, facts = asyncio.run(
             repo.causal_chain_for_query("What's going on with Decision Isolation Component?", [group_id], None)
