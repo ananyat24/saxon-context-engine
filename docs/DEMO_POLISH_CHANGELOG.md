@@ -59,6 +59,10 @@ The original brief said: "if this is not feasible without touching ingestion int
 
 Step 1 (full visual design system) and Step 2 (first-run explainer panel + inline glossary) are deliberately not started without a direction check-in first — see "Needs a design conversation" below. Also not started: MCP tab polish and admin-surface polish (both were already largely present per `docs/FEATURE_INVENTORY.md` -- lower priority than the gaps above).
 
+## Test checkpoint
+
+Full suite re-run after every commit above: **449 passed, 1 deselected**, no regressions. (One interim background run showed 72 failures/42 errors from a missing Neo4j credential in that shell's env, not from any code change here — re-ran with credentials sourced and confirmed clean.)
+
 ## Needs a design conversation before building, not a solo call
 
 Step 1 of the original brief ("commit to one design system," "industrial, dense, technical" palette, dark UI) and Step 2 (first-run explainer, inline glossary) are both real, substantial, opinionated visual work — the kind of consequential decision that should get a quick direction check rather than one interpretation of "industrial, dense, technical" being built out unilaterally and possibly needing to be redone. Everything landed so far has been additive/reversible UI work fitting inside the existing look; a genuine palette-and-type-system pass is a different scale of change.
