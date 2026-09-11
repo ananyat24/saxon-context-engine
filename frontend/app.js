@@ -1452,14 +1452,35 @@ document.getElementById("apiKey").addEventListener("keydown", (e) => {
 updateKeyDot();
 
 // --- Health -------------------------------------------------------------
+// Azure Container Apps scales this deployment to zero replicas when idle
+// (see scripts/deploy_azure.sh's minReplicas), so the very first request
+// after a quiet period can take significantly longer than a warm one --
+// the container itself has to start before it can even answer /health.
+// A plain "checking..." badge that just sits there for that whole stretch
+// reads as a hung page, not a loading one, which is the wrong impression
+// to give someone watching a live demo. Once it's been pending a couple
+// seconds -- past what a warm instance would ever take -- the badge says
+// plainly what's actually happening instead of staying silent about it.
+const COLD_START_HINT_DELAY_MS = 2500;
+
 async function loadHealth() {
   const badge = document.getElementById("healthBadge");
+  badge.textContent = "checking…";
+  badge.className = "badge badge-muted";
+  const coldStartTimer = setTimeout(() => {
+    badge.textContent = "waking up the service…";
+    badge.title = "This deployment scales to zero when idle, so the first request after a quiet period restarts the container. Should resolve within a minute.";
+  }, COLD_START_HINT_DELAY_MS);
   try {
     const res = await fetch(`${API}/health`);
     const data = await res.json();
+    clearTimeout(coldStartTimer);
+    badge.title = "";
     badge.textContent = data.database_connected ? "connected" : "not connected";
     badge.className = "badge " + (data.database_connected ? "badge-ok" : "badge-bad");
   } catch (err) {
+    clearTimeout(coldStartTimer);
+    badge.title = "";
     badge.textContent = "not reachable";
     badge.className = "badge badge-bad";
   }
