@@ -596,6 +596,14 @@ async function openConnectorPreview(connectorId) {
         specifically here. Fixing that means re-ingesting its content for real (a small real cost,
         not just a status check).
       </p>
+      <p class="preview-empty">
+        Note: this only reaches facts already tagged to a connector that simply hasn't re-synced.
+        It can't reach facts left over from before connector-id tagging existed at all -- those are
+        untagged (no connector_id on them anywhere) and need a separate untagged-episode cleanup that
+        doesn't exist yet (see CLAUDE.md's Brightpeak Automation write-up for a confirmed real case).
+        If an answer still looks wrong after this finishes, that's the likelier reason, not that this
+        didn't run.
+      </p>
       <button type="button" class="btn btn-outline" id="fixAttributionBtn">Fix attribution (re-sync for real)</button>
       <p id="fixAttributionStatus" class="status-line"></p>
     `;
