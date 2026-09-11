@@ -1800,6 +1800,13 @@ async function runAskQuery(resultLimit) {
   const rawEl = document.getElementById("queryRaw");
   const seeMoreBtn = document.getElementById("seeMoreBtn");
   const statsEl = document.getElementById("queryStats");
+  // A prior "Explain why + recommend" answer has to be cleared here too.
+  // It's a separate result block (see runCausalQuery below) that only ever
+  // gets touched by the causal button, so without this a stale
+  // recommendation from a previous question stayed on screen underneath a
+  // brand new plain-Ask answer, looking like it was still the answer to the
+  // new question.
+  const causalEl = document.getElementById("causalRecommendation");
   const query = document.getElementById("queryInput").value.trim();
   if (!query) return;
   if (!getApiKey()) {
@@ -1808,6 +1815,8 @@ async function runAskQuery(resultLimit) {
     rawWrap.hidden = true;
     seeMoreBtn.hidden = true;
     statsEl.hidden = true;
+    causalEl.hidden = true;
+    causalEl.innerHTML = "";
     return;
   }
 
@@ -1816,6 +1825,8 @@ async function runAskQuery(resultLimit) {
   rawWrap.hidden = true;
   seeMoreBtn.hidden = true;
   statsEl.hidden = true;
+  causalEl.hidden = true;
+  causalEl.innerHTML = "";
   try {
     // A document set scoped to several connectors at once takes priority over
     // the single-connector picker in the header when one's selected: see
@@ -1881,6 +1892,104 @@ async function runAskQuery(resultLimit) {
 
 document.getElementById("askBtn").addEventListener("click", () => runAskQuery(DEFAULT_RESULT_LIMIT));
 document.getElementById("seeMoreBtn").addEventListener("click", () => runAskQuery(EXPANDED_RESULT_LIMIT));
+
+// "Explain why + recommend": the causal-reasoning mode (POST
+// /api/v1/context/query/causal, see app/context/orchestrator.py's
+// get_causal_context_packet), deliberately a separate button/call from
+// "Ask" above rather than a mode toggle on it: that endpoint is allowed to
+// infer cause/impact/recommendation from a chain of facts, which the plain
+// Ask path never does, and keeping them as visibly separate UI actions
+// mirrors that separation all the way through the stack.
+async function runCausalQuery() {
+  const recEl = document.getElementById("causalRecommendation");
+  const query = document.getElementById("queryInput").value.trim();
+  if (!query) return;
+  if (!getApiKey()) {
+    recEl.hidden = false;
+    recEl.textContent = 'Click "Access key" in the top right first.';
+    return;
+  }
+  recEl.hidden = false;
+  recEl.innerHTML = `<p class="muted">Tracing the causal chain…</p>`;
+  try {
+    const res = await fetch(`${API}/context/query/causal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({
+        query,
+        knowledge_base: getSelectedKnowledgeBase() || undefined,
+        as_user: getSelectedUser() || undefined,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      recEl.textContent = body.detail || "Could not trace a causal chain for that.";
+      return;
+    }
+    const data = await res.json();
+    const rec = data.metadata?.recommendation;
+    if (!rec) {
+      // No real causal chain: either nothing at all to go on
+      // (retrieval_path "none"/"causal_chain_empty"), or a fact-only
+      // fallback with real evidence behind it: either a single entity's own
+      // directly-known facts ("causal_fallback_direct_facts") or the actual
+      // connecting path between two named entities that wasn't entirely
+      // causal-typed ("causal_path_between_entities"): see
+      // get_causal_context_packet. Both fallback shapes used to render
+      // identically to a real causal answer: same muted paragraph, no
+      // distinguishing label, no evidence list at all, which made it
+      // look like the causal engine had actually explained something (and,
+      // when the plain "Ask" answer happened to draw on the same facts,
+      // made the two panels look like an outright bug/duplicate). Checking
+      // for actual facts rather than one specific retrieval_path string
+      // covers both shapes today and any similar one added later.
+      const summary = data.metadata?.summary || "No causal chain found for that.";
+      const facts = data.metadata?.facts || [];
+      if (facts.length > 0) {
+        const disclaimer =
+          data.metadata?.retrieval_path === "causal_path_between_entities"
+            ? "No single causal chain explains this -- here's the actual connection between them instead (not an inference, not a recommendation):"
+            : "No causal chain connects this to anything else -- here's the most directly relevant fact(s) instead (not an inference, not a recommendation):";
+        const factsHost = document.createElement("div");
+        renderFacts(factsHost, facts);
+        // Deliberately never shows metadata.summary here (unlike the API
+        // response, which keeps it: see the MCP tool's documented
+        // "summary" field). With a handful of facts, a synthesized sentence
+        // stitched from them reads as a near-restatement of the same list
+        // right below it: real information density is low on a dataset
+        // this size, so the paragraph consistently added noise rather than
+        // insight. The evidence list (each line now carrying its own real
+        // source document, not just bare text) already says everything a
+        // person asking "why" actually needs from a fact-only answer.
+        recEl.innerHTML = `<p class="fact-list-label">${disclaimer}</p>`;
+        recEl.appendChild(factsHost);
+      } else {
+        recEl.innerHTML = `<p class="muted">${escapeXml(summary)}</p>`;
+      }
+      return;
+    }
+    // Deliberately styled/labeled distinctly from the plain-facts answer
+    // above: this is a generated suggestion, not a restated fact, and it
+    // should never read as one. See app/context/orchestrator.py's docstring
+    // on why "recommendation" and "summary" are never blended.
+    const decisionNote = data.metadata?.decision_id
+      ? `<p class="muted" style="font-size:0.8rem">Logged as an auditable recommendation (id: ${escapeXml(data.metadata.decision_id)}). Saxon has not acted on this -- it's a suggestion only.</p>`
+      : "";
+    recEl.innerHTML = `
+      <p class="fact-list-label">Generated recommendation -- not a stated fact, an inference from the chain below:</p>
+      <p><strong>What happened:</strong> ${escapeXml(rec.what_happened)}</p>
+      <p><strong>Why:</strong> ${escapeXml(rec.why)}</p>
+      <p><strong>Impact:</strong> ${escapeXml(rec.impact)}</p>
+      <p><strong>Recommendation:</strong> ${escapeXml(rec.recommendation)}</p>
+      ${decisionNote}
+      <details class="raw-details"><summary>Chain of facts this was based on</summary>
+        <pre class="result-block">${escapeXml(data.metadata?.summary || "")}</pre>
+      </details>`;
+  } catch (err) {
+    recEl.textContent = `Error: ${err.message}`;
+  }
+}
+document.getElementById("causalBtn").addEventListener("click", runCausalQuery);
 
 // Every fact carries whether it's still true or was superseded by something
 // newer: surfacing that plainly is the actual proof this system tracks
