@@ -1676,7 +1676,42 @@ const CURATED_SUGGESTED_QUESTIONS = {
   ],
 };
 
+// The plain-Ask curated questions above are all single-entity lookups --
+// good demos of fact retrieval, but every one of them also produces a
+// perfectly good plain-Ask answer, so clicking "Explain why + recommend"
+// on any of them lands on the causal endpoint's fact-only fallback path
+// (causal_fallback_direct_facts, see runCausalQuery) and the two panels
+// end up echoing each other -- exactly the confusing-duplicate case
+// runCausalQuery's own disclaimer copy exists to soften, not something a
+// demo should lead with. This is a separate, deliberately real multi-hop
+// question (QE-2091 quality event -> Ferrotek quarantine -> Plant 2
+// throughput -> SO-45821 at risk), confirmed live in
+// eval/baseline_pre_polish.json Q1 to hit the causal endpoint's real
+// causal_chain path with a generated recommendation, not a fallback.
+// Needs more data like this if the demo should show causal chains on
+// more than this one question -- tracked, not built yet.
+const CURATED_CAUSAL_QUESTION = {
+  solandra_supply_chain: "Why is SO-45821 at risk?",
+};
+
+function renderCausalSuggestedQuestion() {
+  const container = document.getElementById("causalSuggestedQuestion");
+  const question = getApiKey() ? CURATED_CAUSAL_QUESTION[getSelectedKnowledgeBase()] : null;
+  if (!question) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  container.hidden = false;
+  container.innerHTML = `<button class="chip chip-suggest" type="button" title="Traces a real multi-hop chain, unlike the questions above">Explain why: ${escapeXml(question)}</button>`;
+  container.querySelector(".chip-suggest").addEventListener("click", () => {
+    document.getElementById("queryInput").value = question;
+    document.getElementById("causalBtn").click();
+  });
+}
+
 async function refreshSuggestedQuestionsForScope(headerNodes) {
+  renderCausalSuggestedQuestion();
   if (!getApiKey()) {
     document.getElementById("suggestedQuestions").innerHTML = "";
     return;
