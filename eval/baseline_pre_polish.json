@@ -1,0 +1,1416 @@
+{
+  "captured_at_utc": "2026-09-11T07:03:01Z",
+  "target": "https://saxon-context-engine.kindsea-5648017b.southindia.azurecontainerapps.io",
+  "knowledge_base": "solandra_supply_chain",
+  "api_key_used_note": "local-dev-key (value not logged; presence/success confirmed by HTTP 200s below)",
+  "questions": [
+    {
+      "id": 1,
+      "label": "causal_chain",
+      "endpoint": "/api/v1/context/query/causal",
+      "question": "Why is SO-45821 at risk?",
+      "note": "Reconstructed from CLAUDE.md's 8-question cross-source reasoning set narrative + task instructions. Real order SO-45821 (Vantus Robotics, PX-440 Motor Controller, status 'production incomplete', Solandra Plant 2) confirmed in data/csv_erp/day1/orders.csv.",
+      "result": {
+        "status": 200,
+        "elapsed_s": 9.44,
+        "body": {
+          "query": "Why is SO-45821 at risk?",
+          "entities": [],
+          "relationships": [],
+          "facts": [],
+          "events": [],
+          "evidence": [],
+          "timeline": [],
+          "confidence": null,
+          "metadata": {
+            "group_ids": [
+              "solandra_supply_chain"
+            ],
+            "summary": "QualityEvent QE-2091 affects Solandra Plant 2\nPlant 2 sources the CX-17 Power Relay from Ferrotek Components\nThe quarantine of the CX-17 Power Relay lot FT-6602 on August 11th caused Plant 2 throughput to drop to 22% below normal\nThe PX-440 Motor Controller production depends on the CX-17 Power Relay.\nPX-440 Motor Controller is supplied by Ferrotek Components\nFerrotek Components produces the CX-17 Power Relay, specifically production lot FT-6602 which was quarantined\nFerrotek Components produces the CX-17 Power Relay on a production line that temporarily had its ISO 9001 certification placed on hold.\nMeridian Circuit Supply can produce a qualification lot for the CX-17 Power Relay within 5 business days\nNo longer current, but real: \"Quality issue QE-2091 has put Order SO-45821 at risk of missing its September 3 due date.\"\nNo longer current, but real: \"Plant 2 manufactures the PX-440 Motor Controller line\"\nNo longer current, but real: \"Quarantine of CX-17 Power Relay lot FT-6602 on August 11th reduced Plant 2 throughput on the PX-440 Motor Controller line to approximately 78% of normal (22% below normal).\"\nNo longer current, but real: \"CX-17 Power Relay components are sourced from Ferrotek Components\"\nNo longer current, but real: \"Ferrotek Components production lot FT-6602 produces the CX-17 Power Relay with a solder-joint defect causing elevated failure rates\"",
+            "facts": [
+              {
+                "fact": "Quality issue QE-2091 has put Order SO-45821 at risk of missing its September 3 due date.",
+                "relationship_type": "AFFECTS",
+                "hop": 0,
+                "source_node_uuid": "191c6cb6-d711-4a7d-90d3-8c10f4467628",
+                "target_node_uuid": "9ec7126e-b33c-4a51-96f5-673b5a9b59ab",
+                "valid_at": "2026-08-20T14:12:00Z",
+                "invalid_at": "2026-08-28T16:08:23.179255Z",
+                "expired_at": "2026-09-01T18:32:42.964573Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Expedited qualification request - CX-17 Power Relay)",
+                  "Solandra Outlook (Budget exception request - Meridian expedite premium ($38,400))"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "QualityEvent QE-2091 affects Solandra Plant 2",
+                "relationship_type": "AFFECTS",
+                "hop": 1,
+                "source_node_uuid": "191c6cb6-d711-4a7d-90d3-8c10f4467628",
+                "target_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Plant 2 manufactures the PX-440 Motor Controller line",
+                "relationship_type": "PRODUCES",
+                "hop": 2,
+                "source_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "target_node_uuid": "716438fc-ceeb-44cb-8aff-bb1a912bc78b",
+                "valid_at": "2026-08-20T11:03:00Z",
+                "invalid_at": "2026-08-28T16:10:17.689436Z",
+                "expired_at": "2026-09-01T18:32:42.912379Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Plant 2 sources the CX-17 Power Relay from Ferrotek Components",
+                "relationship_type": "SOURCED_FROM",
+                "hop": 2,
+                "source_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "target_node_uuid": "6b3334f0-5722-4d4b-be7c-c72173fb0fb3",
+                "valid_at": "2026-08-20T11:03:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Quarantine of CX-17 Power Relay lot FT-6602 on August 11th reduced Plant 2 throughput on the PX-440 Motor Controller line to approximately 78% of normal (22% below normal).",
+                "relationship_type": "AFFECTS",
+                "hop": 2,
+                "source_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "target_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "valid_at": "2026-08-11T00:00:00Z",
+                "invalid_at": "2026-08-14T00:00:00Z",
+                "expired_at": "2026-09-01T18:44:46.357621Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "The quarantine of the CX-17 Power Relay lot FT-6602 on August 11th caused Plant 2 throughput to drop to 22% below normal",
+                "relationship_type": "AFFECTS",
+                "hop": 2,
+                "source_node_uuid": "6b3334f0-5722-4d4b-be7c-c72173fb0fb3",
+                "target_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "valid_at": "2026-08-11T00:00:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "The PX-440 Motor Controller production depends on the CX-17 Power Relay.",
+                "relationship_type": "DEPENDS_ON",
+                "hop": 3,
+                "source_node_uuid": "716438fc-ceeb-44cb-8aff-bb1a912bc78b",
+                "target_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "valid_at": "2026-08-20T18:03:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "PX-440 Motor Controller is supplied by Ferrotek Components",
+                "relationship_type": "SOURCED_FROM",
+                "hop": 3,
+                "source_node_uuid": "716438fc-ceeb-44cb-8aff-bb1a912bc78b",
+                "target_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "valid_at": null,
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "components.csv (Component)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Ferrotek Components produces the CX-17 Power Relay, specifically production lot FT-6602 which was quarantined",
+                "relationship_type": "PRODUCES",
+                "hop": 3,
+                "source_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "target_node_uuid": "6b3334f0-5722-4d4b-be7c-c72173fb0fb3",
+                "valid_at": "2026-08-20T11:03:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "CX-17 Power Relay components are sourced from Ferrotek Components",
+                "relationship_type": "SOURCED_FROM",
+                "hop": 3,
+                "source_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "target_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": "2026-09-01T17:06:02.522055Z",
+                "expired_at": "2026-09-01T17:06:26.937634Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)",
+                  "components.csv (Component)",
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Ferrotek Components produces the CX-17 Power Relay on a production line that temporarily had its ISO 9001 certification placed on hold.",
+                "relationship_type": "PRODUCES",
+                "hop": 3,
+                "source_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "target_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "valid_at": null,
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day1.html)",
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day2.html)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Ferrotek Components production lot FT-6602 produces the CX-17 Power Relay with a solder-joint defect causing elevated failure rates",
+                "relationship_type": "PRODUCES",
+                "hop": 3,
+                "source_node_uuid": "ea2490df-40e3-4874-abc9-0910c1705432",
+                "target_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": "2026-08-19T00:00:00Z",
+                "expired_at": "2026-08-28T16:18:38.611702Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Meridian Circuit Supply can produce a qualification lot for the CX-17 Power Relay within 5 business days",
+                "relationship_type": "PRODUCES",
+                "hop": 3,
+                "source_node_uuid": "0c4a5c07-8bd3-4b0c-9277-981bb6b4f8eb",
+                "target_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "valid_at": "2026-08-21T16:47:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Re: Expedited qualification request - CX-17 Power Relay)",
+                  "Solandra Outlook (Re: Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              }
+            ],
+            "recommendation": {
+              "what_happened": "Quality event QE-2091 triggered a quarantine of CX-17 Power Relay lot FT-6602 from Ferrotek Components on August 11th, causing Plant 2's PX-440 Motor Controller throughput to drop 22% below normal.",
+              "why": "The PX-440 Motor Controller production depends directly on the CX-17 Power Relay, and the quarantine blocked supply of this critical component due to solder-joint defects causing elevated failure rates in lot FT-6602.",
+              "impact": "SO-45821 is at risk of missing its September 3 due date because reduced throughput on the PX-440 Motor Controller line limits fulfillment capacity for orders.",
+              "recommendation": "Expedite qualification of Meridian Circuit Supply's alternate CX-17 Power Relay lot (available within 5 business days) to restore Plant 2 throughput and protect order SO-45821's delivery schedule."
+            },
+            "decision_id": "2462107d-77da-4756-8cbb-67329f7f343b",
+            "retrieval_path": "causal_chain",
+            "cost_usd": 0.002684
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "label": "decision_chain",
+      "endpoint": "/api/v1/context/query/causal",
+      "question": "What decision unblocked QE-2091, and who approved it?",
+      "note": "QE-2091 confirmed real in csv_erp/day1/quality_events.csv (CX-17 Power Relay / Ferrotek Components solder-joint defect). Approval chain (Owen Whitfield -> Grace Okafor, Meridian Circuit Supply, $38,400) reconstructed from CLAUDE.md/tests/test_synthesis_prompt_guards.py -- exact question wording is inferred, not verbatim.",
+      "result": {
+        "status": 200,
+        "elapsed_s": 14.14,
+        "body": {
+          "query": "What decision unblocked QE-2091, and who approved it?",
+          "entities": [],
+          "relationships": [],
+          "facts": [],
+          "events": [],
+          "evidence": [],
+          "timeline": [],
+          "confidence": null,
+          "metadata": {
+            "group_ids": [
+              "solandra_supply_chain"
+            ],
+            "summary": "QualityEvent QE-2091 affects Solandra Plant 2\nThe quarantine of the CX-17 Power Relay lot FT-6602 on August 11th caused Plant 2 throughput to drop to 22% below normal\nPlant 2 sources the CX-17 Power Relay from Ferrotek Components\nThe PX-440 Motor Controller production depends on the CX-17 Power Relay.\nPX-440 Motor Controller is supplied by Ferrotek Components\nFerrotek Components produces the CX-17 Power Relay, specifically production lot FT-6602 which was quarantined\nFerrotek Components produces the CX-17 Power Relay on a production line that temporarily had its ISO 9001 certification placed on hold.\nMeridian Circuit Supply can produce a qualification lot for the CX-17 Power Relay within 5 business days\nMeridian Circuit Supply manufactured and shipped the qualification lot for the CX-17 Power Relay via overnight freight on August 27, 2026.\nNo longer current, but real: \"Quality issue QE-2091 has put Order SO-45821 at risk of missing its September 3 due date.\"\nNo longer current, but real: \"Plant 2 manufactures the PX-440 Motor Controller line\"\nNo longer current, but real: \"Quarantine of CX-17 Power Relay lot FT-6602 on August 11th reduced Plant 2 throughput on the PX-440 Motor Controller line to approximately 78% of normal (22% below normal).\"\nNo longer current, but real: \"CX-17 Power Relay components are sourced from Ferrotek Components\"\nNo longer current, but real: \"Ferrotek Components production lot FT-6602 produces the CX-17 Power Relay with a solder-joint defect causing elevated failure rates\"\nNo longer current, but real: \"Ferrotek Components corrected the solder-joint defect in production lot FT-6602\"\nNo longer current, but real: \"A solder-joint defect was identified in production lot FT-6602.\"",
+            "facts": [
+              {
+                "fact": "Quality issue QE-2091 has put Order SO-45821 at risk of missing its September 3 due date.",
+                "relationship_type": "AFFECTS",
+                "hop": 0,
+                "source_node_uuid": "191c6cb6-d711-4a7d-90d3-8c10f4467628",
+                "target_node_uuid": "9ec7126e-b33c-4a51-96f5-673b5a9b59ab",
+                "valid_at": "2026-08-20T14:12:00Z",
+                "invalid_at": "2026-08-28T16:08:23.179255Z",
+                "expired_at": "2026-09-01T18:32:42.964573Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Expedited qualification request - CX-17 Power Relay)",
+                  "Solandra Outlook (Budget exception request - Meridian expedite premium ($38,400))"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "QualityEvent QE-2091 affects Solandra Plant 2",
+                "relationship_type": "AFFECTS",
+                "hop": 0,
+                "source_node_uuid": "191c6cb6-d711-4a7d-90d3-8c10f4467628",
+                "target_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "The quarantine of the CX-17 Power Relay lot FT-6602 on August 11th caused Plant 2 throughput to drop to 22% below normal",
+                "relationship_type": "AFFECTS",
+                "hop": 1,
+                "source_node_uuid": "6b3334f0-5722-4d4b-be7c-c72173fb0fb3",
+                "target_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "valid_at": "2026-08-11T00:00:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Plant 2 manufactures the PX-440 Motor Controller line",
+                "relationship_type": "PRODUCES",
+                "hop": 1,
+                "source_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "target_node_uuid": "716438fc-ceeb-44cb-8aff-bb1a912bc78b",
+                "valid_at": "2026-08-20T11:03:00Z",
+                "invalid_at": "2026-08-28T16:10:17.689436Z",
+                "expired_at": "2026-09-01T18:32:42.912379Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Plant 2 sources the CX-17 Power Relay from Ferrotek Components",
+                "relationship_type": "SOURCED_FROM",
+                "hop": 1,
+                "source_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "target_node_uuid": "6b3334f0-5722-4d4b-be7c-c72173fb0fb3",
+                "valid_at": "2026-08-20T11:03:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Quarantine of CX-17 Power Relay lot FT-6602 on August 11th reduced Plant 2 throughput on the PX-440 Motor Controller line to approximately 78% of normal (22% below normal).",
+                "relationship_type": "AFFECTS",
+                "hop": 1,
+                "source_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "target_node_uuid": "dc117313-a53e-4d71-be00-64571781db98",
+                "valid_at": "2026-08-11T00:00:00Z",
+                "invalid_at": "2026-08-14T00:00:00Z",
+                "expired_at": "2026-09-01T18:44:46.357621Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "The PX-440 Motor Controller production depends on the CX-17 Power Relay.",
+                "relationship_type": "DEPENDS_ON",
+                "hop": 2,
+                "source_node_uuid": "716438fc-ceeb-44cb-8aff-bb1a912bc78b",
+                "target_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "valid_at": "2026-08-20T18:03:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "PX-440 Motor Controller is supplied by Ferrotek Components",
+                "relationship_type": "SOURCED_FROM",
+                "hop": 2,
+                "source_node_uuid": "716438fc-ceeb-44cb-8aff-bb1a912bc78b",
+                "target_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "valid_at": null,
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "components.csv (Component)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Ferrotek Components produces the CX-17 Power Relay, specifically production lot FT-6602 which was quarantined",
+                "relationship_type": "PRODUCES",
+                "hop": 2,
+                "source_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "target_node_uuid": "6b3334f0-5722-4d4b-be7c-c72173fb0fb3",
+                "valid_at": "2026-08-20T11:03:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "CX-17 Power Relay components are sourced from Ferrotek Components",
+                "relationship_type": "SOURCED_FROM",
+                "hop": 2,
+                "source_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "target_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": "2026-09-01T17:06:02.522055Z",
+                "expired_at": "2026-09-01T17:06:26.937634Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)",
+                  "components.csv (Component)",
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Ferrotek Components produces the CX-17 Power Relay on a production line that temporarily had its ISO 9001 certification placed on hold.",
+                "relationship_type": "PRODUCES",
+                "hop": 2,
+                "source_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "target_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "valid_at": null,
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day1.html)",
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day2.html)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Ferrotek Components production lot FT-6602 produces the CX-17 Power Relay with a solder-joint defect causing elevated failure rates",
+                "relationship_type": "PRODUCES",
+                "hop": 2,
+                "source_node_uuid": "ea2490df-40e3-4874-abc9-0910c1705432",
+                "target_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": "2026-08-19T00:00:00Z",
+                "expired_at": "2026-08-28T16:18:38.611702Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Meridian Circuit Supply can produce a qualification lot for the CX-17 Power Relay within 5 business days",
+                "relationship_type": "PRODUCES",
+                "hop": 2,
+                "source_node_uuid": "0c4a5c07-8bd3-4b0c-9277-981bb6b4f8eb",
+                "target_node_uuid": "1f5cc24e-315b-4798-99e4-9adaab638441",
+                "valid_at": "2026-08-21T16:47:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Re: Expedited qualification request - CX-17 Power Relay)",
+                  "Solandra Outlook (Re: Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Ferrotek Components corrected the solder-joint defect in production lot FT-6602",
+                "relationship_type": "PRODUCES",
+                "hop": 3,
+                "source_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "target_node_uuid": "ea2490df-40e3-4874-abc9-0910c1705432",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": "2026-08-19T00:00:00Z",
+                "expired_at": "2026-08-28T16:23:45.847576Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day2.html)",
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "A solder-joint defect was identified in production lot FT-6602.",
+                "relationship_type": "AFFECTS",
+                "hop": 3,
+                "source_node_uuid": "2e9ddb49-3252-49f3-a1fc-3fa5a1ab3292",
+                "target_node_uuid": "ea2490df-40e3-4874-abc9-0910c1705432",
+                "valid_at": "2026-08-19T00:00:00Z",
+                "invalid_at": "2026-08-26T00:00:00Z",
+                "expired_at": "2026-09-01T16:37:15.812513Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day1.html)",
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day2.html)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Meridian Circuit Supply manufactured and shipped the qualification lot for the CX-17 Power Relay via overnight freight on August 27, 2026.",
+                "relationship_type": "PRODUCES",
+                "hop": 3,
+                "source_node_uuid": "0c4a5c07-8bd3-4b0c-9277-981bb6b4f8eb",
+                "target_node_uuid": "4f8066af-f528-45d1-a477-d3c11c5a2945",
+                "valid_at": "2026-08-27T11:30:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Re: Expedited qualification request - CX-17 Power Relay - shipped)"
+                ],
+                "is_valid": true
+              }
+            ],
+            "recommendation": {
+              "what_happened": "QE-2091 was unblocked when Meridian Circuit Supply's qualification lot for the CX-17 Power Relay was approved and shipped via overnight freight on August 27, 2026, providing an alternative supply source to replace the quarantined Ferrotek Components lot FT-6602.",
+              "why": "The original CX-17 Power Relay lot FT-6602 from Ferrotek Components was quarantined due to a solder-joint defect and remained unavailable because Ferrotek's production line had its ISO 9001 certification on hold; Meridian's qualified alternative resolved the supply chain blockage.",
+              "impact": "The approval of Meridian's qualification lot restored the supply of CX-17 Power Relays, enabling Plant 2 to resume normal throughput on the PX-440 Motor Controller line and allowing Order SO-45821 to meet its September 3 due date.",
+              "recommendation": "Document the approval authority for Meridian's qualification lot and establish Meridian as a qualified secondary supplier for the CX-17 Power Relay to prevent future single-source supply risks."
+            },
+            "decision_id": "32d3de61-e8a3-48b8-a497-92343284774c",
+            "retrieval_path": "causal_chain",
+            "cost_usd": 0.002986
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "label": "temporal_ownership",
+      "endpoint": "/api/v1/context/query",
+      "question": "Who owns the Brightpeak Automation account?",
+      "note": "Verbatim entity (Brightpeak Automation) and topic from CLAUDE.md/orchestrator.py comment ('Who owns the Brightpeak Automation account right now, and does that affect whether it's at risk?'). Simplified to plain-Ask form per task's own phrasing. Ownership changed Priya Nadeem (day1 CSV) -> Diego Alvarez (day2_update CSV, and an Outlook handoff email) -- CLAUDE.md flags this specific answer as previously corrupted by orphaned untagged episodes; worth re-checking live.",
+      "result": {
+        "status": 200,
+        "elapsed_s": 5.55,
+        "body": {
+          "query": "Who owns the Brightpeak Automation account?",
+          "entities": [],
+          "relationships": [],
+          "facts": [],
+          "events": [],
+          "evidence": [],
+          "timeline": [],
+          "confidence": null,
+          "metadata": {
+            "group_ids": [
+              "solandra_supply_chain"
+            ],
+            "summary": "The facts provided do not specify who owns the Brightpeak Automation account; they only identify account managers (Priya Nadeem and Diego Alvarez) and that the company is a customer with an order.",
+            "facts": [
+              {
+                "fact": "Brightpeak Automation is located in USA",
+                "relationship_type": "LOCATED_AT",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "544f65f3-b45f-4c8e-a3a7-d711dcb6c0d5",
+                "valid_at": "2026-08-28T16:07:26.432566Z",
+                "invalid_at": "2026-09-01T17:07:45.784800Z",
+                "expired_at": "2026-09-01T17:08:03.432648Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Brightpeak Automation is in the Warehouse Robotics industry",
+                "relationship_type": "IS_A",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "15151475-aa63-4c8c-a960-157832e3f9b6",
+                "valid_at": "2026-08-28T16:07:26.432566Z",
+                "invalid_at": "2026-09-01T17:11:50.416237Z",
+                "expired_at": "2026-09-01T17:12:10.841339Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Brightpeak Automation is located in Columbus",
+                "relationship_type": "LOCATED_AT",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "6f0d0c3b-920b-41c0-a026-ab1edb7084eb",
+                "valid_at": "2026-08-28T16:07:26.432566Z",
+                "invalid_at": "2026-09-01T17:07:45.784800Z",
+                "expired_at": "2026-09-01T17:08:03.432651Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Brightpeak Automation has Priya Nadeem as its account manager",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "789eb526-0f85-4eb6-9715-721409555890",
+                "valid_at": "2026-08-28T16:07:26.432566Z",
+                "invalid_at": "2026-08-28T16:14:53.258588Z",
+                "expired_at": "2026-08-28T16:15:12.692455Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Brightpeak Automation is responsible for Order SO-45822 (200 units of PX-210 Power Regulator) with a September 20 due date",
+                "relationship_type": "PRODUCES",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "640e46df-2edf-49d0-a703-0ad76cbf5d4d",
+                "valid_at": "2026-08-05T10:15:00Z",
+                "invalid_at": "2026-08-28T16:08:46.426472Z",
+                "expired_at": "2026-09-01T18:34:11.643845Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Heads up - Brightpeak Automation renewal conversation)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Brightpeak Automation has Diego Alvarez as its account manager.",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "b6d8e721-b4f8-4c3a-bc6f-c144a9e79b71",
+                "valid_at": "2026-08-28T16:20:06.438764Z",
+                "invalid_at": "2026-09-01T18:37:11.243287Z",
+                "expired_at": "2026-09-01T18:37:32.827217Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Priya Nadeem manages the Brightpeak Automation account and is responsible for the day-to-day relationship",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "789eb526-0f85-4eb6-9715-721409555890",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-05T10:15:00Z",
+                "invalid_at": "2026-08-22T09:00:00Z",
+                "expired_at": "2026-09-01T18:34:11.620537Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Heads up - Brightpeak Automation renewal conversation)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Priya Nadeem is handing off management of the Brightpeak Automation account to Diego Alvarez as part of a territory realignment",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "789eb526-0f85-4eb6-9715-721409555890",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-22T09:00:00Z",
+                "invalid_at": "2026-08-22T09:00:00Z",
+                "expired_at": "2026-09-01T18:36:29.042464Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Handing off Brightpeak Automation to Diego)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Order SO-45822 belongs to customer Brightpeak Automation",
+                "relationship_type": "BELONGS_TO",
+                "source_node_uuid": "640e46df-2edf-49d0-a703-0ad76cbf5d4d",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-28T16:08:46.426472Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "orders.csv (Order)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Diego Alvarez is the account manager for Brightpeak Automation.",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "b6d8e721-b4f8-4c3a-bc6f-c144a9e79b71",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-28T16:14:53.258588Z",
+                "invalid_at": "2026-09-01T18:37:11.243287Z",
+                "expired_at": "2026-09-01T18:37:32.827214Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Diego Alvarez is taking over day-to-day management of the Brightpeak Automation account, including Order SO-45822, effective immediately",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "b6d8e721-b4f8-4c3a-bc6f-c144a9e79b71",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-22T09:00:00Z",
+                "invalid_at": "2026-08-28T16:07:26.432566Z",
+                "expired_at": "2026-09-01T18:36:29.070581Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Handing off Brightpeak Automation to Diego)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              }
+            ],
+            "result_limit_hit": false,
+            "retrieval_path": "entity_resolution",
+            "cache_hit": false,
+            "cost_usd": 0.001567
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "label": "temporal_ownership_causal_form",
+      "endpoint": "/api/v1/context/query/causal",
+      "question": "Who owns the Brightpeak Automation account right now, and does that affect whether it's at risk?",
+      "note": "Verbatim quote from app/context/orchestrator.py line ~567-572 (a real bug report comment, not a docstring example).",
+      "result": {
+        "status": 200,
+        "elapsed_s": 5.29,
+        "body": {
+          "query": "Who owns the Brightpeak Automation account right now, and does that affect whether it's at risk?",
+          "entities": [],
+          "relationships": [],
+          "facts": [],
+          "events": [],
+          "evidence": [],
+          "timeline": [],
+          "confidence": null,
+          "metadata": {
+            "group_ids": [
+              "solandra_supply_chain"
+            ],
+            "summary": "The facts do not state who currently owns the Brightpeak Automation account or whether account ownership affects risk status; while the facts indicate Diego Alvarez is taking over day-to-day management from Priya Nadeem as part of a territory realignment, they are all marked as \"no longer current.\"",
+            "facts": [
+              {
+                "fact": "Brightpeak Automation is responsible for Order SO-45822 (200 units of PX-210 Power Regulator) with a September 20 due date",
+                "relationship_type": "PRODUCES",
+                "hop": 0,
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "640e46df-2edf-49d0-a703-0ad76cbf5d4d",
+                "valid_at": "2026-08-05T10:15:00Z",
+                "invalid_at": "2026-08-28T16:08:46.426472Z",
+                "expired_at": "2026-09-01T18:34:11.643845Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Heads up - Brightpeak Automation renewal conversation)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Brightpeak Automation is located in USA",
+                "relationship_type": "LOCATED_AT",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "544f65f3-b45f-4c8e-a3a7-d711dcb6c0d5",
+                "valid_at": "2026-08-28T16:07:26.432566Z",
+                "invalid_at": "2026-09-01T17:07:45.784800Z",
+                "expired_at": "2026-09-01T17:08:03.432648Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Brightpeak Automation is in the Warehouse Robotics industry",
+                "relationship_type": "IS_A",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "15151475-aa63-4c8c-a960-157832e3f9b6",
+                "valid_at": "2026-08-28T16:07:26.432566Z",
+                "invalid_at": "2026-09-01T17:11:50.416237Z",
+                "expired_at": "2026-09-01T17:12:10.841339Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Brightpeak Automation is located in Columbus",
+                "relationship_type": "LOCATED_AT",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "6f0d0c3b-920b-41c0-a026-ab1edb7084eb",
+                "valid_at": "2026-08-28T16:07:26.432566Z",
+                "invalid_at": "2026-09-01T17:07:45.784800Z",
+                "expired_at": "2026-09-01T17:08:03.432651Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Brightpeak Automation has Priya Nadeem as its account manager",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "789eb526-0f85-4eb6-9715-721409555890",
+                "valid_at": "2026-08-28T16:07:26.432566Z",
+                "invalid_at": "2026-08-28T16:14:53.258588Z",
+                "expired_at": "2026-08-28T16:15:12.692455Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Brightpeak Automation has Diego Alvarez as its account manager.",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "target_node_uuid": "b6d8e721-b4f8-4c3a-bc6f-c144a9e79b71",
+                "valid_at": "2026-08-28T16:20:06.438764Z",
+                "invalid_at": "2026-09-01T18:37:11.243287Z",
+                "expired_at": "2026-09-01T18:37:32.827217Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Priya Nadeem manages the Brightpeak Automation account and is responsible for the day-to-day relationship",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "789eb526-0f85-4eb6-9715-721409555890",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-05T10:15:00Z",
+                "invalid_at": "2026-08-22T09:00:00Z",
+                "expired_at": "2026-09-01T18:34:11.620537Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Heads up - Brightpeak Automation renewal conversation)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Priya Nadeem is handing off management of the Brightpeak Automation account to Diego Alvarez as part of a territory realignment",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "789eb526-0f85-4eb6-9715-721409555890",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-22T09:00:00Z",
+                "invalid_at": "2026-08-22T09:00:00Z",
+                "expired_at": "2026-09-01T18:36:29.042464Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Handing off Brightpeak Automation to Diego)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Order SO-45822 belongs to customer Brightpeak Automation",
+                "relationship_type": "BELONGS_TO",
+                "source_node_uuid": "640e46df-2edf-49d0-a703-0ad76cbf5d4d",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-28T16:08:46.426472Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "orders.csv (Order)"
+                ],
+                "is_valid": true
+              },
+              {
+                "fact": "Diego Alvarez is the account manager for Brightpeak Automation.",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "b6d8e721-b4f8-4c3a-bc6f-c144a9e79b71",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-28T16:14:53.258588Z",
+                "invalid_at": "2026-09-01T18:37:11.243287Z",
+                "expired_at": "2026-09-01T18:37:32.827214Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "customers.csv (Customer)"
+                ],
+                "is_valid": false
+              },
+              {
+                "fact": "Diego Alvarez is taking over day-to-day management of the Brightpeak Automation account, including Order SO-45822, effective immediately",
+                "relationship_type": "MANAGED_BY",
+                "source_node_uuid": "b6d8e721-b4f8-4c3a-bc6f-c144a9e79b71",
+                "target_node_uuid": "b68bc0c0-d28c-4fcc-b52d-21b6fc6b5687",
+                "valid_at": "2026-08-22T09:00:00Z",
+                "invalid_at": "2026-08-28T16:07:26.432566Z",
+                "expired_at": "2026-09-01T18:36:29.070581Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Handing off Brightpeak Automation to Diego)"
+                ],
+                "is_valid": false
+              }
+            ],
+            "recommendation": null,
+            "decision_id": null,
+            "retrieval_path": "causal_fallback_direct_facts",
+            "cost_usd": 0.001684
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "label": "negative_control",
+      "endpoint": "/api/v1/context/query",
+      "question": "Is Plant 1 affected?",
+      "note": "CLAUDE.md describes 'a negative-control question (whether Plant 1 was ever relevant) retrieved the exactly-correct single fact.' Exact wording inferred; real data only ever references 'Solandra Plant 2', so Plant 1 should return a clear not-affected/no-data answer, not a hallucinated one.",
+      "result": {
+        "status": 200,
+        "elapsed_s": 3.66,
+        "body": {
+          "query": "Is Plant 1 affected?",
+          "entities": [],
+          "relationships": [],
+          "facts": [],
+          "events": [],
+          "evidence": [],
+          "timeline": [],
+          "confidence": null,
+          "metadata": {
+            "group_ids": [
+              "solandra_supply_chain"
+            ],
+            "summary": "No longer current, but real: \"Plant 1 (Toledo) does not share suppliers with Plant 2 on the relay quality issue.\"",
+            "facts": [
+              {
+                "fact": "Plant 1 (Toledo) does not share suppliers with Plant 2 on the relay quality issue.",
+                "relationship_type": "RELATED_TO",
+                "source_node_uuid": "",
+                "target_node_uuid": "",
+                "valid_at": "2026-08-18T08:30:00Z",
+                "invalid_at": "2026-08-20T11:03:00Z",
+                "expired_at": "2026-09-01T18:34:56.271991Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 1 - mid-August throughput summary)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              }
+            ],
+            "result_limit_hit": false,
+            "retrieval_path": "entity_resolution",
+            "cache_hit": false,
+            "cost_usd": 0.0
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "label": "possessive_entity_resolution",
+      "endpoint": "/api/v1/context/query",
+      "question": "What's going on with Ferrotek's production line?",
+      "note": "Regression probe for the fixed possessive-matching bug (CLAUDE.md bug #4 / commit 3cf7fb2): 'Ferrotek's' must resolve to 'Ferrotek Components', not hard-fail with a false not-found.",
+      "result": {
+        "status": 200,
+        "elapsed_s": 4.9,
+        "body": {
+          "query": "What's going on with Ferrotek's production line?",
+          "entities": [],
+          "relationships": [],
+          "facts": [],
+          "events": [],
+          "evidence": [],
+          "timeline": [],
+          "confidence": null,
+          "metadata": {
+            "group_ids": [
+              "solandra_supply_chain"
+            ],
+            "summary": "No longer current, but real: \"Ferrotek Components corrected the solder-joint defect in production lot FT-6602\"",
+            "facts": [
+              {
+                "fact": "Ferrotek Components corrected the solder-joint defect in production lot FT-6602",
+                "relationship_type": "PRODUCES",
+                "source_node_uuid": "",
+                "target_node_uuid": "",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": "2026-08-19T00:00:00Z",
+                "expired_at": "2026-08-28T16:23:45.847576Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day2.html)",
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              }
+            ],
+            "result_limit_hit": false,
+            "retrieval_path": "entity_resolution",
+            "cache_hit": false,
+            "cost_usd": 0.0
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "label": "multi_source_join",
+      "endpoint": "/api/v1/context/query",
+      "question": "Owen Whitfield, in order, who did he loop in?",
+      "note": "CLAUDE.md: 'a genuine multi-source join (an Owen Whitfield, in order, looped in whom question correctly pooled his own facts across CSV, Gmail, and Outlook).' Exact wording inferred/paraphrased from CLAUDE.md's own paraphrase, not a verbatim original quote.",
+      "result": {
+        "status": 200,
+        "elapsed_s": 4.78,
+        "body": {
+          "query": "Owen Whitfield, in order, who did he loop in?",
+          "entities": [],
+          "relationships": [],
+          "facts": [],
+          "events": [],
+          "evidence": [],
+          "timeline": [],
+          "confidence": null,
+          "metadata": {
+            "group_ids": [
+              "solandra_supply_chain"
+            ],
+            "summary": "In order, Owen Whitfield will loop in Renee Kapoor and Yusuf once he hears back on timing for the qualification lot.",
+            "facts": [
+              {
+                "fact": "Owen Whitfield references Ferrotek's corrective action on QE-2091 as a parallel effort to Meridian Circuit Supply's expedited qualification.",
+                "relationship_type": "REFERENCES",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "d504273f-a184-4e82-baf2-521316b005a4",
+                "valid_at": "2026-08-20T15:40:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Re: Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield's budget exception request references quality issue QE-2091 involving the CX-17 Power Relay",
+                "relationship_type": "REFERENCES",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "191c6cb6-d711-4a7d-90d3-8c10f4467628",
+                "valid_at": "2026-08-21T16:20:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Budget exception request - Meridian expedite premium ($38,400))"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield requested an expedited qualification lot for the CX-17 Power Relay from Meridian Circuit Supply",
+                "relationship_type": "REQUESTS",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "0c4a5c07-8bd3-4b0c-9277-981bb6b4f8eb",
+                "valid_at": "2026-08-21T16:47:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Re: Expedited qualification request - CX-17 Power Relay)",
+                  "Solandra Outlook (Re: Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield will loop Renee Kapoor in once he hears back on timing for the qualification lot.",
+                "relationship_type": "COMMUNICATES_WITH",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "e9b001b3-4273-4ef9-9571-b31b80cfbf51",
+                "valid_at": "2026-08-20T15:40:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Re: Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield will loop Yusuf in once he hears back on timing for the qualification lot.",
+                "relationship_type": "COMMUNICATES_WITH",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "a07065ba-c3da-44da-a81e-d6f2daaef138",
+                "valid_at": "2026-08-20T15:40:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Re: Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield references supplier quality report SQR-2026-Q3-011 as supporting documentation for the budget exception request",
+                "relationship_type": "REFERENCES",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "2dcb016b-469e-4397-a41f-a9efdbf2dbb5",
+                "valid_at": "2026-08-21T16:20:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Budget exception request - Meridian expedite premium ($38,400))"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield will put together a formal supplier quality report for the file.",
+                "relationship_type": "CREATED_FOR",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "2dcb016b-469e-4397-a41f-a9efdbf2dbb5",
+                "valid_at": "2026-08-20T15:40:00Z",
+                "invalid_at": "2026-08-21T16:20:00Z",
+                "expired_at": "2026-09-01T18:35:50.415279Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Re: Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield requests a budget exception from Grace Okafor for an expedited qualification lot cost of $38,400 from Meridian Circuit Supply",
+                "relationship_type": "REQUESTS",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "517677b7-1052-4d8d-9899-cb21586cd4a7",
+                "valid_at": "2026-08-21T16:20:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Budget exception request - Meridian expedite premium ($38,400))"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield requests that Grace Okafor forward the budget exception to Daniel for approval",
+                "relationship_type": "REQUESTS",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "eb6fd819-ef9a-4f93-acef-e53b592dd92e",
+                "valid_at": "2026-08-21T16:20:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Budget exception request - Meridian expedite premium ($38,400))"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield contacted Marcus Voss requesting an expedited qualification lot for the CX-17 Power Relay following a prior call.",
+                "relationship_type": "RELATED_TO",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "48acd395-b1b0-47d8-a0ab-c02a16039154",
+                "valid_at": "2026-08-20T14:12:00Z",
+                "invalid_at": "2026-08-21T16:47:00Z",
+                "expired_at": "2026-09-01T17:28:00.116430Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Expedited qualification request - CX-17 Power Relay)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield is the Procurement Lead at Solandra Power Systems.",
+                "relationship_type": "BELONGS_TO",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "c29d7f7c-1bc0-4ef9-88ae-48fa7659ec8b",
+                "valid_at": "2026-08-20T14:12:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Expedited qualification request - CX-17 Power Relay)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield requested that Meridian Circuit Supply put together an expedited qualification lot for the CX-17 Power Relay.",
+                "relationship_type": "REQUESTS",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "4f8066af-f528-45d1-a477-d3c11c5a2945",
+                "valid_at": "2026-08-20T14:12:00Z",
+                "invalid_at": "2026-08-21T16:47:00Z",
+                "expired_at": "2026-09-01T17:28:00.116422Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Expedited qualification request - CX-17 Power Relay)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Owen Whitfield offered to send over the full spec package for the CX-17 Power Relay qualification.",
+                "relationship_type": "REFERENCES",
+                "source_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "target_node_uuid": "41d7ce7a-c458-4f48-b8f9-71068bc5929b",
+                "valid_at": "2026-08-20T14:12:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Expedited qualification request - CX-17 Power Relay)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Priya Nadeem is flagging information about the Brightpeak Automation renewal conversation to Owen Whitfield for the account file",
+                "relationship_type": "RELATED_TO",
+                "source_node_uuid": "789eb526-0f85-4eb6-9715-721409555890",
+                "target_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "valid_at": "2026-08-05T10:15:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Heads up - Brightpeak Automation renewal conversation)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Renee Kapoor flagged the Plant 2 impact to Owen Whitfield, requesting that Procurement find a second source supplier for the CX-17 Power Relay to reduce dependency on Ferrotek Components' corrective-action timeline",
+                "relationship_type": "RELATED_TO",
+                "source_node_uuid": "e9b001b3-4273-4ef9-9571-b31b80cfbf51",
+                "target_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "valid_at": "2026-08-20T11:03:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Angela Brooks communicated with Owen Whitfield about Plant 1 operations and offered support for Plant 2 relay quality issues.",
+                "relationship_type": "RELATED_TO",
+                "source_node_uuid": "71032b97-22c0-47fb-956d-b85bd08039c5",
+                "target_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "valid_at": "2026-08-18T08:30:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 1 - mid-August throughput summary)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Marcus Voss communicated with Owen Whitfield about the shipment of the qualification lot and discussed the possibility of a standing supply agreement.",
+                "relationship_type": "RELATED_TO",
+                "source_node_uuid": "48acd395-b1b0-47d8-a0ab-c02a16039154",
+                "target_node_uuid": "dd3c40fa-af10-4c9f-a977-72f98475d50d",
+                "valid_at": "2026-08-27T11:30:00Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Gmail (Re: Expedited qualification request - CX-17 Power Relay - shipped)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              }
+            ],
+            "result_limit_hit": false,
+            "retrieval_path": "entity_resolution",
+            "cache_hit": false,
+            "cost_usd": 0.001718
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "label": "descriptive_role_reference",
+      "endpoint": "/api/v1/context/query",
+      "question": "Who is the supplier that caused the defect?",
+      "note": "CLAUDE.md bug #5, listed as EXPECTED behavior, not a bug: 'Descriptive/role-based references never resolve (the supplier who caused the defect vs. the one confirming the fix shipped) -- entity resolution is name/ID-pattern matching only.' This question is expected to fall through to generic semantic search, not resolve as a named entity -- included as a known-limitation control, not a pass/fail case.",
+      "result": {
+        "status": 200,
+        "elapsed_s": 6.57,
+        "body": {
+          "query": "Who is the supplier that caused the defect?",
+          "entities": [],
+          "relationships": [],
+          "facts": [],
+          "events": [],
+          "evidence": [],
+          "timeline": [],
+          "confidence": null,
+          "metadata": {
+            "group_ids": [
+              "solandra_supply_chain"
+            ],
+            "summary": "Ferrotek Components is the supplier that caused the defect, as indicated by their completion of corrective action on the solder-joint defect in production lot FT-6602.",
+            "facts": [
+              {
+                "fact": "The formal supplier quality report will document information related to the CX-17 Power Relay qualification.",
+                "relationship_type": "DOCUMENTS",
+                "source_node_uuid": "",
+                "target_node_uuid": "",
+                "valid_at": "2026-08-20T15:40:00Z",
+                "invalid_at": "2026-08-21T16:20:00Z",
+                "expired_at": "2026-09-01T18:35:50.415282Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Re: Plant 2 impact - CX-17 relay hold)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "CX-17 Power Relay components are sourced from Ferrotek Components",
+                "relationship_type": "SOURCED_FROM",
+                "source_node_uuid": "",
+                "target_node_uuid": "",
+                "valid_at": "2026-08-10T00:00:00Z",
+                "invalid_at": "2026-09-01T17:06:02.522055Z",
+                "expired_at": "2026-09-01T17:06:26.937634Z",
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Solandra Outlook (Plant 2 impact - CX-17 relay hold)",
+                  "components.csv (Component)",
+                  "quality_events.csv (QualityEvent)"
+                ],
+                "is_valid": false,
+                "source_authority": 0,
+                "is_authoritative": true
+              },
+              {
+                "fact": "Ferrotek Components completed corrective action on the solder-joint defect identified in CX-17 Power Relay production lot FT-6602",
+                "relationship_type": "RESOLVED",
+                "source_node_uuid": "",
+                "target_node_uuid": "",
+                "valid_at": "2026-09-03T14:03:17Z",
+                "invalid_at": null,
+                "expired_at": null,
+                "group_id": "solandra_supply_chain",
+                "sources": [
+                  "Web page (https://ananyat24.github.io/saxon-test-data/ferrotek-quality-notice-day2.html)"
+                ],
+                "is_valid": true,
+                "source_authority": 0,
+                "is_authoritative": true
+              }
+            ],
+            "result_limit_hit": false,
+            "retrieval_path": "entity_resolution",
+            "cache_hit": false,
+            "cost_usd": 0.001295
+          }
+        }
+      }
+    }
+  ]
+}
