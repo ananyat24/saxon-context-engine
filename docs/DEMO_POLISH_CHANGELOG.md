@@ -47,9 +47,17 @@ Branch: `demo-polish`. This log is updated as work lands, not written once at th
 1. **`cost_usd`/latency for this specific peer audience.** Currently hidden by deliberate design (see `renderQueryStats`'s own comment on why). This peer team is other engineers building a similar system — they may specifically want to see the cost/latency story. Needs a call before building a UI toggle for it.
 2. **How much more causally-connected demo data is worth adding before next week**, so "Explain why" has more than one good example question. This is real ingestion work through the connector interface (Step 4 of the original plan), not a quick UI fix.
 
+## Reset-to-clean-demo-state script (commit `2c39552`)
+
+- New `scripts/reset_demo_state.py`: re-runs the idempotent Solandra role seed and reports every connector's health across every tenant. Deliberately does not sync, purge, or delete anything, and was not run against the live deployment from here.
+
+## Snapshot switcher: investigated, not built -- reporting per the brief's own instruction
+
+The original brief said: "if this is not feasible without touching ingestion internals, tell me instead of forcing it." Checked `app/graph/graph_repository.py`'s fact-validity logic (`_not_yet_invalidated` and friends): every fact's current/superseded state is computed against `datetime.now()` at query time, not against any queryable point-in-time parameter. A real "show this answer as of day 1 / day 2 / day 3" switcher would mean threading an `as_of` timestamp through `graph_repository.py`, the orchestrator, and the query service -- exactly the three files the brief says not to touch without asking first. Not attempted. If this is wanted for the demo, it's a real (if bounded) retrieval-logic change and needs your go-ahead before any code gets written for it.
+
 ## Not yet started
 
-Step 1 (full visual design system) and Step 2 (first-run explainer panel + inline glossary) are deliberately not started without a direction check-in first — see "Needs a design conversation" below. Also not started: MCP tab polish, admin-surface polish, the snapshot switcher across the three sync dates, and a documented reset-to-clean-demo-state script.
+Step 1 (full visual design system) and Step 2 (first-run explainer panel + inline glossary) are deliberately not started without a direction check-in first — see "Needs a design conversation" below. Also not started: MCP tab polish and admin-surface polish (both were already largely present per `docs/FEATURE_INVENTORY.md` -- lower priority than the gaps above).
 
 ## Needs a design conversation before building, not a solo call
 
