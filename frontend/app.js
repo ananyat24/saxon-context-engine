@@ -1928,6 +1928,16 @@ async function runCausalQuery() {
     }
     const data = await res.json();
     const rec = data.metadata?.recommendation;
+    // Same quiet observability line as the plain Ask panel (renderQueryStats
+    // below), just built inline here since this panel's markup isn't a
+    // fixed template -- it's rebuilt as one innerHTML string per branch.
+    const causalPathLabel = RETRIEVAL_PATH_LABELS[data.metadata?.retrieval_path];
+    const causalStatsParts = [];
+    if (causalPathLabel) causalStatsParts.push(causalPathLabel);
+    if (data.metadata?.cache_hit) causalStatsParts.push("served from cache (no new retrieval or LLM call)");
+    const causalStatsLine = causalStatsParts.length
+      ? `<p class="query-stats">${escapeXml(causalStatsParts.join(" · "))}</p>`
+      : "";
     if (!rec) {
       // No real causal chain: either nothing at all to go on
       // (retrieval_path "none"/"causal_chain_empty"), or a fact-only
@@ -1961,10 +1971,10 @@ async function runCausalQuery() {
         // insight. The evidence list (each line now carrying its own real
         // source document, not just bare text) already says everything a
         // person asking "why" actually needs from a fact-only answer.
-        recEl.innerHTML = `<p class="fact-list-label">${disclaimer}</p>`;
+        recEl.innerHTML = `<p class="fact-list-label">${disclaimer}</p>` + causalStatsLine;
         recEl.appendChild(factsHost);
       } else {
-        recEl.innerHTML = `<p class="muted">${escapeXml(summary)}</p>`;
+        recEl.innerHTML = `<p class="muted">${escapeXml(summary)}</p>` + causalStatsLine;
       }
       return;
     }
@@ -1982,6 +1992,7 @@ async function runCausalQuery() {
       <p><strong>Impact:</strong> ${escapeXml(rec.impact)}</p>
       <p><strong>Recommendation:</strong> ${escapeXml(rec.recommendation)}</p>
       ${decisionNote}
+      ${causalStatsLine}
       <details class="raw-details"><summary>Chain of facts this was based on</summary>
         <pre class="result-block">${escapeXml(data.metadata?.summary || "")}</pre>
       </details>`;
@@ -2044,6 +2055,15 @@ const RETRIEVAL_PATH_LABELS = {
   entity_resolution: "matched directly to a known entity",
   semantic_search: "found via broader search",
   none: "no match found",
+  // The causal endpoint's own retrieval_path values (see
+  // app/context/orchestrator.py's get_causal_context_packet): added so the
+  // "Explain why" panel's observability line reads the same way the plain
+  // Ask panel's does, instead of going blank because none of the plain-Ask
+  // path names matched.
+  causal_chain: "traced a real multi-hop causal chain",
+  causal_fallback_direct_facts: "no causal chain found -- showing one entity's own known facts instead",
+  causal_path_between_entities: "no single causal chain -- showing the direct connection between the two entities instead",
+  causal_chain_empty: "no causal chain or connecting facts found",
 };
 
 // Small, quiet observability line (v4): how this specific answer was
