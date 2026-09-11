@@ -1349,10 +1349,22 @@ async function loadUsers() {
     const users = await res.json();
     userDirectory = Object.fromEntries(users.map((u) => [u.id, u]));
     if (users.length === 0) {
-      select.hidden = true;
-      select.innerHTML = "";
+      // Previously hid the dropdown entirely with no explanation, which on
+      // a knowledge base with no seeded org chart looked identical to the
+      // feature not existing at all rather than "not set up for this KB
+      // yet" -- a peer engineer switching knowledge bases mid-demo would
+      // see role filtering silently vanish. A disabled placeholder keeps
+      // the control's existence visible and says why it's inactive here.
+      select.innerHTML = `<option value="">Role filter: no org chart seeded for this knowledge base</option>`;
+      select.value = "";
+      select.disabled = true;
+      select.title = "as_user role-based visibility works here once :User nodes are seeded for this knowledge base -- see scripts/seed_roles.py.";
+      select.hidden = false;
+      setSelectedUser("");
       return;
     }
+    select.disabled = false;
+    select.title = "";
     select.innerHTML = buildUserOptions(users);
     select.value = getSelectedUser();
     select.hidden = false;
