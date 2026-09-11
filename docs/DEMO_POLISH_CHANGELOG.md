@@ -59,9 +59,22 @@ The original brief said: "if this is not feasible without touching ingestion int
 
 Step 1 (full visual design system) and Step 2 (first-run explainer panel + inline glossary) are deliberately not started without a direction check-in first — see "Needs a design conversation" below. Also not started: MCP tab polish and admin-surface polish (both were already largely present per `docs/FEATURE_INVENTORY.md` -- lower priority than the gaps above).
 
+## Step 2: first-run explainer + inline glossary
+
+Cost/latency question resolved: not shown, no toggle needed -- keeping the existing deliberate default (see `renderQueryStats`'s own comment on why).
+
+Design direction for Step 2 specifically: build it, since it's content + a small reusable component rather than an opinionated visual identity decision -- distinct from Step 1's palette/type question, which is still open.
+
+- New dismissible **first-run explainer**: a short card (not the existing deep "How this works" FAQ modal, which stays as-is) that auto-shows once per browser, states what the system is in four sentences, and fills in a dynamic line naming the real knowledge bases and connector count once they load -- never a canned "3 sources" placeholder. Dismissing it swaps in a small "What am I looking at?" re-open link.
+- New **inline glossary** component: any term wrapped in `glossaryTerm()`/`glossaryFieldName()` (or a static `<span class="glossary-anchor" data-glossary-key="...">` enhanced at load) explains itself on hover via `title` and on click via a small popover, for a projector or touch device where hover isn't reliable. One `GLOSSARY` dict holds every definition so the wording lives in one place.
+- Covers all 12 terms named in the brief: `tenant` (header badge), `document_set` (Document sets heading), `group_id` (fact-list label), `superseded_fact` (the superseded badge), `valid_at` (**new** -- facts didn't show their valid-from date at all before this; now every fact does), `entity_resolution` and `retrieval_path` (the observability line, both plain-Ask and causal panels), `cache_hit` (same line), `as_user` (role-filter dropdown title), `connector_health` (connectors table's Status column), `ontology_pack` ("What it looks for" heading), `domain_pack` ("Industry packs" heading).
+- All additive/presentational -- no API response shape changed; `valid_at` was already present on every fact object returned by the API, just never rendered.
+
 ## Test checkpoint
 
 Full suite re-run after every commit above: **449 passed, 1 deselected**, no regressions. (One interim background run showed 72 failures/42 errors from a missing Neo4j credential in that shell's env, not from any code change here — re-ran with credentials sourced and confirmed clean.)
+
+After the Step 2 commit (`f5282f3`), one further full run showed `test_entity_reconciliation.py::test_lowercase_query_still_resolves_precisely_not_via_semantic_search` failing — unrelated to anything touched this session (that commit is frontend-only), and it passes cleanly on its own (1 passed in 17.92s), so it's flaky against live Neo4j/embedding timing, not a real regression.
 
 ## Needs a design conversation before building, not a solo call
 
