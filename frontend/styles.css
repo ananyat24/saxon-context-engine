@@ -335,6 +335,17 @@ input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent)
 details { margin-top: 0.75rem; }
 details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
 
+.ontology-pack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ontology-pack:last-child { border-bottom: none; }
+.ontology-pack-empty { opacity: 0.7; }
+
 .result-block {
   margin-top: 0.75rem;
   background: var(--surface-alt);

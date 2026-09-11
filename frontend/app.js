@@ -1479,6 +1479,47 @@ async function loadOntology() {
   } catch (err) {
     document.getElementById("ontologySummary").textContent = "Could not load ontology.";
   }
+  loadOntologyPacks();
+}
+
+// GET /api/v1/ontology/packs (app/api/ontology_packs.py) keeps each domain
+// pack's own identity instead of the merged, flattened view loadOntology()
+// above renders -- this is what actually answers "what industry packs does
+// this ship with," including the ones still empty. Kept as a separate call
+// (rather than folded into loadOntology's fetch) since it's a different
+// endpoint with its own independent failure mode: an ontology load failure
+// shouldn't also blank out the industry-pack list, and vice versa.
+async function loadOntologyPacks() {
+  const host = document.getElementById("ontologyPacks");
+  if (!host) return;
+  try {
+    const res = await fetch(`${API}/ontology/packs`);
+    if (!res.ok) {
+      host.textContent = "Could not load industry packs.";
+      return;
+    }
+    const data = await res.json();
+    host.innerHTML = data.domains
+      .map((pack) => {
+        if (pack.is_empty) {
+          return `<div class="ontology-pack ontology-pack-empty">
+            <span class="badge badge-neutral">${escapeXml(pack.name)}</span>
+            <span class="muted">not filled in yet</span>
+          </div>`;
+        }
+        const types = [...pack.entity_types, ...pack.relationship_types]
+          .map((t) => `<span class="pill">${escapeXml(t)}</span>`)
+          .join("");
+        return `<div class="ontology-pack">
+          <span class="badge badge-ok">${escapeXml(pack.name)}</span>
+          <span class="muted">${pack.entity_types.length} entity type${pack.entity_types.length === 1 ? "" : "s"}, ${pack.relationship_types.length} relationship type${pack.relationship_types.length === 1 ? "" : "s"}</span>
+          <div class="pill-group">${types}</div>
+        </div>`;
+      })
+      .join("");
+  } catch (err) {
+    host.textContent = "Could not load industry packs.";
+  }
 }
 
 // --- Graph ----------------------------------------------------------------

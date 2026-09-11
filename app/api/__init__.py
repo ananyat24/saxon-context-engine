@@ -12,6 +12,7 @@ from app.api.reconciliation import router as reconciliation_router
 from app.api.admin import router as admin_router
 from app.api.webhooks import router as webhooks_router
 from app.api.odata import router as odata_router
+from app.api.ontology_packs import router as ontology_packs_router
 
 api_router = APIRouter()
 api_router.include_router(health_router, prefix="/health", tags=["Health"])
@@ -33,5 +34,8 @@ api_router.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"]
 # BI's built-in "OData Feed" connector can point at directly. Same
 # X-API-Key tenant auth as every other route here. See app/api/odata.py.
 api_router.include_router(odata_router, prefix="/odata", tags=["OData / BI"])
+# Read-only browse of the core ontology + each domain pack, kept separate
+# from GET /entities' flattened view. See app/api/ontology_packs.py.
+api_router.include_router(ontology_packs_router, prefix="/ontology/packs", tags=["Ontology"])
 
 __all__ = ["api_router"]
