@@ -48,6 +48,21 @@ class SearchQueryRequest(BaseModel):
     result_limit: Optional[int] = None
 
 
+@router.get("/whoami")
+async def whoami(tenant: TenantConfig = Depends(require_tenant)):
+    """Says which tenant the calling X-API-Key resolves to, and which
+    knowledge bases it can reach. Read-only, additive: exists purely so a
+    UI can show "you're viewing as tenant X" -- multi-tenancy itself is
+    already fully enforced server-side by require_tenant on every other
+    route (see app/security.py); this route only makes that enforcement
+    visible rather than changing it.
+    """
+    return {
+        "tenant_id": tenant.tenant_id,
+        "knowledge_bases": [{"id": kb.id, "label": kb.label} for kb in tenant.knowledge_bases],
+    }
+
+
 @router.post("/query")
 async def query_context(req: SearchQueryRequest, request: Request, tenant: TenantConfig = Depends(require_tenant)):
     return await execute_context_query(

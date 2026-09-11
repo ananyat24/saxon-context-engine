@@ -2241,8 +2241,36 @@ function renderMcpCard() {
 // clickable button every visitor sees.
 
 // --- Init -------------------------------------------------------------------
+// GET /api/v1/context/whoami (app/api/context.py) just echoes back the
+// tenant require_tenant already resolved server-side from the X-API-Key
+// header -- multi-tenancy enforcement itself doesn't change here, this
+// only makes the already-enforced boundary visible: which tenant this key
+// belongs to, distinctly from which knowledge base is currently selected
+// within it. One of the most demo-able things about this system per
+// docs/FEATURE_INVENTORY.md, and previously invisible entirely.
+async function loadTenantIdentity() {
+  const badge = document.getElementById("tenantBadge");
+  if (!getApiKey()) {
+    badge.hidden = true;
+    return;
+  }
+  try {
+    const res = await fetch(`${API}/context/whoami`, { headers: authHeaders() });
+    if (!res.ok) {
+      badge.hidden = true;
+      return;
+    }
+    const data = await res.json();
+    badge.textContent = `tenant: ${data.tenant_id}`;
+    badge.hidden = false;
+  } catch (err) {
+    badge.hidden = true;
+  }
+}
+
 async function loadTenantData() {
   loadOntology();
+  loadTenantIdentity();
   await loadKnowledgeBases();
   await loadUsers();
   await loadConnectors();

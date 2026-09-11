@@ -15,6 +15,8 @@
             <img src="/static/assets/saxon-logo.webp" alt="Saxon AI" class="logo" />
             <span class="header-divider"></span>
             <span class="header-title">Context Engine</span>
+            <span id="tenantBadge" class="badge badge-neutral" hidden
+                title="Which tenant your access key resolves to. Every route in this app scopes to this tenant's own knowledge bases server-side -- see app/security.py's require_tenant -- no request can name a different one."></span>
             <select id="kbSelect" class="kb-select" hidden></select>
             <select id="userSelect" class="kb-select" hidden></select>
         </div>
