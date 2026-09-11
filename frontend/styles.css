@@ -245,6 +245,62 @@ main {
 .muted { color: var(--text-muted); font-size: 0.88rem; }
 .muted code, p code { background: var(--surface-sunken); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; }
 
+.explainer-card {
+  position: relative;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.explainer-card h2 { color: var(--accent-strong); }
+.explainer-dismiss {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+}
+.link-btn {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-btn:hover { color: var(--accent-strong); }
+
+/* Inline glossary: a term that explains itself on hover (native title) and
+   on click/tap (a small popover, since a projector audience or a touch
+   device can't rely on hover alone). See GLOSSARY/glossaryTerm in app.js. */
+.glossary-term {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--text-muted);
+  text-underline-offset: 2px;
+}
+.field-name.glossary-term {
+  color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.78em;
+}
+.glossary-popover {
+  position: absolute;
+  z-index: 50;
+  max-width: 260px;
+  background: var(--surface-raised, var(--surface));
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-primary);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+}
+
 .row { display: flex; gap: 0.6rem; margin: 0.75rem 0 0.4rem; }
 
 input[type="text"], input[type="password"] {

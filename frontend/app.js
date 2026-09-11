@@ -4,6 +4,79 @@
 
 const API = "/api/v1";
 
+// --- Inline glossary --------------------------------------------------------
+// One-sentence, plain-English definitions for the internal vocabulary this
+// UI can't avoid showing somewhere (technical details, raw field names,
+// section headings). Written so a peer engineer who's never seen this
+// system gets the idea without opening the "How this works" modal --
+// that modal stays as the deeper reference; this is the in-place version.
+const GLOSSARY = {
+  tenant: "The client/organization your access key belongs to. Every request only ever sees this tenant's own knowledge bases -- see app/security.py's require_tenant.",
+  document_set: "A named group of several knowledge bases you can search across in one question, instead of picking just one.",
+  group_id: "The internal id for one knowledge base. It's the actual field every query is scoped by, so one client's data can never mix with another's.",
+  superseded_fact: "Something that used to be true but has since been replaced by a newer fact. It's kept and shown, not deleted, so nothing gets lost.",
+  valid_at: "The date a fact actually became true in the real world -- not when it was typed into this system, which can be much later.",
+  entity_resolution: "Matching the words in your question to the exact thing already known in the graph (a specific person, order, or company), instead of a vague text search.",
+  retrieval_path: "How this specific answer was produced -- matched directly to a known entity, found via a broader search, or served from cache.",
+  cache_hit: "This exact question was already answered recently, so the system reused that answer instead of re-running retrieval and a new AI call.",
+  as_user: "Filters the answer to only what this specific person could see, based on their place in the org chart, instead of the whole knowledge base.",
+  connector_health: "Whether a data source's last sync worked, is still processing, needs your attention, or hasn't run yet.",
+  ontology_pack: "The vocabulary of entity and relationship types the system is allowed to extract -- the core set plus any industry-specific add-ons.",
+  domain_pack: "One specific industry's add-on vocabulary layered on top of the core ontology, e.g. manufacturing or supply chain.",
+};
+
+// A clickable/hoverable term: title gives the definition on hover (works
+// everywhere, no JS needed), and the click handler below adds a popover
+// for touch devices or a projector where a precise hover is awkward.
+function glossaryTerm(label, key) {
+  const text = GLOSSARY[key];
+  if (!text) return escapeXml(label);
+  return `<button type="button" class="glossary-term" data-glossary-key="${key}" title="${escapeXml(text)}">${escapeXml(label)}</button>`;
+}
+
+// Same idea, but styled as a small muted monospace tag -- for pairing a
+// human-readable label with the raw field name it corresponds to (e.g.
+// "matched directly to a known entity (retrieval_path)"), per the
+// "keep the raw field name visible as a secondary" rule.
+function glossaryFieldName(rawName, key) {
+  const text = GLOSSARY[key];
+  if (!text) return escapeXml(rawName);
+  return `<button type="button" class="glossary-term field-name" data-glossary-key="${key}" title="${escapeXml(text)}">${escapeXml(rawName)}</button>`;
+}
+
+let _openGlossaryPopover = null;
+
+function _closeGlossaryPopover() {
+  if (_openGlossaryPopover) {
+    _openGlossaryPopover.remove();
+    _openGlossaryPopover = null;
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const term = e.target.closest(".glossary-term");
+  if (!term) {
+    _closeGlossaryPopover();
+    return;
+  }
+  const key = term.dataset.glossaryKey;
+  const alreadyOpenForThis = _openGlossaryPopover && _openGlossaryPopover.dataset.forKey === key;
+  _closeGlossaryPopover();
+  if (alreadyOpenForThis) return; // second click on the same term just closes it
+  const text = GLOSSARY[key];
+  if (!text) return;
+  const popover = document.createElement("div");
+  popover.className = "glossary-popover";
+  popover.dataset.forKey = key;
+  popover.textContent = text;
+  document.body.appendChild(popover);
+  const rect = term.getBoundingClientRect();
+  popover.style.left = `${Math.max(8, rect.left + window.scrollX)}px`;
+  popover.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  _openGlossaryPopover = popover;
+  e.stopPropagation();
+});
+
 // --- Access key handling ---------------------------------------------------
 // Kept in this browser's localStorage only, for demo convenience across
 // reloads. Never sent anywhere except this API's own routes via the
@@ -1372,7 +1445,7 @@ async function loadUsers() {
       return;
     }
     select.disabled = false;
-    select.title = "";
+    select.title = GLOSSARY.as_user;
     select.innerHTML = buildUserOptions(users);
     select.value = getSelectedUser();
     select.hidden = false;
@@ -2050,10 +2123,15 @@ async function runCausalQuery() {
     // fixed template -- it's rebuilt as one innerHTML string per branch.
     const causalPathLabel = RETRIEVAL_PATH_LABELS[data.metadata?.retrieval_path];
     const causalStatsParts = [];
-    if (causalPathLabel) causalStatsParts.push(causalPathLabel);
-    if (data.metadata?.cache_hit) causalStatsParts.push("served from cache (no new retrieval or LLM call)");
+    if (causalPathLabel) {
+      const causalPathKey = data.metadata?.retrieval_path === "entity_resolution" ? "entity_resolution" : "retrieval_path";
+      causalStatsParts.push(`${glossaryTerm(causalPathLabel, causalPathKey)} ${glossaryFieldName("retrieval_path", "retrieval_path")}`);
+    }
+    if (data.metadata?.cache_hit) {
+      causalStatsParts.push(`${glossaryTerm("served from cache (no new retrieval or LLM call)", "cache_hit")} ${glossaryFieldName("cache_hit", "cache_hit")}`);
+    }
     const causalStatsLine = causalStatsParts.length
-      ? `<p class="query-stats">${escapeXml(causalStatsParts.join(" · "))}</p>`
+      ? `<p class="query-stats">${causalStatsParts.join(" · ")}</p>`
       : "";
     if (!rec) {
       // No real causal chain: either nothing at all to go on
@@ -2139,7 +2217,18 @@ function renderFacts(container, facts) {
       const current = f.is_valid !== false;
       const badge = current
         ? `<span class="fact-badge fact-badge-current">current</span>`
-        : `<span class="fact-badge fact-badge-superseded">superseded*</span>`;
+        : `<span class="fact-badge fact-badge-superseded">${glossaryTerm("superseded", "superseded_fact")}*</span>`;
+      // valid_at is the date the fact actually became true in the real
+      // world (see app/graph/graph_repository.py), not when it was
+      // ingested -- worth showing plainly next to the fact rather than
+      // only in "Technical details", since "when did this become true" is
+      // exactly the kind of question the current/superseded badge above
+      // implies an answer to but doesn't itself give.
+      const validAt = f.valid_at ? new Date(f.valid_at) : null;
+      const validAtTag =
+        validAt && !isNaN(validAt)
+          ? `<span class="fact-source">${glossaryTerm("valid from", "valid_at")} ${escapeXml(validAt.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }))}</span>`
+          : "";
       // Real provenance, not a guess: group_id is the same field every
       // query in this app is already scoped by (see graph_repository.py's
       // _entity_own_facts/search_graphiti_facts). Only shown when it maps
@@ -2161,11 +2250,12 @@ function renderFacts(container, facts) {
       const docTag = docSources.length
         ? `<span class="fact-source" title="Extracted from this source document/record">${escapeXml(docSources.join(", "))}</span>`
         : "";
-      return `<li class="${current ? "" : "fact-superseded"}">${escapeXml(f.fact || "")}${kbTag}${docTag}${badge}</li>`;
+      return `<li class="${current ? "" : "fact-superseded"}">${escapeXml(f.fact || "")}${kbTag}${validAtTag}${docTag}${badge}</li>`;
     })
     .join("");
   container.innerHTML =
-    `<p class="fact-list-label">Where this answer comes from:</p><ul class="fact-bullets">${items}</ul>` + note;
+    `<p class="fact-list-label">Where this answer comes from ${glossaryFieldName("(group_id)", "group_id")}:</p><ul class="fact-bullets">${items}</ul>` +
+    note;
 }
 
 const RETRIEVAL_PATH_LABELS = {
@@ -2203,13 +2293,18 @@ function renderQueryStats(el, metadata) {
   }
   const parts = [];
   const pathLabel = RETRIEVAL_PATH_LABELS[metadata.retrieval_path];
-  if (pathLabel) parts.push(pathLabel);
-  if (metadata.cache_hit) parts.push("served from cache (no new retrieval or LLM call)");
+  if (pathLabel) {
+    const key = metadata.retrieval_path === "entity_resolution" ? "entity_resolution" : "retrieval_path";
+    parts.push(`${glossaryTerm(pathLabel, key)} ${glossaryFieldName("retrieval_path", "retrieval_path")}`);
+  }
+  if (metadata.cache_hit) {
+    parts.push(`${glossaryTerm("served from cache (no new retrieval or LLM call)", "cache_hit")} ${glossaryFieldName("cache_hit", "cache_hit")}`);
+  }
   if (!parts.length) {
     el.hidden = true;
     return;
   }
-  el.textContent = parts.join(" · ");
+  el.innerHTML = parts.join(" · ");
   el.hidden = false;
 }
 
@@ -2261,7 +2356,7 @@ async function loadTenantIdentity() {
       return;
     }
     const data = await res.json();
-    badge.textContent = `tenant: ${data.tenant_id}`;
+    badge.innerHTML = `${glossaryTerm("tenant", "tenant")}: ${escapeXml(data.tenant_id)}`;
     badge.hidden = false;
   } catch (err) {
     badge.hidden = true;
@@ -2278,7 +2373,68 @@ async function loadTenantData() {
   await loadDocumentSets();
   renderMcpCard();
   loadGraph();
+  updateExplainerIngestNote();
 }
+
+// --- First-run explainer -----------------------------------------------
+// "What just got ingested" is meant to be concrete, not a generic
+// description: real counts from whatever's actually loaded for this
+// tenant, once loadTenantData's fetches land, so it's honest on a
+// knowledge base with real data and honest on an empty one too.
+function updateExplainerIngestNote() {
+  const el = document.getElementById("explainerIngestNote");
+  if (!el) return;
+  const kbCount = knowledgeBaseDirectory.length;
+  const connectorCount = connectorDirectory.length;
+  if (!kbCount) {
+    el.textContent = "";
+    return;
+  }
+  const kbNames = knowledgeBaseDirectory.map((kb) => kb.label).join(", ");
+  el.textContent =
+    connectorCount > 0
+      ? `Right now this key can see ${kbCount === 1 ? "one knowledge base" : `${kbCount} knowledge bases`} (${kbNames}), built from ${connectorCount} connected source${connectorCount === 1 ? "" : "s"}.`
+      : `Right now this key can see ${kbCount === 1 ? "one knowledge base" : `${kbCount} knowledge bases`} (${kbNames}), with no connectors synced into it yet.`;
+}
+
+const EXPLAINER_DISMISSED_KEY = "saxon_explainer_dismissed";
+
+function showFirstRunExplainer() {
+  document.getElementById("firstRunExplainer").hidden = false;
+  document.getElementById("reopenExplainerBtn").hidden = true;
+}
+
+function dismissFirstRunExplainer() {
+  document.getElementById("firstRunExplainer").hidden = true;
+  document.getElementById("reopenExplainerBtn").hidden = false;
+  localStorage.setItem(EXPLAINER_DISMISSED_KEY, "1");
+}
+
+document.getElementById("dismissExplainerBtn").addEventListener("click", dismissFirstRunExplainer);
+document.getElementById("reopenExplainerBtn").addEventListener("click", showFirstRunExplainer);
+
+if (localStorage.getItem(EXPLAINER_DISMISSED_KEY)) {
+  document.getElementById("reopenExplainerBtn").hidden = false;
+} else {
+  showFirstRunExplainer();
+}
+
+// Turns a static <span class="glossary-anchor" data-glossary-key="..."> in
+// index.html into a working glossary term (hover title + click popover,
+// same as the ones built dynamically in JS above) without duplicating each
+// definition's sentence in two places -- the HTML only names which term
+// goes where; GLOSSARY at the top of this file is still the one place the
+// actual wording lives.
+function enhanceGlossaryAnchors() {
+  document.querySelectorAll(".glossary-anchor[data-glossary-key]").forEach((el) => {
+    const text = GLOSSARY[el.dataset.glossaryKey];
+    if (!text) return;
+    el.classList.add("glossary-term");
+    el.title = text;
+    el.tabIndex = 0;
+  });
+}
+enhanceGlossaryAnchors();
 
 loadHealth();
 loadTenantData();

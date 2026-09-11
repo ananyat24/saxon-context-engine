@@ -15,8 +15,7 @@
             <img src="/static/assets/saxon-logo.webp" alt="Saxon AI" class="logo" />
             <span class="header-divider"></span>
             <span class="header-title">Context Engine</span>
-            <span id="tenantBadge" class="badge badge-neutral" hidden
-                title="Which tenant your access key resolves to. Every route in this app scopes to this tenant's own knowledge bases server-side -- see app/security.py's require_tenant -- no request can name a different one."></span>
+            <span id="tenantBadge" class="badge badge-neutral" hidden></span>
             <select id="kbSelect" class="kb-select" hidden></select>
             <select id="userSelect" class="kb-select" hidden></select>
         </div>
@@ -140,6 +139,26 @@
             comes from, or scroll down to see what it looks for and what it's found so far.
         </p>
 
+        <!-- Shown automatically the first time this browser visits (see
+             showFirstRunExplainer/dismissFirstRunExplainer in app.js), then
+             replaced by a small re-open link once dismissed. Distinct from
+             the "How this works" modal above: that's a full reference FAQ
+             you open on purpose; this is a short, unmissable first
+             impression nobody has to go looking for. -->
+        <section id="firstRunExplainer" class="card explainer-card" hidden>
+            <button id="dismissExplainerBtn" class="modal-close explainer-dismiss" type="button" aria-label="Dismiss">&times;</button>
+            <h2>What am I looking at?</h2>
+            <p class="muted">This is a knowledge graph built automatically from your company's own
+                documents, email, and systems -- it reads them, figures out who and what they're
+                about, and keeps track of how that changes over time. Ask a plain-English question
+                below and you get an answer plus the exact facts it's built from, never a guess.</p>
+            <p id="explainerIngestNote" class="muted"></p>
+            <p class="muted">Try one of the suggested questions above the search box, or type your
+                own -- and click <strong>?</strong> in the top right any time for a deeper
+                explanation of how this all works.</p>
+        </section>
+        <button id="reopenExplainerBtn" class="link-btn" type="button" hidden>What am I looking at?</button>
+
         <section class="card">
             <h2>Ask a question</h2>
             <p class="muted">Type a question the way you'd ask a coworker. The answer comes only
@@ -169,7 +188,7 @@
 
         <div class="grid">
             <section class="card">
-                <h2>What it looks for</h2>
+                <h2><span class="glossary-anchor" data-glossary-key="ontology_pack">What it looks for</span></h2>
                 <p class="muted">These are the kinds of people, companies, and things the system
                     is set up to notice, and the kinds of relationships between them it pays
                     attention to, like who manages which account, or which company ordered
@@ -183,7 +202,7 @@
                     <div id="relTypes" class="pill-group"></div>
                 </details>
                 <details>
-                    <summary>Industry packs</summary>
+                    <summary><span class="glossary-anchor" data-glossary-key="domain_pack">Industry packs</span></summary>
                     <p class="muted">On top of the core vocabulary above, the system ships extra
                         vocabulary for specific industries. A pack marked "not filled in yet" is a
                         real placeholder, not hidden or faked -- nobody has defined that industry's
@@ -218,7 +237,7 @@
                             <th>Name</th>
                             <th>Source</th>
                             <th>Feeds into</th>
-                            <th>Status</th>
+                            <th><span class="glossary-anchor" data-glossary-key="connector_health">Status</span></th>
                             <th>Last synced</th>
                             <th></th>
                         </tr>
@@ -379,7 +398,7 @@
         </section>
 
         <section id="docSetsCard" class="card" hidden>
-            <h2>Document sets</h2>
+            <h2><span class="glossary-anchor" data-glossary-key="document_set">Document sets</span></h2>
             <p class="muted">Group your connectors into a named bundle, then use it to control
                 which of them the question above searches across -- instead of picking exactly
                 one connector every time.</p>
