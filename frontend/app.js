@@ -1777,30 +1777,37 @@ const CURATED_SUGGESTED_QUESTIONS = {
 // (causal_fallback_direct_facts, see runCausalQuery) and the two panels
 // end up echoing each other -- exactly the confusing-duplicate case
 // runCausalQuery's own disclaimer copy exists to soften, not something a
-// demo should lead with. This is a separate, deliberately real multi-hop
-// question (QE-2091 quality event -> Ferrotek quarantine -> Plant 2
-// throughput -> SO-45821 at risk), confirmed live in
-// eval/baseline_pre_polish.json Q1 to hit the causal endpoint's real
-// causal_chain path with a generated recommendation, not a fallback.
-// Needs more data like this if the demo should show causal chains on
-// more than this one question -- tracked, not built yet.
-const CURATED_CAUSAL_QUESTION = {
-  solandra_supply_chain: "Why is SO-45821 at risk?",
+// demo should lead with. Both questions below are confirmed live to hit
+// the causal endpoint's real causal_chain path with a generated
+// recommendation, not a fallback: the order-risk chain (QE-2091 quality
+// event -> Ferrotek quarantine -> Plant 2 throughput -> SO-45821 at
+// risk) and the decision chain behind it (who approved the fix and
+// why). Only add a question here after confirming it live -- an
+// unverified one risks landing on the fallback path on stage.
+const CURATED_CAUSAL_QUESTIONS = {
+  solandra_supply_chain: ["Why is SO-45821 at risk?", "What decision unblocked QE-2091, and who approved it?"],
 };
 
 function renderCausalSuggestedQuestion() {
   const container = document.getElementById("causalSuggestedQuestion");
-  const question = getApiKey() ? CURATED_CAUSAL_QUESTION[getSelectedKnowledgeBase()] : null;
-  if (!question) {
+  const questions = getApiKey() ? CURATED_CAUSAL_QUESTIONS[getSelectedKnowledgeBase()] : null;
+  if (!questions || !questions.length) {
     container.hidden = true;
     container.innerHTML = "";
     return;
   }
   container.hidden = false;
-  container.innerHTML = `<button class="chip chip-suggest" type="button" title="Traces a real multi-hop chain, unlike the questions above">Explain why: ${escapeXml(question)}</button>`;
-  container.querySelector(".chip-suggest").addEventListener("click", () => {
-    document.getElementById("queryInput").value = question;
-    document.getElementById("causalBtn").click();
+  container.innerHTML = questions
+    .map(
+      (q) =>
+        `<button class="chip chip-suggest" type="button" title="Traces a real multi-hop chain, unlike the questions above">Explain why: ${escapeXml(q)}</button>`
+    )
+    .join("");
+  container.querySelectorAll(".chip-suggest").forEach((btn, i) => {
+    btn.addEventListener("click", () => {
+      document.getElementById("queryInput").value = questions[i];
+      document.getElementById("causalBtn").click();
+    });
   });
 }
 
@@ -2052,9 +2059,25 @@ async function runAskQuery(resultLimit) {
     const summary = data.metadata?.summary;
     const facts = data.metadata?.facts || [];
 
-    answerEl.textContent = summary && summary !== "No matching graph context found."
-      ? summary
-      : "Nothing on file matches that yet. Try asking a broader question, or add more information first.";
+    // Presentation-layer guard, not a synthesis fix: metadata.summary is
+    // meant to be one synthesized sentence, but on some queries with many
+    // facts it comes back as a newline-joined restatement of every fact
+    // instead (each on its own line, superseded ones prefixed "No longer
+    // current, but real:") -- unreadable as a headline answer, though nothing
+    // is factually wrong with it. Never edit that field or how it's
+    // produced (see app/context/orchestrator.py) -- only decide, here in the
+    // UI, not to render it as if it were prose when it plainly isn't. The
+    // real facts (properly labeled, badged, and dated) are still shown in
+    // full below regardless.
+    const summaryLooksLikeARawFactDump = Boolean(summary) && (summary.match(/\n/g) || []).length >= 3;
+
+    if (summaryLooksLikeARawFactDump) {
+      answerEl.textContent = `Found ${facts.length} related fact${facts.length === 1 ? "" : "s"}. See below.`;
+    } else {
+      answerEl.textContent = summary && summary !== "No matching graph context found."
+        ? summary
+        : "Nothing on file matches that yet. Try asking a broader question, or add more information first.";
+    }
 
     // A single fact IS the answer verbatim in this case (no synthesis step ran
     // for just one fact: see orchestrator.py), but it's still shown below

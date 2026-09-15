@@ -448,12 +448,12 @@ details summary { cursor: pointer; font-size: 0.85rem; color: var(--text-muted);
   font-size: 0.85rem;
   color: var(--text-primary);
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .fact-bullets li.fact-superseded { opacity: 0.65; }
 .fact-text { color: var(--text-primary); }
 .fact-source {
-  display: inline-block;
-  white-space: nowrap;
+  display: inline;
   margin-left: 0.4rem;
   font-size: 0.75rem;
   font-style: italic;
