@@ -2175,7 +2175,7 @@ async function runCausalQuery(queryOverride) {
         ? `<p class="muted" style="font-size:0.8rem">Logged as an auditable recommendation (id: ${escapeXml(data.metadata.decision_id)}). Saxon has not acted on this. It's a suggestion only.</p>`
         : "";
       answerEl.innerHTML = `
-        <p class="fact-list-label">Generated recommendation, not a stated fact, an inference from the facts below:</p>
+        <p class="fact-list-label">Generated recommendation, inferred from the facts below:</p>
         <p><strong>What happened:</strong> ${escapeXml(rec.what_happened)}</p>
         <p><strong>Why:</strong> ${escapeXml(rec.why)}</p>
         <p><strong>Impact:</strong> ${escapeXml(rec.impact)}</p>
