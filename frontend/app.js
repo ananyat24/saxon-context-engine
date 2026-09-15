@@ -1798,16 +1798,10 @@ function renderCausalSuggestedQuestion() {
   }
   container.hidden = false;
   container.innerHTML = questions
-    .map(
-      (q) =>
-        `<button class="chip chip-suggest" type="button" title="Traces a real multi-hop chain, unlike the questions above">Explain why: ${escapeXml(q)}</button>`
-    )
+    .map((q) => `<button class="chip chip-suggest" type="button">Explain why: ${escapeXml(q)}</button>`)
     .join("");
   container.querySelectorAll(".chip-suggest").forEach((btn, i) => {
-    btn.addEventListener("click", () => {
-      document.getElementById("queryInput").value = questions[i];
-      document.getElementById("causalBtn").click();
-    });
+    btn.addEventListener("click", () => runCausalQuery(questions[i]));
   });
 }
 
@@ -1997,13 +1991,6 @@ async function runAskQuery(resultLimit) {
   const rawEl = document.getElementById("queryRaw");
   const seeMoreBtn = document.getElementById("seeMoreBtn");
   const statsEl = document.getElementById("queryStats");
-  // A prior "Explain why + recommend" answer has to be cleared here too.
-  // It's a separate result block (see runCausalQuery below) that only ever
-  // gets touched by the causal button, so without this a stale
-  // recommendation from a previous question stayed on screen underneath a
-  // brand new plain-Ask answer, looking like it was still the answer to the
-  // new question.
-  const causalEl = document.getElementById("causalRecommendation");
   const query = document.getElementById("queryInput").value.trim();
   if (!query) return;
   if (!getApiKey()) {
@@ -2012,8 +1999,6 @@ async function runAskQuery(resultLimit) {
     rawWrap.hidden = true;
     seeMoreBtn.hidden = true;
     statsEl.hidden = true;
-    causalEl.hidden = true;
-    causalEl.innerHTML = "";
     return;
   }
 
@@ -2022,8 +2007,6 @@ async function runAskQuery(resultLimit) {
   rawWrap.hidden = true;
   seeMoreBtn.hidden = true;
   statsEl.hidden = true;
-  causalEl.hidden = true;
-  causalEl.innerHTML = "";
   try {
     // A document set scoped to several connectors at once takes priority over
     // the single-connector picker in the header when one's selected: see
@@ -2108,22 +2091,46 @@ document.getElementById("seeMoreBtn").addEventListener("click", () => runAskQuer
 
 // "Explain why + recommend": the causal-reasoning mode (POST
 // /api/v1/context/query/causal, see app/context/orchestrator.py's
-// get_causal_context_packet), deliberately a separate button/call from
-// "Ask" above rather than a mode toggle on it: that endpoint is allowed to
+// get_causal_context_packet), deliberately a separate call from "Ask"
+// above rather than a mode toggle on it: that endpoint is allowed to
 // infer cause/impact/recommendation from a chain of facts, which the plain
-// Ask path never does, and keeping them as visibly separate UI actions
-// mirrors that separation all the way through the stack.
-async function runCausalQuery() {
-  const recEl = document.getElementById("causalRecommendation");
-  const query = document.getElementById("queryInput").value.trim();
+// Ask path never does. It shares the same three result elements Ask uses
+// (queryAnswer/queryStats/queryFacts) rather than its own separate box:
+// a second box under the (often still-empty) Ask box, with the real
+// answer living only in that second box, read as a blank box followed by
+// a disconnected one rather than one coherent result -- whichever of Ask
+// or Explain-why ran most recently now simply owns all three, the same
+// way asking a second plain question already overwrites the first.
+//
+// Takes an optional literal query so a suggested chip (see
+// renderCausalSuggestedQuestion) can trigger this directly with its own
+// question text, instead of writing into the input box and then
+// simulating a click on causalBtn -- one direct call, nothing to get out
+// of sync.
+async function runCausalQuery(queryOverride) {
+  const answerEl = document.getElementById("queryAnswer");
+  const factsEl = document.getElementById("queryFacts");
+  const statsEl = document.getElementById("queryStats");
+  const rawWrap = document.getElementById("queryRawWrap");
+  const rawEl = document.getElementById("queryRaw");
+  const seeMoreBtn = document.getElementById("seeMoreBtn");
+  const inputEl = document.getElementById("queryInput");
+  const query = (queryOverride ?? inputEl.value).trim();
   if (!query) return;
+  inputEl.value = query;
   if (!getApiKey()) {
-    recEl.hidden = false;
-    recEl.textContent = 'Click "Access key" in the top right first.';
+    answerEl.textContent = 'Click "Access key" in the top right first.';
+    factsEl.innerHTML = "";
+    statsEl.hidden = true;
+    rawWrap.hidden = true;
+    seeMoreBtn.hidden = true;
     return;
   }
-  recEl.hidden = false;
-  recEl.innerHTML = `<p class="muted">Tracing the causal chain…</p>`;
+  answerEl.textContent = "Tracing the causal chain…";
+  factsEl.innerHTML = "";
+  statsEl.hidden = true;
+  rawWrap.hidden = true;
+  seeMoreBtn.hidden = true;
   try {
     const res = await fetch(`${API}/context/query/causal`, {
       method: "POST",
@@ -2136,26 +2143,12 @@ async function runCausalQuery() {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      recEl.textContent = body.detail || "Could not trace a causal chain for that.";
+      answerEl.textContent = body.detail || "Could not trace a causal chain for that.";
       return;
     }
     const data = await res.json();
     const rec = data.metadata?.recommendation;
-    // Same quiet observability line as the plain Ask panel (renderQueryStats
-    // below), just built inline here since this panel's markup isn't a
-    // fixed template -- it's rebuilt as one innerHTML string per branch.
-    const causalPathLabel = RETRIEVAL_PATH_LABELS[data.metadata?.retrieval_path];
-    const causalStatsParts = [];
-    if (causalPathLabel) {
-      const causalPathKey = data.metadata?.retrieval_path === "entity_resolution" ? "entity_resolution" : "retrieval_path";
-      causalStatsParts.push(`${glossaryTerm(causalPathLabel, causalPathKey)} ${glossaryFieldName("retrieval_path", "retrieval_path")}`);
-    }
-    if (data.metadata?.cache_hit) {
-      causalStatsParts.push(`${glossaryTerm("served from cache (no new retrieval or LLM call)", "cache_hit")} ${glossaryFieldName("cache_hit", "cache_hit")}`);
-    }
-    const causalStatsLine = causalStatsParts.length
-      ? `<p class="query-stats">${causalStatsParts.join(" · ")}</p>`
-      : "";
+    const facts = data.metadata?.facts || [];
     if (!rec) {
       // No real causal chain: either nothing at all to go on
       // (retrieval_path "none"/"causal_chain_empty"), or a fact-only
@@ -2163,62 +2156,41 @@ async function runCausalQuery() {
       // directly-known facts ("causal_fallback_direct_facts") or the actual
       // connecting path between two named entities that wasn't entirely
       // causal-typed ("causal_path_between_entities"): see
-      // get_causal_context_packet. Both fallback shapes used to render
-      // identically to a real causal answer: same muted paragraph, no
-      // distinguishing label, no evidence list at all, which made it
-      // look like the causal engine had actually explained something (and,
-      // when the plain "Ask" answer happened to draw on the same facts,
-      // made the two panels look like an outright bug/duplicate). Checking
-      // for actual facts rather than one specific retrieval_path string
-      // covers both shapes today and any similar one added later.
+      // get_causal_context_packet.
       const summary = data.metadata?.summary || "No causal chain found for that.";
-      const facts = data.metadata?.facts || [];
       if (facts.length > 0) {
-        const disclaimer =
+        answerEl.textContent =
           data.metadata?.retrieval_path === "causal_path_between_entities"
-            ? "No single causal chain explains this -- here's the actual connection between them instead (not an inference, not a recommendation):"
-            : "No causal chain connects this to anything else -- here's the most directly relevant fact(s) instead (not an inference, not a recommendation):";
-        const factsHost = document.createElement("div");
-        renderFacts(factsHost, facts);
-        // Deliberately never shows metadata.summary here (unlike the API
-        // response, which keeps it: see the MCP tool's documented
-        // "summary" field). With a handful of facts, a synthesized sentence
-        // stitched from them reads as a near-restatement of the same list
-        // right below it: real information density is low on a dataset
-        // this size, so the paragraph consistently added noise rather than
-        // insight. The evidence list (each line now carrying its own real
-        // source document, not just bare text) already says everything a
-        // person asking "why" actually needs from a fact-only answer.
-        recEl.innerHTML = `<p class="fact-list-label">${disclaimer}</p>` + causalStatsLine;
-        recEl.appendChild(factsHost);
+            ? "No single causal chain explains this. Here's the actual connection between them instead, not an inference or a recommendation."
+            : "No causal chain connects this to anything else. Here's the most directly relevant fact(s) instead, not an inference or a recommendation.";
       } else {
-        recEl.innerHTML = `<p class="muted">${escapeXml(summary)}</p>` + causalStatsLine;
+        answerEl.textContent = summary;
       }
-      return;
+    } else {
+      // Deliberately styled/labeled distinctly from a plain-facts answer:
+      // this is a generated suggestion, not a restated fact, and it
+      // should never read as one. See app/context/orchestrator.py's
+      // docstring on why "recommendation" and "summary" are never blended.
+      const decisionNote = data.metadata?.decision_id
+        ? `<p class="muted" style="font-size:0.8rem">Logged as an auditable recommendation (id: ${escapeXml(data.metadata.decision_id)}). Saxon has not acted on this. It's a suggestion only.</p>`
+        : "";
+      answerEl.innerHTML = `
+        <p class="fact-list-label">Generated recommendation, not a stated fact, an inference from the facts below:</p>
+        <p><strong>What happened:</strong> ${escapeXml(rec.what_happened)}</p>
+        <p><strong>Why:</strong> ${escapeXml(rec.why)}</p>
+        <p><strong>Impact:</strong> ${escapeXml(rec.impact)}</p>
+        <p><strong>Recommendation:</strong> ${escapeXml(rec.recommendation)}</p>
+        ${decisionNote}`;
     }
-    // Deliberately styled/labeled distinctly from the plain-facts answer
-    // above: this is a generated suggestion, not a restated fact, and it
-    // should never read as one. See app/context/orchestrator.py's docstring
-    // on why "recommendation" and "summary" are never blended.
-    const decisionNote = data.metadata?.decision_id
-      ? `<p class="muted" style="font-size:0.8rem">Logged as an auditable recommendation (id: ${escapeXml(data.metadata.decision_id)}). Saxon has not acted on this -- it's a suggestion only.</p>`
-      : "";
-    recEl.innerHTML = `
-      <p class="fact-list-label">Generated recommendation -- not a stated fact, an inference from the chain below:</p>
-      <p><strong>What happened:</strong> ${escapeXml(rec.what_happened)}</p>
-      <p><strong>Why:</strong> ${escapeXml(rec.why)}</p>
-      <p><strong>Impact:</strong> ${escapeXml(rec.impact)}</p>
-      <p><strong>Recommendation:</strong> ${escapeXml(rec.recommendation)}</p>
-      ${decisionNote}
-      ${causalStatsLine}
-      <details class="raw-details"><summary>Chain of facts this was based on</summary>
-        <pre class="result-block">${escapeXml(data.metadata?.summary || "")}</pre>
-      </details>`;
+    renderFacts(factsEl, facts);
+    renderQueryStats(statsEl, data.metadata);
+    rawEl.textContent = JSON.stringify(data, null, 2);
+    rawWrap.hidden = false;
   } catch (err) {
-    recEl.textContent = `Error: ${err.message}`;
+    answerEl.textContent = `Error: ${err.message}`;
   }
 }
-document.getElementById("causalBtn").addEventListener("click", runCausalQuery);
+document.getElementById("causalBtn").addEventListener("click", () => runCausalQuery());
 
 // Every fact carries whether it's still true or was superseded by something
 // newer: surfacing that plainly is the actual proof this system tracks

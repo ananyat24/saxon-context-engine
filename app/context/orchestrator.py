@@ -64,13 +64,23 @@ class _CausalRecommendation(BaseModel):
 _RECOMMENDATION_MAX_TOKENS = 500
 
 
-# Kept low deliberately: this is one short sentence, not a report. Also
-# bounds the cost of a call that (unlike extraction) runs on every multi-fact
-# query, not just at ingestion time. Raised from 80 for the same reason
-# _RECOMMENDATION_MAX_TOKENS was: _build_answer_lines now feeds real
-# historical facts in too, and 80 tokens left no margin before a longer
-# synthesized sentence got cut off mid-JSON-field and failed validation.
-_SYNTHESIS_MAX_TOKENS = 150
+# Kept well under _RECOMMENDATION_MAX_TOKENS deliberately: this is one short
+# sentence, not a report. Also bounds the cost of a call that (unlike
+# extraction) runs on every multi-fact query, not just at ingestion time.
+# Raised from 80 to 150 for the same reason _RECOMMENDATION_MAX_TOKENS was
+# raised (_build_answer_lines feeding real historical facts in too), and
+# raised again here from 150: confirmed live that a query pulling ~19
+# facts (a plain, non-causal question -- "What happened with the CX-17
+# Power Relay?") still exhausted 150 tokens completing the tool-call JSON
+# before finishing the "answer" field, which fails the same way as the
+# _RECOMMENDATION_MAX_TOKENS case above -- not an exception, just an empty
+# "answer" -- so _synthesize_answer's own except-nothing fallback
+# (`return answer or "\n".join(current_lines)`) silently degraded to
+# dumping every fact as the "answer" instead of erroring loudly. Confirmed
+# via live container logs: the LLM call itself succeeded (200 OK), so this
+# was never a retrieval or synthesis-logic problem, purely a token-budget
+# one for a busier-than-average fact set.
+_SYNTHESIS_MAX_TOKENS = 400
 
 
 def _parse_iso(timestamp) -> Optional[datetime]:
